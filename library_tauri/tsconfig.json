@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    /* 🚀 UPGRADE 1: Use 'Bundler' instead of 'Node' */
+    "moduleResolution": "Bundler", 
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "preserve",
+
+    /* 🚀 UPGRADE 2: Use strict types for better reliability */
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+
+    /* 🚀 UPGRADE 3: Remove 'baseUrl' and use absolute 'paths' */
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.vue"]
+}

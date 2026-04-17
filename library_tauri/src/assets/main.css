@@ -1,0 +1,129 @@
+/* =====================================================
+   THEME TOKENS
+===================================================== */
+:root[data-theme="light"]{
+
+  /* ===== App Structure ===== */
+  --app-bg: #d4cec2;        /* outer canvas */
+  --sidebar-bg: #c9c2b6;    /* darker than app */
+  --content-bg: #d4cec2;    /* slightly lighter than app */
+
+  /* ===== Table ===== */
+  --table-bg: #f0e9dd;
+  --table-alt: #e7dfd3;
+  --table-header: #d8d0c3;
+  --table-hover: #dde2e8;
+  --table-active: #cdd5df;
+
+  /* ===== Inspector ===== */
+  --inspector-bg: #ebe3d6;
+  --inspector-border: #c2c7cd;
+  --inspector-header: #d6cec1;
+
+  /* ===== Pagination ===== */
+  --pagination-bg: #e2dbcf;
+  --pagination-active: #cfd6de;
+
+  /* ===== Buttons ===== */
+  --button-bg: #1f2937;
+  --button-text: #ffffff;
+
+  /* ===== Text ===== */
+  --text-primary: #111827;
+  --text-muted: #4b5563;
+
+  /* ===== Borders ===== */
+  --border-main: #c9ced4;
+}
+
+:root[data-theme="dark"]{
+
+  /* ===== App Structure ===== */
+  --app-bg: #0f1115;
+  --sidebar-bg: #0b0c0e;
+  --content-bg: #0f1115;
+
+  /* ===== Table ===== */
+  --table-bg: #16181c;
+  --table-alt: #1b1f24;
+  --table-header: #1e2329;
+  --table-hover: #20262d;
+  --table-active: #2a3a4f;
+
+  /* ===== Inspector ===== */
+  --inspector-bg: #111827;
+  --inspector-border: #262a30;
+  --inspector-header: #1a1f25;
+
+  /* ===== Pagination ===== */
+  --pagination-bg: #1b1f24;
+  --pagination-active: #2a3a4f;
+
+  /* ===== Buttons ===== */
+  --button-bg: #1f2937;
+  --button-text: #ffffff;
+
+  /* ===== Text ===== */
+  --text-primary: #e5e7eb;
+  --text-muted: #9ca3af;
+
+  /* ===== Borders ===== */
+  --border-main: #262a30;
+}
+
+/* =====================================================
+   BASE
+===================================================== */
+
+body{
+  margin:0;
+  background:var(--app-bg);
+  color:var(--text-primary);
+  font-family:system-ui,Arial;
+}
+
+/* TEXT */
+h1,h2,h3,h4{
+  color:var(--text-primary);
+}
+
+/* INPUTS */
+input,select,textarea{
+  background:var(--content-bg);
+  color:var(--text-primary);
+  border:1px solid var(--border-main);
+  padding:6px;
+}
+
+/* BUTTONS */
+button{
+  background:var(--button-bg);
+  color:var(--button-text);
+  border:none;
+}
+
+/* TABLE BASE */
+table{
+  width:100%;
+  border-collapse:collapse;
+}
+
+th{
+  padding:10px;
+  text-align:left;
+}
+
+td{
+  padding:9px;
+  border-bottom:1px solid var(--border-main);
+}
+
+.sidebar{
+  background:var(--sidebar-bg);
+}
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
