@@ -1,0 +1,17 @@
+# Python
+library_api/venv312/
+__pycache__/
+*.pyc
+.env
+
+# Node / Tauri
+library_tauri/node_modules/
+library_tauri/dist/
+library_tauri/src-tauri/target/
+
+# Editor
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
