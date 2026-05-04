@@ -52,7 +52,7 @@ const handleLogin = async () => {
 
   try {
     // 2. Execute the Login Request
-    const response = await axios.post('http://localhost:8000/token', params, {
+    const response = await axios.post('/token', params, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     });
 
