@@ -19,9 +19,10 @@ from app.database import get_connection, record_audit
 from app.auth import create_token, get_current_user
 from app.utils.security import hash_password, verify_password, is_password_strong
 from app.routers import (
-    catalogue, items, search, status_audit, dashboard, 
-    accessions, health, reports, bulk, analytics, operations,print,
-    circulation, admin_config, profile  
+    catalogue, items, search, status_audit, dashboard,
+    accessions, health, reports, bulk, analytics, operations,
+    print as print_router,
+    circulation, admin_config, profile
 )
 
 class RefreshRequest(BaseModel):
@@ -233,7 +234,7 @@ async def logout(req: RefreshRequest):
 
 
 
-app.include_router(print.router)
+app.include_router(print_router.router)
 app.include_router(health.router)
 app.include_router(catalogue.router)
 app.include_router(items.router, dependencies=[Depends(get_current_user)])
