@@ -3,6 +3,7 @@ library_api/venv312/
 __pycache__/
 *.pyc
 .env
+library_api/library_catalogue_backup.sql
 
 # Node / Tauri
 library_tauri/node_modules/

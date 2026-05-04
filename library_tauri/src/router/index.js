@@ -16,7 +16,7 @@ const routes = [
   { path: "/login", name: "login", component: Login },
 
   // ✅ CHANGE START PAGE HERE
-  { path: "/", redirect: "/catalogue" },
+  { path: "/", redirect: "/login" },
 
   { path: "/dashboard", name: "dashboard", component: Dashboard },
   { path: "/catalogue", name: "catalogue", component: CatalogueView },
