@@ -1,5 +1,6 @@
 # Python
 library_api/venv312/
+library_api/venv/
 __pycache__/
 *.pyc
 .env
