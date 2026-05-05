@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, provide } from "vue"
-import { useRouter } from "vue-router"
-import axios from 'axios'
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 
-const router = useRouter()
+import axios from 'axios'
+
+
+
 
 // 1. Core State
 const rows = ref<any[]>([])
@@ -117,29 +117,50 @@ async function loadCatalogue() {
 
 
 async function openFullDetails(row: any) {
-  // 1. Create a unique label for the new window
-  const windowLabel = `details-${row.serial_no}`
-
-  // 2. Check if the window is already open to avoid duplicates
-  const existingWindow = await WebviewWindow.getByLabel(windowLabel)
-  if (existingWindow) {
-    await existingWindow.setFocus()
+  if (!row?.serial_no) {
+    console.error("Missing serial number:", row)
     return
   }
 
-  // 3. Create the new native window
-  const webview = new WebviewWindow(windowLabel, {
-    url: `/#/details/${row.serial_no}`,
-    title: `Book Details: ${row.title}`,
-    width: 800,
-    height: 600,
-    resizable: true,
-  })
+  const detailUrl = `/#/details/${row.serial_no}`
 
-  // Optional: Handle errors during window creation
-  webview.once('tauri://error', (e) => {
-    console.error("Failed to open window:", e)
-  })
+  try {
+    // Check if app is running inside Tauri
+    if ((window as any).__TAURI__) {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+
+      const windowLabel = `details-${row.serial_no}`
+
+      const existingWindow = await WebviewWindow.getByLabel(windowLabel)
+
+      if (existingWindow) {
+        await existingWindow.setFocus()
+        return
+      }
+
+      const webview = new WebviewWindow(windowLabel, {
+        url: detailUrl,
+        title: `Book Details: ${row.title}`,
+        width: 1000,
+        height: 700,
+        resizable: true,
+      })
+
+      webview.once("tauri://error", (e) => {
+        console.error("Tauri window error:", e)
+      })
+
+    } else {
+      // Browser fallback
+      window.open(detailUrl, "_blank")
+    }
+
+  } catch (err) {
+    console.error("Failed opening record:", err)
+
+    // Final fallback
+    window.open(detailUrl, "_blank")
+  }
 }
 
 // Filters
