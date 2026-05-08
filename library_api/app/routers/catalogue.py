@@ -169,8 +169,8 @@ def get_catalogue(
 @router.patch("/{serial_no}")
 
 async def update_ledger_record(serial_no: int, payload: dict, request: Request, current_user: dict = Depends(get_current_user)):
-    print(f"DEBUG: I received this from Vue: {payload}")
-    if current_user.get('role') != "SYSTEM_ARCHITECT":
+    
+    if current_user.get('role') != "Sys_Arch":
         raise HTTPException(status_code=403, detail="Architect Authorization Required")
 
     conn = get_connection()
@@ -237,7 +237,7 @@ async def approve_work(
     work_id: int, action: str, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user['role'] != "SYSTEM_ARCHITECT":
+    if current_user['role'] != "Sys_Arch":
         raise HTTPException(status_code=403, detail="Architect only.")
 
     conn = get_connection()
@@ -276,7 +276,7 @@ async def soft_delete_book(
     book_id: int, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user['role'] != "SYSTEM_ARCHITECT":
+    if current_user['role'] != "Sys_Arch":
         raise HTTPException(status_code=403, detail="Architect only.")
 
     conn = get_connection()
