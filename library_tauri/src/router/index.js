@@ -18,18 +18,18 @@ const routes = [
   // ✅ CHANGE START PAGE HERE
   { path: "/", redirect: "/login" },
 
-  { path: "/dashboard", name: "dashboard", component: Dashboard },
-  { path: "/catalogue", name: "catalogue", component: CatalogueView },
-  { path: "/search", name: "search", component: Search },
-  { path: "/status-audit", name: "audit", component: Audit },
-  { path: "/details/:id", name: "details", component: DetailsView },
+  { path: "/dashboard", name: "dashboard", component: Dashboard,meta: { requiresAuth: true } },
+  { path: "/catalogue", name: "catalogue", component: CatalogueView ,meta: { requiresAuth: true }},
+  { path: "/search", name: "search", component: Search ,meta: { requiresAuth: true }},
+  { path: "/status-audit", name: "audit", component: Audit,meta: { requiresAuth: true } },
+  { path: "/details/:id", name: "details", component: DetailsView ,meta: { requiresAuth: true }},
 
-  { path: "/create-work", name: "create-work", component: CreateWorkView },
-  { path: "/create-item", name: "create-item", component: CreateItemView },
-  { path: "/operations/:accession", name: "operations", component: Operations },
-  { path: "/edit-item/:id", name: "edit-item", component: EditItemView },
+  { path: "/create-work", name: "create-work", component: CreateWorkView,meta: { requiresAuth: true } },
+  { path: "/create-item", name: "create-item", component: CreateItemView,meta: { requiresAuth: true } },
+  { path: "/operations/:accession", name: "operations", component: Operations,meta: { requiresAuth: true } },
+  { path: "/edit-item/:id", name: "edit-item", component: EditItemView,meta: { requiresAuth: true } },
 
-  { path: "/admin/settings", name: "admin-settings", component: SystemSettings }
+  { path: "/admin/settings", name: "admin-settings", component: SystemSettings,meta: { requiresAuth: true } }
 ]
 
 const router = createRouter({
@@ -37,8 +37,15 @@ const router = createRouter({
   routes
 })
 
-// ✅ AUTH COMPLETELY DISABLED
+
 router.beforeEach((to, from, next) => {
+  const token = localStorage.getItem("token")
+
+  if (to.meta.requiresAuth && !token) {
+    next("/login")
+    return
+  }
+
   next()
 })
 
