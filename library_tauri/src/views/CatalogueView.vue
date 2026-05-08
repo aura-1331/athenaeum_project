@@ -122,7 +122,7 @@ async function openFullDetails(row: any) {
     return
   }
 
-  const detailUrl = `/#/details/${row.serial_no}`
+  const detailUrl = `index.html#/details/${row.serial_no}`
 
   try {
     // Check if app is running inside Tauri

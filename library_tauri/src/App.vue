@@ -44,6 +44,7 @@ const updateClock = () => {
     currentPlace.value = 'Local'
   }
 }
+const isAuthenticated = ref(!!localStorage.getItem("token"))
 
 const updateSyncTime = () => {
   const now = new Date()
@@ -62,12 +63,17 @@ function toggleTheme() {
  // Ensure you have this or use the imported one
 
 const handleLogout = () => {
-  // 1. Clear Security
   localStorage.removeItem("token")
+  localStorage.removeItem("refresh_token")
+  localStorage.removeItem("user_role")
+  localStorage.removeItem("user_name")
+
   sessionStorage.clear()
-  
-  // 2. Use the router variable (this makes it "active")
-  router.push('/login')
+
+  isAuthenticated.value = false
+  window.dispatchEvent(new Event("auth-changed"))
+
+  router.push("/login")
 }
 onMounted(() => {
   document.title = "Athenaeum Orbis | Library Management System"
@@ -78,6 +84,9 @@ onMounted(() => {
   const saved = localStorage.getItem("ui-theme") || "dark"
   theme.value = saved
   applyTheme(saved)
+  window.addEventListener("auth-changed", () => {
+  isAuthenticated.value = !!localStorage.getItem("token")
+ })
 })
 
 onUnmounted(() => {
@@ -92,7 +101,10 @@ watch(() => route.path, () => {
 <template>
   <div class="app" :class="{ 'details-window-theme': route.path.includes('/details/') }">
     
-    <aside v-if="!isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" class="sidebar">
+    <aside 
+      v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" 
+      class="sidebar"
+    >
       <div class="logo-area">
         <div class="ao-seal">AO</div>
         <div class="brand-text">
@@ -125,7 +137,10 @@ watch(() => route.path, () => {
 
     <main class="content-wrapper" :class="{ 'no-padding': route.path.includes('/details/') }">
       
-      <header v-if="!isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" class="global-header">
+      <header 
+        v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" 
+        class="global-header"
+      >
         <div class="breadcrumb">{{ route.name || 'Admin Panel' }}</div>
         <div class="live-meta">
           <span class="division-tag">Archive Division</span>
