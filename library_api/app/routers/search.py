@@ -1,29 +1,22 @@
 from fastapi import APIRouter
 from psycopg2.extras import RealDictCursor
 from app.database import get_connection
-from indic_transliteration import sanscript
-from indic_transliteration.sanscript import transliterate
+
 
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-# -------- Manglish helper --------
-def to_manglish(text):
-    try:
-        return transliterate(text, sanscript.MALAYALAM, sanscript.ISO).lower()
-    except:
-        return text.lower()
 
 
 # ================= GLOBAL SEARCH =================
-@router.get("/")
+@router.get("")
 def global_search(q: str = "", page: int = 1, limit: int = 10):
 
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     offset = (page - 1) * limit
-    q_manglish = to_manglish(q)
+    
 
     # -------- COUNT --------
     count_query = """
@@ -43,8 +36,7 @@ def global_search(q: str = "", page: int = 1, limit: int = 10):
             OR similarity(w.author, %s) > 0.2
             OR w.title ILIKE %s
             OR w.author ILIKE %s
-            OR w.manglish ILIKE %s
-            OR w.manglish ILIKE %s
+            
         )
         """
         count_params.extend([
@@ -53,8 +45,8 @@ def global_search(q: str = "", page: int = 1, limit: int = 10):
             q,
             f"%{q}%",
             f"%{q}%",
-            f"%{q}%",
-            f"%{q_manglish}%"
+            
+            
         ])
 
     cur.execute(count_query, count_params)
@@ -75,8 +67,7 @@ def global_search(q: str = "", page: int = 1, limit: int = 10):
                 WHEN w.title ILIKE %s THEN 60
                 WHEN w.author ILIKE %s THEN 40
                 WHEN similarity(w.title, %s) > 0.3 THEN 20
-                WHEN w.manglish ILIKE %s THEN 10
-                WHEN w.manglish ILIKE %s THEN 8
+                      
                 ELSE 0
             END AS score
 
@@ -95,8 +86,7 @@ def global_search(q: str = "", page: int = 1, limit: int = 10):
             OR similarity(w.author, %s) > 0.2
             OR w.title ILIKE %s
             OR w.author ILIKE %s
-            OR w.manglish ILIKE %s
-            OR w.manglish ILIKE %s
+            
         )
         """
         data_params.extend([
@@ -105,8 +95,7 @@ def global_search(q: str = "", page: int = 1, limit: int = 10):
             q,
             f"%{q}%",
             f"%{q}%",
-            f"%{q}%",
-            f"%{q_manglish}%"
+                        
         ])
 
     ranking_params = [
@@ -115,8 +104,7 @@ def global_search(q: str = "", page: int = 1, limit: int = 10):
         f"%{q}%",               # contains
         f"%{q}%",               # author
         q,                      # similarity
-        f"%{q}%",               # manglish direct
-        f"%{q_manglish}%"       # manglish converted
+    
     ]
 
     query += """
@@ -144,9 +132,7 @@ def suggest(q: str = ""):
 
     if not q:
         return []
-
-    q_manglish = to_manglish(q)
-
+    
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
@@ -160,8 +146,7 @@ def suggest(q: str = ""):
                 WHEN w.title ILIKE %s THEN 80
                 WHEN w.title ILIKE %s THEN 60
                 WHEN w.author ILIKE %s THEN 40
-                WHEN w.manglish ILIKE %s THEN 20
-                WHEN w.manglish ILIKE %s THEN 15
+                
                 ELSE 0
             END AS score
 
@@ -169,8 +154,7 @@ def suggest(q: str = ""):
         WHERE 
             w.title ILIKE %s
             OR w.author ILIKE %s
-            OR w.manglish ILIKE %s
-            OR w.manglish ILIKE %s
+            
 
         ORDER BY score DESC, w.title
         LIMIT 10
@@ -180,11 +164,9 @@ def suggest(q: str = ""):
         f"%{q}%",
         f"%{q}%",
         f"%{q}%",
-        f"%{q_manglish}%",
         f"%{q}%",
-        f"%{q}%",
-        f"%{q}%",
-        f"%{q_manglish}%"
+        
+        
     ))
 
     rows = cur.fetchall()

@@ -21,12 +21,12 @@ print(f"User: {DB_USER} | DB: {DB_NAME} | Pass Found: {DB_PASS is not None}")
 def get_connection():
     try:
         conn = psycopg2.connect(
-            host=DB_HOST,
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASS,
-            port=DB_PORT,
-            sslmode="require"
+            host=os.getenv("DB_HOST"),
+            port=os.getenv("DB_PORT"),
+            database=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            sslmode=os.getenv("DB_SSLMODE", "require")
         )
         conn.autocommit = False
         return conn
