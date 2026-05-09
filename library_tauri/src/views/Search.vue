@@ -140,30 +140,48 @@ const getGroup = (groupKeys) => {
   <div class="results-container no-print">
     <div v-if="loading" class="loading-state">Searching...</div>
     
-    <table v-if="results.length && !loading">
-      <thead>
-        <tr>
-          <th>Sl No</th>
-          <th>Accession</th>
-          <th>Title</th>
-          <th>Author</th>
-          <th>Original Language</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(row, index) in results" :key="row.serial_no">
-          <td>{{ ((page - 1) * limit) + index + 1 }}</td> 
-          <td>{{ row.accession_no || row.serial_no }}</td>
-          <td class="title" @click="openDetail(row.serial_no)" v-html="highlight(row.title)"></td>
-          <td v-html="highlight(row.author)"></td>
-          <td>{{ row.language || 'N/A' }}</td>
-          <td>
-            <button class="edit-btn-small" @click="goToEdit(row.serial_no)">Edit</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div v-if="results.length && !loading" class="result-list">
+  <div
+    v-for="(row, index) in results"
+    :key="row.serial_no"
+    class="result-card"
+  >
+    <div class="result-left">
+      <small class="result-index">
+        #{{ ((page - 1) * limit) + index + 1 }}
+      </small>
+
+      <h3 
+        class="result-title"
+        @click="openDetail(row.serial_no)"
+        v-html="highlight(row.title)"
+      ></h3>
+
+      <p class="result-author" v-html="highlight(row.author)"></p>
+
+      <div class="result-meta">
+        <span>{{ row.language || "Unknown Language" }}</span>
+        <span>{{ row.accession_no || row.serial_no }}</span>
+      </div>
+    </div>
+
+    <div class="result-right">
+      <button
+        class="inspect-btn"
+        @click="openDetail(row.serial_no)"
+      >
+        Inspect Record
+      </button>
+
+      <button
+        class="edit-btn-small"
+        @click="goToEdit(row.serial_no)"
+      >
+        Edit
+      </button>
+    </div>
+  </div>
+</div>
 
     <div v-if="total > limit" class="pagination no-print">
       <button :disabled="page === 1" @click="changePage(page - 1)">PREV</button>
@@ -253,15 +271,50 @@ th:nth-child(2), td:nth-child(2) {
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
-.search-page { display: flex; flex-direction: column; gap: 15px; padding: 20px; color: white; }
-.search-input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #444; background: #111; color: white; margin-bottom: 10px; }
+.search-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 30px;
+}
+.search-input {
+  width: 100%;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #25324a;
+  background: #101827;
+  color: white;
+  margin-bottom: 10px;
+  font-size: 15px;
+  transition: all 0.2s ease;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #18d2c3;
+  box-shadow: 0 0 0 3px rgba(24,210,195,0.15);
+}
 
 .loading-state { text-align: center; padding: 20px; color: #888; }
 
-table { width: 100%; border-collapse: collapse; margin-top: 10px;}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  background: #111827;
+  border-radius: 12px;
+  overflow: hidden;
+}
+tbody tr:hover {
+  background: rgba(24,210,195,0.08);
+}
 th { text-align: left; padding: 12px; background: #222; color: #888; font-size: 0.8rem; text-transform: uppercase; border-bottom: 2px solid #333;}
 td { padding: 12px; border-bottom: 1px solid #333; font-size: 0.9rem; }
-.title { cursor: pointer; color: #4dabf7; font-weight: bold; }
+.title {
+  cursor: pointer;
+  color: #18d2c3;
+  font-weight: 600;
+}
 .title:hover { text-decoration: underline; }
 
 .pagination { display: flex; justify-content: center; align-items: center; gap: 15px; margin-top: 25px; padding: 10px; }
@@ -271,9 +324,17 @@ td { padding: 12px; border-bottom: 1px solid #333; font-size: 0.9rem; }
 .page-info { font-size: 0.85rem; color: #888; }
 
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-.inspector.modal-content { background: #0f1114; border-radius: 12px; width: 95%; max-width: 1000px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; border: 1px solid #333; }
 
-.inspector-title-box { background: #1c7ed6; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; }
+.inspector.modal-content {
+  background: #0b1120;}
+
+.inspector-title-box {
+  background: linear-gradient(
+    90deg,
+    #0f172a,
+    #152238
+  );
+  border-bottom: 1px solid #23314d;}
 
 .header-actions { display: flex; gap: 8px; }
 .edit-btn { background: #f59f00; color: white; border: none; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 0.8rem; }
@@ -297,10 +358,89 @@ td { padding: 12px; border-bottom: 1px solid #333; font-size: 0.9rem; }
 .audit-timestamps { font-size: 0.85rem; color: #999; margin: 15px 0; }
 .audit-li { padding: 12px 0; border-bottom: 1px solid #222; font-size: 0.85rem; display: flex; align-items: center; gap: 10px; }
 .status-badge { background: #333; padding: 2px 8px; border-radius: 4px; color: #aaa; }
-.status-badge.new { background: #2b8a3e; color: white; }
+.status-badge.new {
+  background: #18d2c3;
+  color: #04111f;
+  font-weight: bold;
+}
 .audit-time { color: #666; font-size: 0.75rem; margin-left: auto; }
 
 mark { background: #fcc419; color: black; border-radius: 2px; }
+
+.result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.result-card {
+  background: #111827;
+  border: 1px solid #22314d;
+  border-radius: 14px;
+  padding: 22px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.result-card:hover {
+  transform: translateY(-2px);
+  border-color: #18d2c3;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+}
+
+.result-index {
+  color: #18d2c3;
+  font-weight: bold;
+}
+
+.result-title {
+  color: white;
+  font-size: 20px;
+  margin: 8px 0;
+  cursor: pointer;
+}
+
+.result-title:hover {
+  color: #18d2c3;
+}
+
+.result-author {
+  color: #94a3b8;
+  margin-bottom: 10px;
+}
+
+.result-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.result-meta span {
+  background: #1e293b;
+  color: #18d2c3;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+}
+
+.result-right {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.inspect-btn {
+  background: #18d2c3;
+  color: #04111f;
+  border: none;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+}
 
 @media print {
   .no-print { display: none !important; }

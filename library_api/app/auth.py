@@ -38,6 +38,7 @@ def create_token(user_data: dict, token_type: str = "access"):
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
+        print("TOKEN RECEIVED:", token)
         payload = jwt.decode(
     token, 
     SECRET_KEY, 
