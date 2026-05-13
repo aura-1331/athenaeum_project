@@ -3,19 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-"scripts": {
-  "dev": "vite --host",
-  "build": "vite build",
-  "preview": "vite preview",
-
-  "tauri": "tauri",
-  "tauri:dev": "tauri dev",
-
-  "dev:full": "concurrently \"runapi\" \"npm run tauri:dev\""
-},
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "dev:full": "concurrently \"runapi\" \"npm run tauri:dev\""
+  },
   "dependencies": {
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-fs": "^2.4.5",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "axios": "^1.14.0",

@@ -1,3 +1,4 @@
+let unlistenNav = null
 <script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from "vue"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
@@ -10,7 +11,11 @@ import {
   BookPlus,
   Sun,
   Moon,
-  LogOut
+  LogOut,
+  BookOpen,
+  FileText,
+  AlertTriangle,
+  ShieldCheck
 } from 'lucide-vue-next'
 
 const theme = ref("dark")
@@ -19,9 +24,10 @@ const router = useRouter()
 
 import { listen } from '@tauri-apps/api/event'
 
-listen('navigate-to', (event) => {
-  router.push(event.payload)
-})
+
+// listen('navigate-to', (event) => {
+//   router.push(event.payload)
+// })
 
 // Logic to detect if we are in "Deep Focus" edit mode
 const isEditing = computed(() => route.path.includes('edit-item'))
@@ -75,7 +81,7 @@ const handleLogout = () => {
 
   router.push("/login")
 }
-onMounted(() => {
+onMounted(async () => {
   document.title = "Athenaeum Orbis | Library Management System"
   updateClock()
   updateSyncTime()
@@ -87,15 +93,30 @@ onMounted(() => {
   window.addEventListener("auth-changed", () => {
   isAuthenticated.value = !!localStorage.getItem("token")
  })
+ if (window.__TAURI__) {
+  try {
+    unlistenNav = await listen('navigate-to', (event) => {
+      console.log("TAURI EVENT RECEIVED:", event.payload)
+      router.push(event.payload)
+    })
+  } catch (err) {
+    console.warn("Tauri event listener failed:", err)
+  }
+}
 })
 
 onUnmounted(() => {
   if (timeInterval) clearInterval(timeInterval)
+  if (unlistenNav) {
+  unlistenNav()
+}
 })
 
 watch(() => route.path, () => {
   updateSyncTime()
 })
+
+
 </script>
 
 <template>
@@ -156,27 +177,7 @@ watch(() => route.path, () => {
   </div>
 </template>
 <style>
-/* --- 1. DESIGN SYSTEM VARIABLES --- */
-:root[data-theme="light"] {
-  --sidebar-bg: #0d9488;      /* Keeps that beautiful Teal */
-  --content-bg: #f8fafc;      /* Clean, off-white background */
-  --card-bg: #ffffff;         /* Pure white cards (Fixes the screenshot) */
-  --text-primary: #0f172a;    /* Bold charcoal text */
-  --text-muted: #475569;      /* Clear grey for authors/subtitles */
-  --border-main: #e2e8f0;     /* Soft border for card edges */
-  --accent: #0d9488;          /* Matching the sidebar teal */
-}
-:root[data-theme="dark"] {
-  --sidebar-bg: #111827;
-  --content-bg: #030712;
-  --card-bg: #0f172a;
-  --text-primary: #f9fafb;
-  --text-active: #2dd4bf;
-  --text-muted: #9ca3af;
-  --border-main: #1e293b;
-  --accent: #2dd4bf;
-  --curve-size: 25px;
-}
+
 html, body, #app {
   margin: 0;
   padding: 0;
@@ -196,6 +197,11 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 /* --- 3. SIDEBAR STYLES --- */
 .sidebar {
   width: 240px;
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+
   background: var(--sidebar-bg);
   display: flex;
   flex-direction: column;
@@ -212,42 +218,44 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 }
 
 
+
 .ao-seal {
-  background: #fbbf24;
-  color: #064e3b;
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Georgia', serif;
-  font-weight: 900;
-  font-size: 16px;
-  border-radius: 6px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-}
 
+  background: transparent;
+  border: 1px solid rgba(184,146,90,0.25);
+
+  color: var(--accent);
+  font-family: "Cormorant Garamond", serif;
+  font-weight: 700;
+  font-size: 18px;
+
+  border-radius: 50%;
+}
 .brand-text { display: flex; flex-direction: column; }
 
-.logo { 
-  font-family: 'Georgia', serif;
-  color: #fbbf24;
-  font-size: 15px; 
-  font-weight: 700;
-  text-transform: uppercase;
+
+.logo {
+  font-family: "Cormorant Garamond", serif;
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 600;
   letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .tagline {
-  font-size: 8px;
-  color: #2dd4bf;
+  font-size: 9px;
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: 2px;
-  margin-top: 2px;
-  font-weight: 600;
+  margin-top: 4px;
 }
-
 /* --- 4. NAVIGATION LINKS --- */
 .nav-links { display: flex; flex-direction: column; gap: 4px; }
 
@@ -264,26 +272,20 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   transition: all 0.2s ease;
 }
 
+
+
 .sidebar a:hover {
-  color: #2dd4bf; /* Teal hover effect */
-  background: rgba(45, 212, 191, 0.05);
-  transition: all 0.2s ease;
+  color: var(--accent);
+  background: rgba(184,146,90,0.08);
 }
 
 .sidebar a.router-link-active {
-  background: var(--content-bg);
+  background: rgba(184,146,90,0.12);
   color: var(--accent);
   font-weight: 700;
   position: relative;
 }
 
-/* Scoop Curves */
-.sidebar a.router-link-active::before, .sidebar a.router-link-active::after {
-  content: ""; position: absolute; right: 0; width: 25px; height: 25px; 
-  background: transparent; border-radius: 50%; pointer-events: none;
-}
-.sidebar a.router-link-active::before { top: -25px; box-shadow: 10px 10px 0 0 var(--content-bg); }
-.sidebar a.router-link-active::after { bottom: -25px; box-shadow: 10px -10px 0 0 var(--content-bg); }
 
 /* --- 5. MAIN CONTENT & HEADER --- */
 .content-wrapper {
@@ -291,7 +293,11 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   display: flex;
   flex-direction: column;
   background: var(--content-bg);
- }
+
+  margin-left: 240px;
+  height: 100vh;
+  overflow: hidden;
+}
 
 .global-header {
   height: 60px;
@@ -344,9 +350,12 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   background: var(--content-bg);
   display: flex;
   flex-direction: column;
-  overflow: auto;
-}
 
+  overflow-y: auto;
+}
+.page-content {
+  padding: 0 !important; /* This removes the side gaps */
+}
 .page-content::-webkit-scrollbar { display: none; }
 
 /* --- 6. THEME TOGGLE --- */

@@ -52,8 +52,8 @@ def create_accession(work_id: int, shelf: str = None):
         cursor.execute(
             """
             INSERT INTO public.items
-            (accession_no, work_id, shelf)
-            VALUES (%s,%s,%s)
+            (accession_no, work_id, shelf, created_at)
+            VALUES (%s, %s, %s, NOW())
             RETURNING accession_no
             """,
             (accession_no, work_id, shelf),
