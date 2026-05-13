@@ -1,19 +1,24 @@
-# Python
-library_api/venv312/
-library_api/venv/
+# --- Python & Backend ---
+library_api/venv*/
 __pycache__/
 *.pyc
-.env
-library_api/library_catalogue_backup.sql
+*.pyo
+*.pyd
+*.db
+library_api/*.sql
+library_api/.env*
 
-# Node / Tauri
+# --- Node / Tauri / Frontend ---
+node_modules/
 library_tauri/node_modules/
 library_tauri/dist/
 library_tauri/src-tauri/target/
+library_tauri/.env*
+.env*
 
-# Editor
+# --- Editor & OS ---
 .vscode/
-
-# OS
+.idea/
 .DS_Store
 Thumbs.db
+*.log
