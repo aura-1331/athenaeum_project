@@ -38,37 +38,38 @@
 
 :root[data-theme="dark"]{
 
-  /* ===== App Structure ===== */
-  --app-bg: #0f1115;
-  --sidebar-bg: #0b0c0e;
-  --content-bg: #0f1115;
+  /* ===== App Structure: From Blue-Black to Warm Charcoal ===== */
+  --app-bg: #0a0908; 
+  --sidebar-bg: #080706; /* Slightly deeper than main app */
+  --content-bg: #0a0908;
 
-  /* ===== Table ===== */
-  --table-bg: #16181c;
-  --table-alt: #1b1f24;
-  --table-header: #1e2329;
-  --table-hover: #20262d;
-  --table-active: #2a3a4f;
+  /* ===== Table: Warm Parchment-Black Layers ===== */
+  --table-bg: #12100e;
+  --table-alt: #161412;
+  --table-header: #1a1815;
+  --table-hover: #221f1b;
+  --table-active: #2d2822; /* Faded bronze feel */
 
-  /* ===== Inspector ===== */
-  --inspector-bg: #111827;
-  --inspector-border: #262a30;
-  --inspector-header: #1a1f25;
+  /* ===== Inspector & Panels: Dipped in Antique Brown ===== */
+  --inspector-bg: #141210;
+  --inspector-border: rgba(184, 146, 90, 0.15); /* Tinted with gold */
+  --inspector-header: #1c1a17;
 
   /* ===== Pagination ===== */
-  --pagination-bg: #1b1f24;
-  --pagination-active: #2a3a4f;
+  --pagination-bg: #161412;
+  --pagination-active: #2d2822;
 
-  /* ===== Buttons ===== */
-  --button-bg: #1f2937;
-  --button-text: #ffffff;
+  /* ===== Buttons: Deep Forest Green/Brown ===== */
+  --button-bg: #1f221b;
+  --button-text: #f5eee0;
 
-  /* ===== Text ===== */
-  --text-primary: #e5e7eb;
-  --text-muted: #9ca3af;
+  /* ===== Text: Aged Parchment Colors ===== */
+  --text-primary: #f5eee0; /* Off-white / Cream */
+  --text-muted: #b8a88a;    /* Faded gold/tan */
+  --accent: #b8925a;        /* Signature Gold */
 
-  /* ===== Borders ===== */
-  --border-main: #262a30;
+  /* ===== Borders: Subtle Gold Glow ===== */
+  --border-main: rgba(184, 146, 90, 0.12);
 }
 
 /* =====================================================
