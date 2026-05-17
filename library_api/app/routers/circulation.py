@@ -26,7 +26,7 @@ async def issue_book(
     request: Request = None,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user['role'] not in ["ARCHIVIST", "SYSTEM_ARCHITECT"]:
+    if current_user['role'] not in ["The Keeper", "The Chief"]:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     conn = get_connection()
@@ -57,9 +57,16 @@ async def issue_book(
         """, (serial_no, borrower_id, due_date, current_user['user_id']))
         loan_id = cur.fetchone()[0]
 
-        cur.execute("UPDATE public.items SET availability_status = 'LENT' WHERE serial_no = %s", (serial_no,))
+        cur.execute(
+    """
+    UPDATE public.items
+    SET availability_status = 'IN_RESEARCH_USE'
+    WHERE serial_no = %s
+    """,
+    (serial_no,)
+    )
         
-        await record_audit(current_user['user_id'], "ISSUE_BOOK", request, str(loan_id), f"Lent {serial_no}")
+        await record_audit(current_user['user_id'], "ISSUE_BOOK", request, str(loan_id), f"Assigned item {serial_no} for research access")
         conn.commit()
         return {"loan_id": loan_id, "due_date": due_date}
     except Exception as e:
@@ -80,7 +87,7 @@ async def return_book(
     return_data: ReturnRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user['role'] not in ["ARCHIVIST", "SYSTEM_ARCHITECT"]:
+    if current_user['role'] not in ["The Keeper", "The Chief"]:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     conn = get_connection()
@@ -128,7 +135,7 @@ async def return_book(
 @router.get("/overdue", tags=["Circulation Monitoring"])
 async def list_overdue_books(current_user: dict = Depends(get_current_user)):
     """Lists all books that are past their due date but haven't been returned."""
-    if current_user['role'] not in ["ARCHIVIST", "SYSTEM_ARCHITECT"]:
+    if current_user['role'] not in ["The Keeper", "The Chief"]:
         raise HTTPException(status_code=403, detail="Access denied.")
 
     conn = get_connection()
@@ -175,7 +182,7 @@ async def pay_fine(
     current_user: dict = Depends(get_current_user)
 ):
     """Records payment of a fine."""
-    if current_user['role'] not in ["ARCHIVIST", "SYSTEM_ARCHITECT"]:
+    if current_user['role'] not in ["The Keeper", "The Chief"]:
         raise HTTPException(status_code=403, detail="Staff only.")
 
     conn = get_connection()
