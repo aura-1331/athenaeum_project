@@ -22,3 +22,5 @@ library_tauri/.env*
 .DS_Store
 Thumbs.db
 *.log
+library_api/private.pem
+library_api/public.pem

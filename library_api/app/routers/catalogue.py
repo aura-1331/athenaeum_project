@@ -163,7 +163,7 @@ def get_catalogue(
         conn.close()
 
 
-# --- 3. ATOMIC SELECTIVE UPDATE (STOPS WIPEOUTS) ---
+
 
 # --- 3. ATOMIC SELECTIVE UPDATE (STOPS WIPEOUTS) ---
 @router.patch("/{serial_no}")

@@ -11,8 +11,8 @@ async def update_config(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user['role'] != "SYSTEM_ARCHITECT":
-        raise HTTPException(status_code=403, detail="Only the System Architect can alter library policy.")
+    if current_user['role'] != "The Chief":
+        raise HTTPException(status_code=403, detail="Only The Chief can update system configurations.")
 
     conn = get_connection()
     cur = conn.cursor()
