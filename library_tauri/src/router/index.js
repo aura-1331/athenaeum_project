@@ -14,22 +14,21 @@ import Login from "../views/Login.vue"
 
 const routes = [
   { path: "/login", name: "login", component: Login },
-
-  // ✅ CHANGE START PAGE HERE
+  
   { path: "/", redirect: "/login" },
 
-  { path: "/dashboard", name: "dashboard", component: Dashboard,meta: { requiresAuth: true } },
-  { path: "/catalogue", name: "catalogue", component: CatalogueView ,meta: { requiresAuth: true }},
-  { path: "/search", name: "search", component: Search ,meta: { requiresAuth: true }},
-  { path: "/status-audit", name: "audit", component: Audit,meta: { requiresAuth: true } },
-  { path: "/details/:id", name: "details", component: DetailsView ,meta: { requiresAuth: true }},
+  { path: "/dashboard", name: "dashboard", component: Dashboard, meta: { requiresAuth: true } },
+  { path: "/catalogue", name: "catalogue", component: CatalogueView, meta: { requiresAuth: true } },
+  { path: "/search", name: "search", component: Search, meta: { requiresAuth: true } },
+  { path: "/status-audit", name: "audit", component: Audit, meta: { requiresAuth: true } },
+  { path: "/details/:id", name: "details", component: DetailsView, meta: { requiresAuth: true } },
 
-  { path: "/create-work", name: "create-work", component: CreateWorkView,meta: { requiresAuth: true } },
-  { path: "/create-item", name: "create-item", component: CreateItemView,meta: { requiresAuth: true } },
-  { path: "/operations/:accession", name: "operations", component: Operations,meta: { requiresAuth: true } },
-  { path: "/edit-item/:id", name: "edit-item", component: EditItemView,meta: { requiresAuth: true } },
+  { path: "/create-work", name: "create-work", component: CreateWorkView, meta: { requiresAuth: true } },
+  { path: "/create-item", name: "create-item", component: CreateItemView, meta: { requiresAuth: true } },
+  { path: "/operations/:accession", name: "operations", component: Operations, meta: { requiresAuth: true } },
+  { path: "/edit-item/:id", name: "edit-item", component: EditItemView, meta: { requiresAuth: true } },
 
-  { path: "/admin/settings", name: "admin-settings", component: SystemSettings,meta: { requiresAuth: true } }
+  { path: "/admin/settings", name: "admin-settings", component: SystemSettings, meta: { requiresAuth: true } }
 ]
 
 const router = createRouter({
@@ -37,12 +36,16 @@ const router = createRouter({
   routes
 })
 
-
 router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem("token")
+  const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token")
+
+  if (to.path === '/login' && token) {
+    next('/dashboard')
+    return
+  }
 
   if (to.meta.requiresAuth && !token) {
-    next("/login")
+    next('/login')
     return
   }
 

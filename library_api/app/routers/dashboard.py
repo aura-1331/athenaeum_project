@@ -88,67 +88,54 @@ def dashboard_summary(current_user: dict = Depends(get_current_user)):
 
         # ---------------- CATEGORY STATS ----------------
         
+        # ---------------- CATEGORY STATS ----------------
         cursor.execute("""
             SELECT 
-                COALESCE(category, 'Uncategorized') as category,
+                COALESCE(w.category, 'Uncategorized') as category,
                 COUNT(*) as count
-            FROM public.items
-            WHERE is_deleted = FALSE
-            GROUP BY category
+            FROM public.items i
+            LEFT JOIN public.works w ON i.work_id = w.work_id
+            WHERE i.is_deleted = FALSE
+            GROUP BY w.category
             ORDER BY count DESC
             LIMIT 5
         """)
 
         category_rows = cursor.fetchall()
+        categories = [{"category": row[0], "count": row[1]} for row in category_rows]
 
-        categories = []
-
-        for row in category_rows:
-            categories.append({
-                "category": row[0],
-                "count": row[1]
-            })
-
-       
         # ---------------- LANGUAGE STATS ----------------
         cursor.execute("""
             SELECT 
-                COALESCE(language_id, 'Unknown') as language,
+                COALESCE(w.language, 'Unknown') as language,
                 COUNT(*) as count
-            FROM public.items
-            WHERE is_deleted = FALSE
-            GROUP BY language_id
+            FROM public.items i
+            LEFT JOIN public.works w ON i.work_id = w.work_id
+            WHERE i.is_deleted = FALSE
+            GROUP BY w.language
             ORDER BY count DESC
             LIMIT 5
         """)
 
         language_rows = cursor.fetchall()
-
-        languages = []
-
-        for row in language_rows:
-            languages.append({
-                "language": row[0],
-                "count": row[1]
-            })
+        languages = [{"language": row[0], "count": row[1]} for row in language_rows]
 
         # ---------------- RECENT ADDITIONS ----------------
         cursor.execute("""
             SELECT 
-                accession_no,
-                title,
-                author,
-                created_at
-            FROM public.items
-            WHERE is_deleted = FALSE
-            ORDER BY created_at DESC
+                i.accession_no,
+                w.title,
+                w.author,
+                i.created_at
+            FROM public.items i
+            LEFT JOIN public.works w ON i.work_id = w.work_id
+            WHERE i.is_deleted = FALSE
+            ORDER BY i.created_at DESC
             LIMIT 5
         """)
 
         recent_rows = cursor.fetchall()
-
         recent_additions = []
-
         for row in recent_rows:
             recent_additions.append({
                 "accession_no": row[0],

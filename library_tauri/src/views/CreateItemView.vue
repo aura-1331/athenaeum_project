@@ -1,6 +1,6 @@
 <script setup>
 import { ref, watch } from "vue"
-import axios from "axios" // 🚀 1. Import the Hybrid Engine
+import axios from "axios"
 
 const form = ref({
   work_id: "",
@@ -13,57 +13,56 @@ const loading = ref(false)
 const authority = ref(null)
 const authorityLoading = ref(false)
 
-// =====================================================
-// ⭐ LOAD AUTHORITY DETAILS (Natural)
-// =====================================================
 watch(
   () => form.value.work_id,
   async (newVal) => {
     authority.value = null
+
     if (!newVal) return
 
     authorityLoading.value = true
 
     try {
-      // 🚀 Clean Axios call: Base URL and Token handled by main.js
       const res = await axios.get(`/catalogue/work/${newVal}`)
       authority.value = res.data
     } catch (err) {
-      console.error("Authority fetch failed:", err)
-      authority.value = { error: "Authority not found or Access Denied" }
+      authority.value = {
+        error: "Authority not found"
+      }
     } finally {
       authorityLoading.value = false
     }
   }
 )
 
-// =====================================================
-// 🏗️ CREATE ITEM (Natural)
-// =====================================================
 async function createItem() {
   if (!form.value.work_id || !form.value.language_id) {
-    return alert("Please provide Work ID and Language.")
+    return alert("Provide Work ID and Language")
   }
 
   loading.value = true
   result.value = null
 
   try {
-    // 🚀 Natural Axios POST: No manual headers or stringifying needed!
-    const res = await axios.post("/catalogue/create-item", form.value)
-    
+    const res = await axios.post(
+      "/catalogue/create-item",
+      form.value
+    )
+
     result.value = res.data
-    alert(`✅ Item Created! Accession: ${res.data.accession_no}`)
-    
-    // Optional: Reset form after success
+
+    alert(`Item Created • ${res.data.accession_no}`)
+
     form.value.work_id = ""
     form.value.language_id = ""
+
     authority.value = null
 
   } catch (err) {
-    console.error("Creation failed:", err)
-    result.value = { 
-      error: err.response?.data?.detail || "Request failed. Check permissions." 
+    result.value = {
+      error:
+        err.response?.data?.detail ||
+        "Creation failed"
     }
   } finally {
     loading.value = false
@@ -72,121 +71,386 @@ async function createItem() {
 </script>
 
 <template>
-  <div class="page">
-    <h2>Create Item (Generate Accession)</h2>
+  <div class="workbench">
 
-    <!-- WORK ID INPUT -->
-    <input
-      v-model="form.work_id"
-      placeholder="Work ID"
-      class="input"
-    />
+    <div class="panel">
 
-    <!-- ⭐ AUTHORITY BANNER -->
-    <div v-if="authorityLoading" class="authority loading">
-      Loading authority...
+      <div class="panel-header">
+        <div>
+          <div class="eyebrow">
+            INVENTORY REGISTRY
+          </div>
+
+          <h1>Create Inventory Item</h1>
+
+          <p>
+            Generate accessioned archival inventory
+            from an authority record.
+          </p>
+        </div>
+
+        <div class="stats-card">
+          <span class="stats-label">SYSTEM</span>
+          <span class="stats-value">READY</span>
+        </div>
+      </div>
+
+      <div class="form-grid">
+
+        <div class="input-group full">
+          <label>Authority Work ID</label>
+
+          <input
+            v-model="form.work_id"
+            placeholder="ML-0012"
+            class="input"
+          />
+        </div>
+
+        <div
+          v-if="authorityLoading"
+          class="authority-banner loading full"
+        >
+          Loading authority record...
+        </div>
+
+        <div
+          v-if="authority && !authority.error"
+          class="authority-banner full"
+        >
+          <div class="authority-title">
+            {{ authority.title }}
+          </div>
+
+          <div class="authority-meta">
+            <span>{{ authority.author }}</span>
+            <span>{{ authority.language }}</span>
+            <span>{{ authority.category }}</span>
+          </div>
+        </div>
+
+        <div
+          v-if="authority && authority.error"
+          class="authority-banner error full"
+        >
+          {{ authority.error }}
+        </div>
+
+        <div class="input-group">
+          <label>Item Language</label>
+
+          <select
+            v-model="form.language_id"
+            class="input"
+          >
+            <option disabled value="">
+              Select Language
+            </option>
+
+            <option value="ML">
+              Malayalam (ML)
+            </option>
+
+            <option value="EN">
+              English (EN)
+            </option>
+
+            <option value="MU">
+              Multilingual (MU)
+            </option>
+
+            <option value="GE">
+              German (GE)
+            </option>
+          </select>
+        </div>
+
+      </div>
+
+      <div class="actions">
+        <button
+          @click="createItem"
+          :disabled="loading"
+        >
+          {{ loading ? "Generating..." : "Generate Item" }}
+        </button>
+      </div>
+
+      <div
+        v-if="result && !result.error"
+        class="result-card"
+      >
+        <div class="result-label">
+          ACCESSION GENERATED
+        </div>
+
+        <div class="result-accession">
+          {{ result.accession_no }}
+        </div>
+      </div>
+
+      <div
+        v-if="result && result.error"
+        class="result-error"
+      >
+        {{ result.error }}
+      </div>
+
     </div>
-
-    <div
-      v-if="authority && !authority.error"
-      class="authority"
-    >
-      <strong>Authority Loaded:</strong>
-
-      <div class="auth-line">
-        <span class="label">Title:</span>
-        {{ authority.title }}
-      </div>
-
-      <div class="auth-line">
-        <span class="label">Author:</span>
-        {{ authority.author }}
-      </div>
-
-      <div class="auth-line">
-        <span class="label">Language:</span>
-        {{ authority.language }}
-      </div>
-
-      <div class="auth-line">
-        <span class="label">Category:</span>
-        {{ authority.category }}
-      </div>
-    </div>
-
-    <div
-      v-if="authority && authority.error"
-      class="authority error"
-    >
-      {{ authority.error }}
-    </div>
-
-    <!-- LANGUAGE SELECT -->
-    <select v-model="form.language_id" class="input">
-      <option disabled value="">Select Language</option>
-      <option value="ML">Malayalam (ML)</option>
-      <option value="EN">English (EN)</option>
-      <option value="MU">Multilingual (MU)</option>
-      <option value="GE">German (GE)</option>
-    </select>
-
-    <button @click="createItem" :disabled="loading">
-      {{ loading ? "Creating..." : "Create Item" }}
-    </button>
-
-    <pre v-if="result">{{ result }}</pre>
   </div>
 </template>
 
-
 <style scoped>
-.page {
-  max-width: 600px;
+.workbench {
+  min-height: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 60px;
+}
+
+.panel {
+  width: 100%;
+  max-width: 1100px;
+
+  background: rgba(255,255,255,0.02);
+
+  border: 1px solid rgba(184,146,90,0.12);
+
+  border-radius: 18px;
+
+  padding: 42px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+
+  margin-bottom: 40px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #8b7355;
+  margin-bottom: 12px;
+}
+
+h1 {
+  font-size: 42px;
+  margin-bottom: 10px;
+  color: #f5f5f5;
+}
+
+p {
+  color: #777;
+  max-width: 520px;
+  line-height: 1.6;
+}
+
+.stats-card {
+  display: flex;
+  flex-direction: column;
+
+  align-items: flex-end;
+
+  padding: 18px;
+
+  border: 1px solid rgba(184,146,90,0.1);
+
+  border-radius: 12px;
+
+  min-width: 140px;
+}
+
+.stats-label {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: #777;
+}
+
+.stats-value {
+  margin-top: 8px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #10b981;
+}
+
+.form-grid {
+  display: grid;
+
+  grid-template-columns: 1fr 1fr;
+
+  gap: 20px;
+}
+
+.full {
+  grid-column: 1 / -1;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+}
+
+label {
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #999;
+  letter-spacing: 1px;
 }
 
 .input {
-  display: block;
-  width: 100%;
+  height: 54px;
+
+  background: rgba(255,255,255,0.03);
+
+  border: 1px solid rgba(255,255,255,0.08);
+
+  border-radius: 10px;
+
+  padding: 0 16px;
+
+  color: white;
+
+  font-size: 15px;
+
+  transition: 0.2s;
+}
+
+.input:focus {
+  outline: none;
+
+  border-color: rgba(99,102,241,0.6);
+
+  background: rgba(255,255,255,0.05);
+}
+
+.authority-banner {
+  background: rgba(99,102,241,0.08);
+
+  border: 1px solid rgba(99,102,241,0.2);
+
+  border-radius: 12px;
+
+  padding: 20px;
+}
+
+.authority-banner.loading {
+  opacity: 0.7;
+}
+
+.authority-banner.error {
+  background: rgba(239,68,68,0.08);
+
+  border-color: rgba(239,68,68,0.2);
+
+  color: #f87171;
+}
+
+.authority-title {
+  font-size: 24px;
+  font-weight: 700;
   margin-bottom: 12px;
-  padding: 8px;
-  border: 1px solid #d1d5db;
+}
+
+.authority-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.authority-meta span {
+  font-size: 13px;
+
+  padding: 6px 10px;
+
+  border-radius: 999px;
+
+  background: rgba(255,255,255,0.05);
+
+  color: #aaa;
+}
+
+.actions {
+  margin-top: 34px;
 }
 
 button {
-  padding: 8px 14px;
-  background: #111827;
+  height: 52px;
+
+  padding: 0 26px;
+
+  border-radius: 10px;
+
+  border: 1px solid rgba(99,102,241,0.35);
+
+  background: linear-gradient(
+    180deg,
+    rgba(99,102,241,0.22),
+    rgba(99,102,241,0.12)
+  );
+
   color: white;
-  border: none;
-  cursor: pointer;
-}
 
-/* =====================================================
-⭐ AUTHORITY BANNER STYLE
-===================================================== */
-.authority {
-  background: #f3f4f6;
-  border-left: 5px solid #111827;
-  padding: 12px;
-  margin-bottom: 14px;
-  border-radius: 6px;
-}
-
-.authority.loading {
-  background: #e5e7eb;
-}
-
-.authority.error {
-  background: #fee2e2;
-  border-left-color: #dc2626;
-}
-
-.auth-line {
   font-size: 14px;
-  margin-top: 4px;
+
+  font-weight: 600;
+
+  cursor: pointer;
+
+  transition: 0.2s;
 }
 
-.label {
-  font-weight: 700;
-  margin-right: 6px;
+button:hover {
+  transform: translateY(-1px);
+
+  border-color: rgba(99,102,241,0.7);
+}
+
+.result-card {
+  margin-top: 28px;
+
+  padding: 24px;
+
+  border-radius: 14px;
+
+  border: 1px solid rgba(16,185,129,0.2);
+
+  background: rgba(16,185,129,0.06);
+}
+
+.result-label {
+  font-size: 11px;
+
+  letter-spacing: 2px;
+
+  color: #6ee7b7;
+
+  margin-bottom: 12px;
+}
+
+.result-accession {
+  font-size: 34px;
+
+  font-weight: 800;
+
+  letter-spacing: 1px;
+
+  color: white;
+}
+
+.result-error {
+  margin-top: 24px;
+
+  padding: 16px;
+
+  border-radius: 10px;
+
+  background: rgba(239,68,68,0.08);
+
+  border: 1px solid rgba(239,68,68,0.2);
+
+  color: #f87171;
 }
 </style>

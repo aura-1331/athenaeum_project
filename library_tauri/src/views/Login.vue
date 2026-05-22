@@ -1,195 +1,599 @@
 <template>
-  <div class="login-container">
-    <div class="login-card">
-      <h1>🏛️ Athenaeum Login</h1>
-      <p>Enter your credentials to access the library system.</p>
+  <div class="login-wrapper">
+    <div class="layout-container">
 
-      <form @submit.prevent="handleLogin">
-        <div class="form-group">
-          <label>Username</label>
-          <input v-model="username" type="text" placeholder="Enter username" required />
+      <div class="brand-panel">
+        <div class="scan-overlay"></div>
+
+        <div class="brand-content">
+          <div class="node-badge">
+            <div class="pulse-dot"></div>
+            <span>Athenaeum Archive Network</span>
+          </div>
+
+          <h2 class="brand-title">
+            Institutional Memory Access
+          </h2>
+
+          <p class="brand-subtitle" v-if="currentStep === 1">
+            Mapping identity credentials...
+          </p>
+
+          <p class="brand-subtitle" v-if="currentStep === 2">
+            Identity verified. Credential verification in progress.
+          </p>
+
+          <p class="brand-subtitle" v-if="currentStep === 3">
+            Secondary verification required.
+          </p>
         </div>
+      </div>
 
-        <div class="form-group">
-          <label>Password</label>
-          <input v-model="password" type="password" placeholder="••••••••" required />
+      <div class="form-panel">
+        <div class="form-content">
+
+          <div class="panel-header">
+            <div class="terminal-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </div>
+
+            <h1>Secure Access</h1>
+
+            <p v-if="currentStep === 1">
+              Enter your archive identity code
+            </p>
+
+            <p v-if="currentStep === 2">
+              Enter your password
+            </p>
+
+            <p v-if="currentStep === 3">
+              Enter verification code
+            </p>
+          </div>
+
+          <form v-if="currentStep === 1" @submit.prevent="verifyIdentity">
+
+            <div class="input-group">
+              <label>Archive Identity</label>
+
+              <div class="input-shell">
+                <span class="input-prefix">ATH</span>
+
+                <input
+                  v-model="identityDigits"
+                  @input="handleIdentityInput"
+                  type="text"
+                  required
+                  maxlength="5"
+                  placeholder="00000"
+                />
+
+              </div>
+            </div>  
+            <button class="action-btn" type="submit" :disabled="loading">
+              {{ loading ? 'Verifying...' : 'Continue' }}
+            </button>
+          </form>
+
+          <form v-if="currentStep === 2" @submit.prevent="verifyPassword">
+
+            <div class="input-group">
+              <label>Password</label>
+
+              <div class="password-wrapper">
+                <input
+                  v-model="passkey"
+                  :type="showPassword ? 'text' : 'password'"
+                  required
+                  placeholder="••••••••"
+                />
+
+                <button
+                  type="button"
+                  class="toggle-password"
+                  @click="showPassword = !showPassword"
+                >
+                  <svg
+                    v-if="!showPassword"
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+
+                  <svg
+                    v-else
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20C5 20 1 12 1 12a21.77 21.77 0 0 1 5.06-6.94"/>
+                    <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.77 21.77 0 0 1-2.16 3.19"/>
+                    <path d="M1 1l22 22"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="remember-row">
+              <label class="remember-label">
+                <input type="checkbox" v-model="rememberMe" />
+                <span>Remember this terminal</span>
+              </label>
+            </div>
+
+            <button class="action-btn" type="submit" :disabled="loading">
+              {{ loading ? 'Authenticating...' : 'Verify Password' }}
+            </button>
+          </form>
+
+          <form v-if="currentStep === 3" @submit.prevent="verifyTwoFA">
+
+            <div class="input-group">
+              <label>2FA Token</label>
+
+              <input
+                v-model="tokenPin"
+                type="text"
+                required
+                placeholder="000000"
+              />
+            </div>
+
+            <button class="action-btn" type="submit" :disabled="loading">
+              {{ loading ? 'Verifying...' : 'Verify Code' }}
+            </button>
+          </form>
+
+          <p v-if="errorMessage" class="error-message">
+            {{ errorMessage }}
+          </p>
+
         </div>
+      </div>
 
-        <button type="submit" :disabled="loading">
-          {{ loading ? 'Authenticating...' : 'Sign In' }}
-        </button>
-      </form>
-
-      <p v-if="error" class="error-msg">{{ error }}</p>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { useRouter } from 'vue-router';
-import axios from 'axios';
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+const router = useRouter()
 
-const username = ref('');
-const password = ref('');
-const loading = ref(false);
-const error = ref(null);
-const router = useRouter();
+const currentStep = ref(1)
 
-// ----------------------------------------------------------------------------------------------------------------------------------//
-// --------------------------------------------------LOGIN FUNCTION-----------------------------------------------------------------//
-// --------------------------------------------------------------------------------------------------------------------------------//
+const identityDigits = ref('')
+const fullOperatorId = ref('')
+const passkey = ref('')
+const tokenPin = ref('')
 
+const loading = ref(false)
+const errorMessage = ref('')
 
-const handleLogin = async () => {
-  loading.value = true;
-  error.value = null;
+const handleIdentityInput = () => {
+  identityDigits.value = identityDigits.value
+    .replace(/\D/g, '')
+    .slice(0, 5)
+}
 
-  // 1. Prepare OAuth2 Form Data (FastAPI expects this)
-  const params = new URLSearchParams();
-  params.append('username', username.value);
-  params.append('password', password.value);
+const rememberMe = ref(false)
+const showPassword = ref(false)
+
+const verifyIdentity = async () => {
+  loading.value = true
+  errorMessage.value = ''
 
   try {
-    // 2. Execute the Login Request
-    const response = await axios.post('/token', params, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
+    fullOperatorId.value = `ATH${identityDigits.value}`
 
-    // 3. Save Credentials to LocalStorage
-    const token = response.data.access_token;
-    localStorage.setItem('token', token);
-    localStorage.setItem('refresh_token', response.data.refresh_token);
-    localStorage.setItem('user_role', response.data.role);
-    localStorage.setItem('user_name', username.value);
-    window.dispatchEvent(new Event("auth-changed")); // Notify other components of auth change
+    const response = await fetch('http://127.0.0.1:8000/auth/check-identity', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        identity_code: identityDigits.value
+      })
+    })
 
-    // 🛡️ 4. THE "SECRET SAUCE" (REACTIVE HEADER UPDATE)
-    // This tells the "Natural" system to use the token IMMEDIATELY.
-    // Without this, the first Dashboard call might fail with 401.
-    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(
+        errorData.detail || 'Unable to verify identity'
+      )
+    }
 
-    console.log("✅ Login Successful. Token attached to Axios.");
+    currentStep.value = 2
 
-    // 5. Redirect to Dashboard
-    router.push({ name: 'dashboard' });
-    
-
-  } catch (err) {
-    console.error("❌ Login Error:", err);
-    // Handles server errors or "Incorrect username/password"
-    error.value = err.response?.data?.detail || "Connection failed. Is the backend running?";
+  } catch (error) {
+    console.error(error)
+    errorMessage.value = error.message
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
+
+const verifyPassword = async () => {
+  loading.value = true
+  errorMessage.value = ''
+
+  try {
+    const formData = new URLSearchParams()
+    formData.append('username', fullOperatorId.value)
+    formData.append('password', passkey.value)
+
+    const response = await fetch('http://127.0.0.1:8000/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: formData
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      if (data.detail === '2FA verification required') {
+        currentStep.value = 3
+        return
+      }
+
+      throw new Error(data.detail || 'Authentication failed')
+    }
+
+    if (rememberMe.value) {
+      localStorage.setItem('access_token', data.access_token)
+      localStorage.setItem('refresh_token', data.refresh_token)
+    } else {
+      sessionStorage.setItem('access_token', data.access_token)
+      sessionStorage.setItem('refresh_token', data.refresh_token)
+    }
+    localStorage.setItem('user_role', data.role)
+
+    window.dispatchEvent(new Event("auth-changed"))
+
+    window.location.href = "http://localhost:1420/#/dashboard"
+
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    loading.value = false
+  }
+}
+
+const verifyTwoFA = async () => {
+  loading.value = true
+  errorMessage.value = ''
+
+  try {
+    const response = await fetch('http://127.0.0.1:8000/verify-2fa', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('access_token')}`
+      },
+      body: JSON.stringify({
+        token: tokenPin.value
+      })
+    })
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.detail || 'Invalid code')
+    }
+
+    window.location.href = "http://localhost:1420/#/dashboard"
+
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <style scoped>
-.login-container {
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: monospace;
+}
+
+.login-wrapper {
+  min-height: 100vh;
+  background: #020205;
+}
+
+.layout-container {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* LEFT PANEL */
+.brand-panel {
+  flex: 1;
+  position: relative;
+  background: #05050a;
+  border-right: 1px solid #111;
+  display: flex;
+  align-items: center;
+  padding: 60px;
+  overflow: hidden;
+}
+
+.scan-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(99,102,241,0.12),
+    transparent
+  );
+  animation: scanMove 5s linear infinite;
+}
+
+@keyframes scanMove {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+.brand-content {
+  position: relative;
+  z-index: 2;
+}
+
+.node-badge {
+  display: inline-flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  color: #818cf8;
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  background: #6366f1;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%,100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.5);
+    opacity: 0.5;
+  }
+}
+
+.brand-title {
+  color: white;
+  font-size: 30px;
+  margin-bottom: 15px;
+}
+
+.brand-subtitle {
+  color: gray;
+  margin-bottom: 30px;
+}
+
+.security-metrics {
+  display: flex;
+  gap: 20px;
+}
+
+.metric-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-val {
+  color: white;
+  font-weight: bold;
+}
+
+.metric-lbl {
+  color: gray;
+  font-size: 12px;
+}
+
+/* RIGHT PANEL */
+.form-panel {
+  flex: 1;
   display: flex;
   justify-content: center;
   align-items: center;
-  min-height: 100vh;
-
-  background:
-    radial-gradient(circle at top right, rgba(20, 184, 166, 0.08), transparent 25%),
-    radial-gradient(circle at bottom left, rgba(245, 158, 11, 0.06), transparent 20%),
-    #020617;
+  background: #07070f;
 }
 
-.login-card {
+.form-content {
   width: 100%;
-  max-width: 430px;
-  padding: 2.5rem;
-  border-radius: 16px;
+  max-width: 400px;
+}
 
-  background: rgba(10, 20, 40, 0.95);
-  backdrop-filter: blur(10px);
-
-  box-shadow: 0 20px 60px rgba(0,0,0,0.35);
-  border: 1px solid rgba(20,184,166,0.15);
-
+.panel-header h1 {
   color: white;
+  margin-bottom: 10px;
 }
 
-.login-card h1 {
-  font-size: 2rem;
-  font-weight: 700;
-  margin-bottom: 0.5rem;
-  
-}
-.login-card h1 {
-  color: white;
+.panel-header p {
+  color: gray;
+  margin-bottom: 30px;
 }
 
-.login-card p {
-  
-  margin-bottom: 1.5rem;
-  line-height: 1.5;
-}
-.login-card p {
-  color: #cbd5e1;
-}
-.form-group {
-  margin-bottom: 1rem;
-  text-align: left;
+.input-group {
+  margin-bottom: 20px;
 }
 
-label {
+.input-group label {
   display: block;
-  margin-bottom: 0.4rem;
-  font-weight: 600;
-  
-}
-label {
-  color: #e2e8f0;
-}
-input {
-  width: 100%;
-  padding: 12px;
-  border-radius: 8px;
-  transition: all 0.2s ease;
-}
-input {
-  background: #0f172a;
-  color: white;
-  border: 1px solid #334155;
-}
-input:focus {
-  outline: none;
-  border-color: #14b8a6;
-  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.2);
+  color: #aaa;
+  margin-bottom: 8px;
 }
 
-button {
+.input-group input {
   width: 100%;
   padding: 14px;
-  margin-top: 0.5rem;
-  border: none;
-  border-radius: 8px;
-
-  background: linear-gradient(90deg, #0f766e, #14b8a6);
+  background: #0b0b16;
+  border: 1px solid #222;
   color: white;
+  border-radius: 6px;
+}
 
-  font-weight: 600;
+.action-btn {
+  width: 100%;
+  padding: 14px;
+  background: #4f46e5;
+  color: white;
+  border: none;
   cursor: pointer;
-  transition: transform 0.2s ease;
+  border-radius: 6px;
 }
 
-button:hover {
-  transform: translateY(-1px);
-}
-
-button:disabled {
-  background: #64748b;
+.action-btn:disabled {
+  opacity: 0.7;
   cursor: not-allowed;
 }
 
-.error-msg {
-  color: #dc2626;
-  margin-top: 1rem;
-  font-size: 0.9rem;
-  text-align: center;
+.checkbox-label {
+  color: gray;
+}
+
+.error-message {
+  color: red;
+  margin-top: 20px;
+}
+
+.panel-footer {
+  margin-top: 30px;
+  color: gray;
+}
+
+.terminal-icon {
+  width: 64px;
+  height: 64px;
+  background: #111122;
+  border: 1px solid #222244;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 25px;
+  overflow: hidden;
+}
+
+.terminal-icon svg {
+  width: 28px;
+  height: 28px;
+  stroke: #818cf8;
+  display: block;
+}
+
+.input-shell {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: #0b0b16;
+  border: 1px solid #222;
+  border-radius: 6px;
+  padding: 0 14px;
+}
+
+.input-prefix {
+  color: rgba(16, 173, 194, 0.28);
+  letter-spacing: 2px;
+  font-weight: normal;
+  margin-right: 2px;
+  font-size: 15px;
+}
+
+.input-shell input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: white;
+  padding: 14px 0;
+  outline: none;
+  font-size: 15px;
+  letter-spacing: 2px;
+}
+
+.remember-row {
+  margin-bottom: 20px;
+}
+
+.remember-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #777;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.remember-label input {
+  accent-color: #6366f1;
+}
+
+.password-wrapper {
+  position: relative;
+}
+
+.password-wrapper input {
+  width: 100%;
+  padding: 14px;
+  padding-right: 50px;
+  background: #0b0b16;
+  border: 1px solid #222;
+  color: white;
+  border-radius: 6px;
+}
+
+.toggle-password {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toggle-password:hover {
+  color: #aaa;
+}
+
+@media (max-width: 900px) {
+  .brand-panel {
+    display: none;
+  }
 }
 </style>

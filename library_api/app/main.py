@@ -21,7 +21,8 @@ from app.auth import (
     PUBLIC_KEY,
     ALGORITHM,
     create_token,
-    get_current_user
+    get_current_user,
+    router as auth_router
 )
 
 from app.utils.security import (
@@ -99,8 +100,7 @@ app.add_middleware(
     allow_headers=["*"],
     allow_methods=["*"],
 )
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 # ----------------------------
 # Chief Review / Final Decision
@@ -1060,6 +1060,7 @@ async def verify_2fa(
 app.include_router(print_router.router)
 app.include_router(health.router)
 app.include_router(catalogue.router)
+app.include_router(auth_router)
 app.include_router(items.router, dependencies=[Depends(get_current_user)])
 app.include_router(search.router, dependencies=[Depends(get_current_user)])
 app.include_router(circulation.router, dependencies=[Depends(get_current_user)])

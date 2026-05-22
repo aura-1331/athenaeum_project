@@ -1,36 +1,28 @@
 import "./assets/main.css"
+
 import { createApp } from "vue"
 import { createPinia } from 'pinia'
 import App from "./App.vue"
 import router from "./router"
 import axios from 'axios'
 
-// 🛡️ 1. CONFIGURE GLOBAL AXIOS
 axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
+const refreshClient = axios.create({
+  baseURL: axios.defaults.baseURL
+});
 
-// 🛡️ REQUEST INTERCEPTOR (attach token)
 axios.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("token");
-
+    const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-
     return config;
   },
   (error) => Promise.reject(error)
 );
 
-
-// 🔄 Separate axios for refresh (no loop)
-const refreshClient = axios.create({
-  baseURL: axios.defaults.baseURL
-});
-
-
-// 🔁 RESPONSE INTERCEPTOR (auto refresh + retry)
 axios.interceptors.response.use(
   (res) => res,
   async (err) => {
@@ -41,57 +33,46 @@ axios.interceptors.response.use(
       !err.config.url.includes("/refresh")
     ) {
       err.config._retry = true;
+      const refresh = localStorage.getItem("refresh_token") || sessionStorage.getItem("refresh_token");
 
-      const refresh = localStorage.getItem("refresh_token");
-
-      // ❌ No refresh token → logout
       if (!refresh) {
         localStorage.clear();
+        sessionStorage.clear();
         localStorage.setItem("logout", Date.now());
         window.location.href = "/login";
         return;
       }
 
       try {
-        // 🔄 get new access token
-        const res = await refreshClient.post("/refresh", {
-          refresh_token: refresh
-        });
-
+        const res = await refreshClient.post("/refresh", { refresh_token: refresh });
         const newToken = res.data.access_token;
 
-        // 💾 store new token
-        localStorage.setItem("token", newToken);
+        if (localStorage.getItem("refresh_token")) {
+          localStorage.setItem("access_token", newToken);
+        } else {
+          sessionStorage.setItem("access_token", newToken);
+        }
 
-        // 🔥 update global axios header
-        axios.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
-
-        // 🔁 retry original request
         err.config.headers["Authorization"] = `Bearer ${newToken}`;
         return axios(err.config);
-
       } catch (refreshError) {
-        // ❌ refresh failed → logout everywhere
         localStorage.clear();
+        sessionStorage.clear();
         localStorage.setItem("logout", Date.now());
         window.location.href = "/login";
       }
     }
-
     return Promise.reject(err);
   }
 );
 
-
-// 🔔 SYNC LOGOUT ACROSS TABS
 window.addEventListener("storage", (event) => {
   if (event.key === "logout") {
+    sessionStorage.clear();
     window.location.href = "/login";
   }
 });
 
-
-// 🚀 INITIALIZE APP
 const app = createApp(App)
 const pinia = createPinia()
 

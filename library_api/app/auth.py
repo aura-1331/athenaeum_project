@@ -13,8 +13,10 @@ from fastapi import (
     Depends,
     Request,
     Response,
-    status
+    status,
+    APIRouter
 )
+
 from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
 from slowapi import Limiter
@@ -43,7 +45,7 @@ REFRESH_EXPIRE_DAYS = 7
 
 ALGORITHM = "RS256"
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 # -------------------------
 # REDIS
@@ -77,10 +79,16 @@ logging.basicConfig(level=logging.INFO)
 # -------------------------
 # FASTAPI APP
 # -------------------------
-app = FastAPI()
+
+
+router = APIRouter(
+    prefix="/auth",
+    tags=["Authentication"]
+)
 
 limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
+
+
 
 # -------------------------
 # TOKEN CREATION
@@ -224,64 +232,116 @@ def generate_csrf_token():
 # -------------------------
 # LOGIN ROUTE
 # -------------------------
-@app.post("/login")
+# -------------------------
+# LOGIN ROUTE
+# -------------------------
+@router.post("/token", tags=["Authentication"])
 @limiter.limit("5/minute")
 def login(
-    request: Request,
-    response: Response,
-    username: str,
-    password: str
+     request: Request,
+     response: Response,
+     username: str,
+     password: str
 ):
-    # Replace with DB lookup
-    stored_hash = hash_password("admin123")
+     stored_hash = hash_password("admin123")
 
-    if not verify_password(password, stored_hash):
-        logger.warning("Failed login attempt")
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid credentials"
-        )
+     if not verify_password(password, stored_hash):
+          logger.warning("Failed login attempt")
+          raise HTTPException(
+               status_code=401,
+               detail="Invalid credentials"
+          )
 
-    user_payload = {
-        "sub": username,
-        "role": "Sys_Arch"
-    }
+     user_payload = {
+          "sub": username,
+          "role": "Sys_Arch"
+     }
 
-    access_token = create_token(
-        user_payload,
-        "access"
+     access_token = create_token(
+          user_payload,
+          "access"
+     )
+
+     refresh_token = create_token(
+          user_payload,
+          "refresh"
+     )
+
+     csrf_token = generate_csrf_token()
+
+     response.set_cookie(
+          key="refresh_token",
+          value=refresh_token,
+          httponly=True,
+          secure=True,
+          samesite="Strict"
+     )
+
+     response.set_cookie(
+          key="csrf_token",
+          value=csrf_token,
+          secure=True,
+          samesite="Strict"
+     )
+
+     return {
+          "access_token": access_token
+     }
+# -------------------------
+# CHECK IDENTITY ROUTE
+# -------------------------
+
+@router.post("/check-identity")
+def check_identity(payload: dict):
+    from app.database import get_connection
+
+    identity_code = payload.get("identity_code")
+
+    if not identity_code.isdigit() or len(identity_code) != 5:
+     raise HTTPException(
+        status_code=400,
+        detail="Invalid identity format"
     )
 
-    refresh_token = create_token(
-        user_payload,
-        "refresh"
-    )
+    full_id = f"ATH{identity_code}"
+    print("FULL ID:", full_id)
+    conn = get_connection()
+    cur = conn.cursor()
 
-    csrf_token = generate_csrf_token()
+    try:
+        cur.execute("""
+            SELECT user_id, name, role, status
+            FROM users
+            WHERE operator_id = %s
+        """, (full_id,))
 
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=True,
-        samesite="Strict"
-    )
+        user = cur.fetchone()
 
-    response.set_cookie(
-        key="csrf_token",
-        value=csrf_token,
-        secure=True,
-        samesite="Strict"
-    )
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail="Unable to verify identity"
+            )
 
-    return {
-        "access_token": access_token
-    }
+        if user[3] != "APPROVED":
+            raise HTTPException(
+                status_code=403,
+                detail="Account inactive"
+            )
+
+        return {
+            "message": "Identity verified",
+            "name": user[1]
+        }
+
+    finally:
+        cur.close()
+        conn.close()
 
 # -------------------------
 # REFRESH ROUTE
 # -------------------------
-@app.post("/refresh")
+@router.post("/refresh")
 def refresh(request: Request):
     refresh_token = request.cookies.get(
         "refresh_token"
@@ -298,7 +358,7 @@ def refresh(request: Request):
 # -------------------------
 # LOGOUT ROUTE
 # -------------------------
-@app.post("/logout")
+@router.post("/logout")
 def logout(
     request: Request,
     response: Response
