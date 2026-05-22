@@ -201,7 +201,8 @@ const verifyIdentity = async () => {
   try {
     fullOperatorId.value = `ATH${identityDigits.value}`
 
-    const response = await fetch('http://127.0.0.1:8000/auth/check-identity', {
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+    const response = await fetch(`${baseUrl}/auth/check-identity`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -237,7 +238,8 @@ const verifyPassword = async () => {
     formData.append('username', fullOperatorId.value)
     formData.append('password', passkey.value)
 
-    const response = await fetch('http://127.0.0.1:8000/token', {
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+    const response = await fetch(`${baseUrl}/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded'
@@ -267,7 +269,7 @@ const verifyPassword = async () => {
 
     window.dispatchEvent(new Event("auth-changed"))
 
-    window.location.href = "http://localhost:1420/#/dashboard"
+    router.push('/dashboard')
 
   } catch (error) {
     errorMessage.value = error.message
@@ -281,7 +283,8 @@ const verifyTwoFA = async () => {
   errorMessage.value = ''
 
   try {
-    const response = await fetch('http://127.0.0.1:8000/verify-2fa', {
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+    const response = await fetch(`${baseUrl}/verify-2fa`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -298,7 +301,7 @@ const verifyTwoFA = async () => {
       throw new Error(data.detail || 'Invalid code')
     }
 
-    window.location.href = "http://localhost:1420/#/dashboard"
+    router.push('/dashboard')
 
   } catch (error) {
     errorMessage.value = error.message
