@@ -77,7 +77,9 @@ function goToRecord(direction: 'next' | 'prev') {
 function handlePrint() {
   window.print()
 }
-
+function closeWindow() {
+  window.close()
+}
 function editRecord() {
   if (book.value?.serial_no) {
     router.push({ 
@@ -149,15 +151,16 @@ onMounted(() => fetchBookDetails())
         </div>
 
         <footer class="folio-footer">
-          <div class="nav-group">
-            <button class="btn-nav" @click="goToRecord('prev')">← Previous</button>
-            <button class="btn-nav" @click="goToRecord('next')">Next →</button>
-          </div>
-          <div class="action-group">
-            <button class="btn-action edit" @click="editRecord">Edit Record</button>
-            <button class="btn-action print" @click="triggerPrint">Print Folio</button>
-          </div>
-        </footer>
+  <div class="nav-group">
+    <button class="btn-nav" @click="closeWindow">← Return to Ledger</button>
+    <button class="btn-nav" @click="goToRecord('prev')">← Previous</button>
+    <button class="btn-nav" @click="goToRecord('next')">Next →</button>
+  </div>
+  <div class="action-group">
+    <button class="btn-action edit" @click="editRecord">Edit Record</button>
+    <button class="btn-action print" @click="triggerPrint">Print Folio</button>
+  </div>
+</footer>
               </main>
     </div>
   </div>
