@@ -3,53 +3,54 @@
     <main class="catalogue-main">
       <header class="catalogue-header">
         <div class="header-top-row">
-          <div class="cat-path">Main Registry <span class="sep">/</span> Index Lucerna</div>
+          <div class="cat-path">Main Registry <span class="sep">/</span> Central Catalogue Index</div>
           <div class="stats-tracker">
-            <span class="total-badge">Total System: <strong>{{ totalBooks }} Books</strong></span>
+            <span class="total-badge">Total System: <strong>{{ totalBooks }} Records</strong></span>
             <span class="pipe">|</span>
-            <span class="page-badge">This Page Contains: <strong>{{ books.length }} Books</strong></span>
+            <span class="page-badge">Showing: <strong>{{ books.length }}</strong></span>
           </div>
         </div>
         <h1 class="catalogue-title">The Central Index Catalogue</h1>
       </header>
 
-      <div v-if="loading && books.length === 0" class="vault-loader">Consulting the Orbis Registry...</div>
+      <div v-if="loading" class="vault-loader">Consulting the Registry...</div>
 
       <div v-else-if="books.length === 0" class="empty-catalogue">
-        No records match the requested lookup criteria.
+        No records match the requested catalogue criteria.
       </div>
 
-      <div v-else class="grid-scroll-container" ref="scrollContainer" @scroll="handleScroll">
-        <div class="catalogue-grid">
-          <div 
-            v-for="(item, index) in books" 
-            :key="`${item.serial_no}-${index}`" 
-            class="book-card"
-            :style="getCardStyle(item.serial_no)"
-            @click="viewBook(item.serial_no)"
-          >
-            <div class="card-spine">
-              <span class="card-sl">#{{ item.serial_no }}</span>
-            </div>
-            <div class="card-body">
-              <div class="card-meta">
-                <span>{{ item.category }}</span>
-                <span>•</span>
-                <span>Acc No: <strong>{{ item.accession_no }}</strong></span>
-              </div>
-              <h3 class="card-title">{{ item.title }}</h3>
-              <p class="card-author">Scribe: <strong>{{ item.author || 'Unknown' }}</strong></p>
-              <footer class="card-footer">
-                <span class="badge-shelf">Shelf {{ item.shelf || 'N/A' }}</span>
-                <span class="badge-id">{{ item.record_id }}</span>
-              </footer>
-            </div>
-          </div>
-        </div>
-
-        <div v-if="loadingMore" class="loading-more-indicator">
-          Retrieving subsequent records...
-        </div>
+      <div v-else class="ledger-table-wrapper" ref="scrollContainer">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th class="col-sl">SL No</th>
+              <th class="col-work-id">Work ID</th>
+              <th class="col-acc">Accession No</th>
+              <th class="col-title">Title</th>
+              <th class="col-author">Author</th>
+              <th class="col-cat">Category</th>
+              <th class="col-shelf">Shelf</th>
+              <th class="col-id">Record ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr 
+              v-for="(item, index) in books" 
+              :key="`${item.serial_no}-${index}`"
+              class="ledger-row"
+              @click="viewBook(item.serial_no)"
+            >
+              <td class="cell-sl">#{{ (currentPage - 1) * itemsPerPage + index + 1 }}</td>
+              <td class="cell-work-id">#{{ item.work_id || item.id || '—' }}</td>
+              <td class="cell-acc"><span class="acc-pill">{{ item.accession_no }}</span></td>
+              <td class="cell-title" :title="item.title">{{ item.title }}</td>
+              <td class="cell-author">{{ item.author || '—' }}</td>
+              <td class="cell-cat"><span class="cat-tag">{{ item.category }}</span></td>
+              <td class="cell-shelf">{{ item.shelf || '—' }}</td>
+              <td class="cell-id">{{ item.record_id }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <footer class="catalogue-footer">
@@ -85,21 +86,10 @@ import axios from "axios"
 const router = useRouter()
 const books = ref<any[]>([])
 const loading = ref(true)
-const loadingMore = ref(false)
 const totalBooks = ref(0)
 const currentPage = ref(1)
-const itemsPerPage = ref(12)
+const itemsPerPage = ref(15)
 const scrollContainer = ref<HTMLElement | null>(null)
-
-const colorPalette = [
-  { bg: "#ffffff", text: "#111111", meta: "#8b0000", border: "rgba(0,0,0,0.06)", foot: "rgba(0,0,0,0.05)" },
-  { bg: "#250906", text: "#f2e8cf", meta: "#d4af37", border: "rgba(214,175,55,0.2)", foot: "rgba(255,255,255,0.05)" },
-  { bg: "#141d26", text: "#ffffff", meta: "#1da1f2", border: "rgba(255,255,255,0.1)", foot: "rgba(255,255,255,0.05)" },
-  { bg: "#f4f1ea", text: "#2c3e50", meta: "#e74c3c", border: "rgba(0,0,0,0.08)", foot: "rgba(0,0,0,0.04)" },
-  { bg: "#1e272c", text: "#eceff1", meta: "#00b0ff", border: "rgba(255,255,255,0.08)", foot: "rgba(255,255,255,0.04)" },
-  { bg: "#e8f5e9", text: "#1b5e20", meta: "#2e7d32", border: "rgba(0,0,0,0.06)", foot: "rgba(0,0,0,0.03)" },
-  { bg: "#3e2723", text: "#efebe9", meta: "#ffb74d", border: "rgba(255,255,255,0.1)", foot: "rgba(255,255,255,0.05)" }
-]
 
 const totalPages = computed(() => {
   return Math.ceil(totalBooks.value / itemsPerPage.value) || 1
@@ -130,24 +120,8 @@ const visiblePages = computed(() => {
   return pages
 })
 
-function getCardStyle(serialNo: number) {
-  const scheme = colorPalette[serialNo % colorPalette.length]
-  return {
-    '--card-bg': scheme.bg,
-    '--card-text': scheme.text,
-    '--card-meta': scheme.meta,
-    '--card-border': scheme.border,
-    '--card-foot': scheme.foot
-  }
-}
-
-async function fetchCatalogue(appendMode = false) {
-  if (!appendMode) {
-    loading.value = true
-  } else {
-    loadingMore.value = true
-  }
-
+async function fetchCatalogue() {
+  loading.value = true
   try {
     const params = {
       page: currentPage.value,
@@ -160,7 +134,6 @@ async function fetchCatalogue(appendMode = false) {
 
     if (!token) {
       loading.value = false
-      loadingMore.value = false
       router.push("/login")
       return
     }
@@ -173,16 +146,12 @@ async function fetchCatalogue(appendMode = false) {
     }
 
     const response = await axios.get("/catalogue/", config)
-    
-    if (appendMode) {
-      books.value = [...books.value, ...response.data.data]
-    } else {
-      books.value = response.data.data
-      if (scrollContainer.value) {
-        scrollContainer.value.scrollTop = 0
-      }
-    }
+    books.value = response.data.data
     totalBooks.value = response.data.total
+    
+    if (scrollContainer.value) {
+      scrollContainer.value.scrollTop = 0
+    }
   } catch (err: any) {
     if (err.response?.status === 401) {
       books.value = []
@@ -193,72 +162,36 @@ async function fetchCatalogue(appendMode = false) {
     console.error("Failed to map the records:", err)
   } finally {
     loading.value = false
-    loadingMore.value = false
   }
 }
 
 function goToPage(targetPage: number) {
   if (targetPage >= 1 && targetPage <= totalPages.value) {
     currentPage.value = targetPage
-    fetchCatalogue(false)
-  }
-}
-
-function handleScroll() {
-  if (!scrollContainer.value || loading.value || loadingMore.value) return
-
-  const { scrollTop, scrollHeight, clientHeight } = scrollContainer.value
-
-  const cardHeight = 160
-  const rowGap = 25
-  const scrollIndex = Math.floor(scrollTop / (cardHeight + rowGap))
-  const itemsPerRow = Math.max(1, Math.floor(scrollContainer.value.clientWidth / 280))
-  const itemsPassed = scrollIndex * itemsPerRow
-  
-  const currentScrollPage = Math.min(
-    totalPages.value,
-    Math.max(1, Math.ceil(itemsPassed / itemsPerPage.value) + 1)
-  )
-  
-  if (currentScrollPage !== currentPage.value) {
-    currentPage.value = currentScrollPage
-  }
-
-  if (scrollTop + clientHeight >= scrollHeight - 50) {
-    const currentFetchedPages = Math.ceil(books.value.length / itemsPerPage.value)
-    if (currentFetchedPages < totalPages.value) {
-      currentPage.value = currentFetchedPages + 1
-      fetchCatalogue(true)
-    }
+    fetchCatalogue()
   }
 }
 
 function viewBook(serialNo: number) {
-  const routeData = router.resolve(`/details/${serialNo}`)
-  window.open(routeData.href, '_blank')
+  router.push(`/details/${serialNo}`)
 }
 
 onMounted(() => {
-  fetchCatalogue(false)
+  fetchCatalogue()
 })
 </script>
 
 <style scoped>
 .athenaeum-vault {
-  --mahogany: #250906;
-  --gold: #d4af37;
-  --parchment: #f2e8cf;
-  --ink: #111;
-  --blood: #8b0000;
-  background: var(--parchment); 
-  height: 100%; 
-  width: 100%; 
-  display: flex; 
+  background: #111111;
+  height: 100%;
+  width: 100%;
+  display: flex;
 }
 
 .catalogue-main {
   flex-grow: 1;
-  background: var(--parchment);
+  background: #111111;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -266,181 +199,124 @@ onMounted(() => {
 }
 
 .catalogue-header { 
-  padding: 30px 40px 15px; 
-  border-bottom: 1px solid rgba(0,0,0,0.08); 
+  padding: 24px 32px 16px; 
+  border-bottom: 1px solid #1c1c1c; 
 }
 
 .header-top-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 
 .cat-path { 
-  font-size: 13px; 
-  font-weight: 800; 
-  color: var(--mahogany); 
+  font-size: 11px; 
+  font-weight: 600; 
+  color: #cfb997; 
   text-transform: uppercase; 
   letter-spacing: 1.5px; 
 }
 
 .cat-path .sep { 
-  color: var(--blood); 
-  padding: 0 5px; 
+  color: #444444; 
+  padding: 0 4px; 
 }
 
 .stats-tracker {
   display: flex;
   align-items: center;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: #3d2b1f;
-  font-weight: 700;
+  font-size: 12px;
+  color: #8c8c8c;
 }
 
 .stats-tracker strong {
-  color: var(--blood);
-  font-weight: 900;
+  color: #e0e0e0;
+  font-weight: 600;
 }
 
 .pipe {
-  margin: 0 12px;
-  opacity: 0.3;
+  margin: 0 10px;
+  color: #262626;
 }
 
 .catalogue-title {
-  font-family: 'Playfair Display', serif; 
-  font-size: 30px; 
-  color: var(--ink); 
+  font-size: 22px; 
+  color: #e0e0e0; 
   margin: 0; 
-  font-weight: 900; 
-}
-
-.grid-scroll-container {
-  flex-grow: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 30px 40px;
-}
-
-.catalogue-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 25px;
-  align-items: start;
-}
-
-.book-card {
-  background: var(--card-bg, #fff);
-  border-radius: 4px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-  display: flex;
-  cursor: pointer;
-  overflow: hidden;
-  border: 1px solid var(--card-border, rgba(0, 0, 0, 0.06));
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-  height: 160px;
-}
-
-.book-card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 25px rgba(37, 9, 6, 0.25);
-}
-
-.card-spine {
-  width: 35px;
-  background: var(--mahogany);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.card-sl {
-  color: var(--gold);
-  font-weight: 900;
-  font-size: 11px;
-  transform: rotate(-90deg);
-  white-space: nowrap;
-}
-
-.card-body {
-  flex-grow: 1;
-  padding: 15px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  overflow: hidden;
-}
-
-.card-meta {
-  font-size: 11px;
-  text-transform: uppercase;
-  font-weight: 800;
-  color: var(--card-meta, #555);
+  font-weight: 500; 
   letter-spacing: 0.5px;
 }
 
-.card-meta strong {
-  color: var(--blood);
-  font-weight: 900;
+.ledger-table-wrapper {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
 }
 
-.card-meta span {
-  opacity: 0.7;
-  margin: 0 4px;
+.ledger-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
 }
 
-.card-title {
-  font-family: 'Playfair Display', serif;
-  font-size: 16px;
-  color: var(--card-text, var(--ink));
-  margin: 5px 0;
-  font-weight: 900;
-  line-height: 1.2;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.card-author {
+.ledger-table th {
+  background: #161616;
+  color: #cfb997;
   font-size: 12px;
-  color: var(--card-text, #555);
-  opacity: 0.8;
-  margin: 0;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #282828;
+}
+
+.ledger-row {
+  border-bottom: 1px solid #1c1c1c;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.ledger-row:hover {
+  background: #181715;
+}
+
+.ledger-row td {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #c5c5c5;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 10px;
-  border-top: 1px solid var(--card-border, rgba(0, 0, 0, 0.05));
-  padding-top: 8px;
-  background: var(--card-foot, transparent);
+.col-sl, .cell-sl { width: 80px; font-family: monospace; color: #8c8c8c !important; }
+.col-work-id, .cell-work-id { width: 90px; font-family: monospace; color: #cfb997 !important; }
+.col-acc, .cell-acc { width: 140px; }
+.col-title { max-width: 300px; }
+.cell-title { font-weight: 500; color: #e0e0e0 !important; }
+.col-author, .cell-author { max-width: 200px; }
+.col-cat, .cell-cat { width: 130px; }
+.col-shelf, .cell-shelf { width: 100px; }
+.col-id, .cell-id { width: 180px; font-family: monospace; color: #555555 !important; font-size: 12px !important; }
+
+.acc-pill {
+  background: #1a221f;
+  color: #10b981;
+  font-family: monospace;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid #142e24;
 }
 
-.badge-shelf {
-  font-size: 10px;
-  font-weight: 800;
-  background: rgba(37, 9, 6, 0.08);
-  color: var(--mahogany);
+.cat-tag {
+  background: #1b1916;
+  color: #cfb997;
+  font-size: 12px;
   padding: 2px 6px;
   border-radius: 3px;
-}
-
-.badge-id {
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--card-text, #777);
-  opacity: 0.6;
+  border: 1px solid #2a251e;
 }
 
 .vault-loader, .empty-catalogue {
@@ -448,26 +324,14 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--mahogany);
-  font-style: italic;
-}
-
-.loading-more-indicator {
-  text-align: center;
-  padding: 20px 0;
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--mahogany);
-  text-transform: uppercase;
-  letter-spacing: 1px;
+  font-size: 15px;
+  color: #8c8c8c;
 }
 
 .catalogue-footer {
-  padding: 15px 40px; 
-  background: rgba(0, 0, 0, 0.04); 
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  padding: 16px 32px; 
+  background: #141414; 
+  border-top: 1px solid #1c1c1c;
   display: flex; 
   justify-content: center; 
   align-items: center;
@@ -477,25 +341,32 @@ onMounted(() => {
 .pagination-matrix {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .btn-matrix-nav, .btn-matrix-number {
-  background: transparent;
-  border: 1px solid var(--mahogany);
-  color: var(--mahogany);
-  font-size: 11px;
-  font-weight: 900;
-  text-transform: uppercase;
+  background: #161616;
+  border: 1px solid #282828;
+  color: #a3a3a3;
+  font-size: 12px;
+  font-weight: 500;
   padding: 6px 12px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  min-width: 35px;
+  border-radius: 3px;
+  transition: all 0.15s ease;
+  min-width: 32px;
 }
 
-.btn-matrix-number.active, .btn-matrix-nav:hover:not(:disabled), .btn-matrix-number:hover {
-  background: var(--mahogany);
-  color: #fff;
+.btn-matrix-number.active {
+  background: #cfb997;
+  color: #121212;
+  border-color: #cfb997;
+  font-weight: 600;
+}
+
+.btn-matrix-nav:hover:not(:disabled), .btn-matrix-number:hover:not(.active) {
+  border-color: #cfb997;
+  color: #cfb997;
 }
 
 .btn-matrix-nav:disabled {
@@ -504,8 +375,7 @@ onMounted(() => {
 }
 
 .matrix-ellipsis {
-  color: var(--mahogany);
-  font-weight: 900;
+  color: #444444;
   padding: 0 4px;
 }
 </style>
