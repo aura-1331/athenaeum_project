@@ -1,268 +1,596 @@
-<script setup>
-import { ref, onMounted, onUnmounted, computed } from "vue"
+<template>
+  <div class="control-panel-layout">
+    <div v-if="loading" class="vault-loader">
+      <div class="minimal-spinner"></div>
+      <span class="loading-label">RETRIEVING_WRITE_AUTHORIZATION</span>
+    </div>
+
+    <div v-else-if="editableBook" class="panel-container">
+      
+      <aside class="identity-anchor-panel">
+        <div class="panel-badge">REVISION_STATION_01</div>
+        
+        <div class="hero-identity-block">
+          <span class="meta-label">CURRENTLY_EDITING</span>
+          <h1 class="display-title">{{ editableBook.title }}</h1>
+          <p class="display-author">BY {{ editableBook.author || 'UNKNOWN' }}</p>
+        </div>
+
+        <div class="system-status-matrix">
+          <div class="status-node">
+            <span>REGISTRY_RANK</span>
+            <strong class="rank-badge">{{ auditData.userRole }}</strong>
+          </div>
+          <div class="status-node">
+            <span>INDEX_MARKER</span>
+            <strong class="font-mono">#{{ editableBook.serial_no }}</strong>
+          </div>
+        </div>
+
+        <div class="panel-actions-stack">
+          <button class="btn btn-filled" @click="triggerActionConfirm('commit')">COMMIT_CHANGES</button>
+          <button class="btn btn-outline" @click="triggerActionConfirm('abort')">ABORT_TRANSACTION</button>
+        </div>
+      </aside>
+
+      <main class="form-feed-column">
+        <div class="form-scroll-wrapper">
+          
+          <fieldset class="form-fieldset">
+            <legend class="fieldset-legend">01 // CORE SYSTEM IDENTITY</legend>
+            
+            <div class="form-row">
+              <div class="field-container full-width">
+                <label class="input-label">ASSET_TITLE_REGISTER</label>
+                <input type="text" v-model="editableBook.title" class="panel-input font-emphasis" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="field-container full-width">
+                <label class="input-label">PRIMARY_CREATOR_ORIGIN</label>
+                <input type="text" v-model="editableBook.author" class="panel-input" />
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset 
+            v-if="auditData.userRole === 'The Chief' || auditData.userRole === 'The Keeper'" 
+            class="form-fieldset"
+          >
+            <legend class="fieldset-legend">02 // REGISTRY TOKENS & CLEARANCE</legend>
+            
+            <div class="form-row split-2">
+              <div class="field-container disabled-container">
+                <label class="input-label">RECORD_IDENTIFIER (LOCKED)</label>
+                <div class="static-value font-mono">{{ editableBook.record_id }}</div>
+              </div>
+              <div class="field-container disabled-container">
+                <label class="input-label">DATABASE_WORK_ID (LOCKED)</label>
+                <div class="static-value font-mono text-amber">{{ editableBook.work_id }}</div>
+              </div>
+            </div>
+
+            <div class="form-row split-2">
+              <div class="field-container disabled-container">
+                <label class="input-label">ACCESSION_SEQUENCE_NO (LOCKED)</label>
+                <div class="static-value font-mono text-blue">{{ editableBook.accession_no }}</div>
+              </div>
+              <div class="field-container disabled-container">
+                <label class="input-label">SERIAL_INDEX_SEQUENCE (LOCKED)</label>
+                <div class="static-value font-mono text-magenta">{{ editableBook.serial_no }}</div>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset 
+            v-if="auditData.userRole === 'The Chief' || auditData.userRole === 'The Keeper'" 
+            class="form-fieldset"
+          >
+            <legend class="fieldset-legend">03 // PHYSICAL SPATIAL VECTORS</legend>
+            
+            <div class="form-row split-2">
+              <div class="field-container contextual-bg">
+                <label class="input-label">SHELF_LOCATION_COORDINATES</label>
+                <input type="text" v-model="editableBook.shelf" class="panel-input font-mono font-bold" />
+              </div>
+              <div class="field-container contextual-bg">
+                <label class="input-label">CALL_SIGNATURE_MARKER</label>
+                <input type="text" v-model="editableBook.call_no" class="panel-input font-mono font-bold" />
+              </div>
+            </div>
+
+            <div class="form-row split-3">
+              <div class="field-container">
+                <label class="input-label">TEXT_LANGUAGE</label>
+                <input type="text" v-model="editableBook.language" class="panel-input size-compact" />
+              </div>
+              <div class="field-container">
+                <label class="input-label">SOURCE_ORIGIN</label>
+                <input type="text" v-model="editableBook.original_language" class="panel-input size-compact" />
+              </div>
+              <div class="field-container">
+                <label class="input-label">CLASSIFICATION</label>
+                <input type="text" v-model="editableBook.genre" class="panel-input size-compact" />
+              </div>
+            </div>
+
+            <div class="form-row split-3">
+              <div class="field-container">
+                <label class="input-label">IMPRINT_PUBLISHER</label>
+                <input type="text" v-model="editableBook.publisher" class="panel-input size-compact" />
+              </div>
+              <div class="field-container">
+                <label class="input-label">TEMPORAL_EPOCH</label>
+                <input type="text" v-model="editableBook.year" class="panel-input size-compact font-mono" />
+              </div>
+              <div class="field-container">
+                <label class="input-label">ISBN_IDENTIFIER</label>
+                <input type="text" v-model="editableBook.isbn" class="panel-input size-compact font-mono" />
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="form-fieldset">
+            <legend class="fieldset-legend">04 // ADMINISTRATIVE CURATORIAL LOG</legend>
+            <div class="form-row">
+              <div class="field-container full-width plaintext-wrapper">
+                <label class="input-label">REVISE_NOTATIONS_REMARKS</label>
+                <textarea v-model="editableBook.notes" class="panel-textarea" rows="6"></textarea>
+              </div>
+            </div>
+          </fieldset>
+
+        </div>
+      </main>
+
+    </div>
+
+    <div v-if="activeModalType" class="modal-overlay-shroud">
+      <div class="modal-alert-box" :class="activeModalType === 'commit' ? 'border-emerald' : 'border-crimson'">
+        <div class="modal-tag">SYSTEM_TRANSACTION_ALERT</div>
+        
+        <h3 class="modal-heading">
+          {{ activeModalType === 'commit' ? 'CONFIRM WRITE OPERATION?' : 'ABORT CURRENT TRANSACTION?' }}
+        </h3>
+        
+        <p class="modal-body-text">
+          {{ activeModalType === 'commit' 
+              ? 'You are committing new modifications to the centralized database matrix. This record will update across all client node networks.' 
+              : 'You are abandoning all pending modifications. Uncommitted form changes will be completely deleted from temporary session memory.' 
+          }}
+        </p>
+
+        <div class="countdown-ticker-bar">
+          AUTO-RESOLVING IN: <span class="ticker-value">{{ countdownTimerSeconds }}s</span>
+        </div>
+
+        <div class="modal-button-row">
+          <button 
+            class="m-btn m-btn-confirm" 
+            :class="activeModalType === 'commit' ? 'bg-emerald' : 'bg-crimson'"
+            @click="executeConfirmedAction"
+          >
+            EXECUTE
+          </button>
+          <button class="m-btn m-btn-dismiss" @click="closeModalPrompt">
+            DISMISS
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted, onBeforeUnmount } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import axios from "axios"
 
 const route = useRoute()
 const router = useRouter()
-
-// --- 1. ROLE DEFINITION ---
-// Set to "staff" to test locking; set to "architect" to unlock sensitive controls.
-const userRole = ref("staff") 
-const isArchitect = computed(() => userRole.value === 'architect')
-
-const item = ref({
-  serial_no: '', accession_no: '', title: '', language: '',
-  category: '', author: '', original_language: '', translation_compilation: '',
-  genre: '', ddc: '', call_no: '', isbn: '', shelf: '',
-  publisher: '', year: '', notes: ''
-})
-
-const originalItem = ref(null)
 const loading = ref(true)
-const showToast = ref(false)
-const showLeaveConfirm = ref(false)
+const editableBook = ref<any>(null)
 
-const isDirty = computed(() => {
-  if (!originalItem.value) return false
-  return JSON.stringify(item.value) !== JSON.stringify(originalItem.value)
+// Confirmation HUD Reactive State Controllers
+const activeModalType = ref<string | null>(null) // Values: 'commit', 'abort', or null
+const countdownTimerSeconds = ref<number>(0)
+let nativeIntervalReference: any = null
+
+const auditData = ref({
+  deviceID: "EDITORIAL-CARDS-STATION-01",
+  ip: "192.168.1.105", 
+  userName: "System Archivist",
+  userRole: "The Chief" 
 })
 
-async function loadData() {
+async function fetchRecordData() {
   loading.value = true
+  const id = route.params.id
   try {
-    const res = await axios.get(`/catalogue/${route.params.id}`)
-    item.value = res.data 
-    originalItem.value = JSON.parse(JSON.stringify(res.data))
+    const response = await axios.get(`/catalogue/${id}`)
+    editableBook.value = { ...response.data }
   } catch (err) {
-    console.error("❌ Archive Access Error:", err)
+    console.error("Database loading exception:", err)
   } finally {
     loading.value = false
   }
 }
 
-async function handleSave() {
-  if (!isDirty.value) return
-  if (!confirm("AUTHORIZE ATOMIC UPDATE: Commit changes to the Master Ledger?")) return
+function triggerActionConfirm(actionType: 'commit' | 'abort') {
+  // Clear any dangling interval tasks running in the loop context
+  if (nativeIntervalReference) clearInterval(nativeIntervalReference)
   
-  try {
-    await axios.patch(`/catalogue/${route.params.id}`, item.value)
-    if (window.__TAURI_INTERNALS__) {
-      const { emit } = await import('@tauri-apps/api/event')
-      await emit('record-updated', { id: route.params.id }) 
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke("close_current_window")
-    } else {
-      showToast.value = true
-      setTimeout(() => router.back(), 1200)
+  activeModalType.value = actionType
+  countdownTimerSeconds.value = 10 // Sets 10-second auto-action window tracking constraint
+  
+  nativeIntervalReference = setInterval(() => {
+    countdownTimerSeconds.value--
+    if (countdownTimerSeconds.value <= 0) {
+      clearInterval(nativeIntervalReference)
+      executeConfirmedAction()
     }
+  }, 1000)
+}
+
+function executeConfirmedAction() {
+  const targetAction = activeModalType.value
+  closeModalPrompt()
+  
+  if (targetAction === 'commit') {
+    saveRecord()
+  } else if (targetAction === 'abort') {
+    cancelEdit()
+  }
+}
+
+function closeModalPrompt() {
+  if (nativeIntervalReference) clearInterval(nativeIntervalReference)
+  activeModalType.value = null
+}
+
+async function saveRecord() {
+  const id = route.params.id || editableBook.value?.serial_no
+  try {
+    await axios.patch(`/catalogue/${id}`, editableBook.value)
+    router.push(`/details/${id}`)
   } catch (err) {
-    alert("TRANSACTION FAILED: " + (err.response?.data?.detail || "Error"))
+    console.error("Transaction commit rejected:", err)
+    alert("Write Failure: Transaction aborted or field formatting rules syntax error.")
   }
 }
 
-function handleCancel() {
-  if (isDirty.value) {
-    showLeaveConfirm.value = true
-  } else {
-    router.back()
-  }
+function cancelEdit() {
+  router.push(`/details/${route.params.id}`)
 }
 
-function confirmLeave() {
-  showLeaveConfirm.value = false
-  router.back()
-}
-
-// --- SECURE CLEAR LOGIC ---
-function handleClear() {
-  // HARD BLOCK: Refuses to run if userRole is not architect
-  if (!isArchitect.value) {
-    alert("RESTRICTED ACTION: Architect level authorization is required to clear this ledger.");
-    return;
-  }
-
-  if (confirm("ARCHITECT AUTHORIZATION: This will wipe all editable metadata. Proceed?")) {
-    const s = item.value.serial_no;
-    const a = item.value.accession_no;
-
-    item.value = {
-      ...item.value,
-      title: '', language: '', category: '', author: '',
-      genre: '', publisher: '', year: '', isbn: '',
-      shelf: '', notes: '', translation_compilation: '',
-      ddc: '', call_no: '', original_language: ''
-    };
-
-    // Restore primary keys immediately
-    item.value.serial_no = s;
-    item.value.accession_no = a;
-  }
-}
-
-const handleGlobalKeys = (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-    e.preventDefault()
-    if (isDirty.value) handleSave()
-  }
-  if (e.key === 'Escape') handleCancel()
-}
-
-onMounted(() => {
-  loadData();
-  window.addEventListener('keydown', handleGlobalKeys);
+onBeforeUnmount(() => {
+  if (nativeIntervalReference) clearInterval(nativeIntervalReference)
 })
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleGlobalKeys);
-})
+onMounted(() => fetchRecordData())
 </script>
 
-<template>
-  <div class="edit-container">
-    <Transition name="fade">
-      <div v-if="showToast" class="toast-popup">✓ Master Ledger Synchronized</div>
-    </Transition>
-
-    <div class="edit-card">
-      <header class="athenaeum-header">
-        <div class="motto">NON OMNIA SCRIBUNTUR SED OMNIA SERVANTUR</div>
-        <div class="main-title">
-          <div class="ao-logo">Athenaeum Orbis</div>
-          <div class="title-text">Master Records Editor</div>
-        </div>
-      </header>
-
-      <div class="edit-nav-bar">
-        <button 
-          type="button" 
-          @click="handleClear" 
-          :disabled="!isArchitect" 
-          class="btn-nav-clear"
-        >
-          {{ isArchitect ? 'RESET FORM' : 'RESET LOCKED' }}
-        </button>
-
-        <button type="button" @click="handleCancel" class="btn-nav-back">← BACK TO CATALOGUE</button>
-
-        <div class="edit-status">
-          <span class="status-dot" :class="{ 'is-dirty': isDirty }"></span>
-          {{ isDirty ? 'UNSAVED CHANGES' : 'RECORD SYNCED' }}
-          <span v-if="isArchitect" class="role-badge">ARCHITECT ACCESS</span>
-        </div>
-      </div>
-
-      <div v-if="loading" class="loading-text">Accessing Archives...</div>
-
-      <form v-else @submit.prevent="handleSave" class="ledger-form">
-        <div class="form-grid">
-          <div class="input-box">
-            <label>Serial No {{ isArchitect ? '' : '(Locked)' }}</label>
-            <input v-model="item.serial_no" :readonly="!isArchitect" :class="{ 'readonly-field': !isArchitect }">
-          </div>
-          <div class="input-box">
-            <label>Accession No {{ isArchitect ? '' : '(Locked)' }}</label>
-            <input v-model="item.accession_no" :readonly="!isArchitect" :class="{ 'readonly-field': !isArchitect }">
-          </div>
-          <div class="input-box">
-            <label>ISBN Identifier</label>
-            <input v-model="item.isbn">
-          </div>
-
-          <div class="input-box full-width">
-            <label>Book Title</label>
-            <input v-model="item.title" required>
-          </div>
-
-          <div class="input-box"><label>Author</label><input v-model="item.author"></div>
-          <div class="input-box"><label>Language</label><input v-model="item.language"></div>
-          <div class="input-box"><label>Original Language</label><input v-model="item.original_language"></div>
-          <div class="input-box"><label>Category</label><input v-model="item.category"></div>
-          <div class="input-box"><label>Genre</label><input v-model="item.genre"></div>
-          <div class="input-box"><label>DDC Index</label><input v-model="item.ddc"></div>
-          <div class="input-box"><label>Publisher</label><input v-model="item.publisher"></div>
-          <div class="input-box"><label>Year of Release</label><input v-model="item.year"></div>
-          <div class="input-box"><label>Call Number</label><input v-model="item.call_no"></div>
-          <div class="input-box"><label>Shelf Location</label><input v-model="item.shelf"></div>
-          
-          <div class="input-box full-width">
-             <label>Translation / Compilation Details</label>
-             <input v-model="item.translation_compilation">
-          </div>
-
-          <div class="input-box full-width">
-            <label>Curator Notes & Administrative Annotations</label>
-            <textarea v-model="item.notes" rows="4"></textarea>
-          </div>
-        </div>
-
-        <div class="action-btns">
-          <button type="submit" class="save-btn" :disabled="!isDirty">Save Ledger Update</button>
-          <button type="button" @click="handleCancel" class="cancel-btn">Discard Changes</button>
-        </div>
-      </form>
-    </div>
-
-    <div v-if="showLeaveConfirm" class="confirm-overlay">
-      <div class="confirm-box">
-        <h3>Unsaved Changes</h3>
-        <p>Leaving will discard your current ledger updates.</p>
-        <div class="confirm-actions">
-          <button class="btn-discard" @click="confirmLeave">Discard & Exit</button>
-          <button class="btn-stay" @click="showLeaveConfirm = false">Return</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
-
 <style scoped>
-.edit-container { display: block; padding: 40px 20px; background: #064e3b; min-height: 100vh; overflow-y: auto; color: #fff; }
-.edit-card { background: rgba(0, 0, 0, 0.5); padding: 40px; border-radius: 8px; width: 100%; max-width: 1200px; margin: 0 auto 40px; border-left: 8px solid #fbbf24; box-shadow: 0 30px 60px rgba(0,0,0,0.5); }
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=JetBrains+Mono:wght@400;700&display=swap');
 
-/* HEADER */
-.athenaeum-header { text-align: center; margin-bottom: 40px; padding-bottom: 30px; border-bottom: 1px solid rgba(251, 191, 36, 0.2); }
-.motto { color: #2dd4bf; letter-spacing: 6px; font-size: 0.75rem; font-weight: 800; margin-bottom: 15px; }
-.main-title { display: flex; align-items: center; justify-content: center; gap: 15px; background: #fbbf24; padding: 12px 30px; border-radius: 4px; display: inline-flex; }
-.ao-logo { color: #064e3b; font-family: 'Playfair Display', serif; font-weight: 900; font-size: 1.8rem; text-transform: uppercase; }
-.title-text { color: #fbbf24; background: #064e3b; font-weight: 800; font-size: 0.9rem; padding: 5px 12px; border-radius: 3px; text-transform: uppercase; }
+.control-panel-layout {
+  background-color: #111216;
+  color: #e2e4e9;
+  
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 9999 !important;
+  
+  display: flex;
+  overflow: hidden;
+  font-family: 'JetBrains Mono', monospace;
+  -webkit-font-smoothing: antialiased;
+  margin: 0 !important;
+  padding: 0 !important;
+}
 
-/* NAV BAR */
-.edit-nav-bar { display: flex; justify-content: space-between; align-items: center; padding: 15px 0; margin-bottom: 40px; border-bottom: 1px double rgba(251, 191, 36, 0.3); }
-.btn-nav-back { background: transparent; border: none; color: #fbbf24; font-size: 10px; font-weight: 700; cursor: pointer; opacity: 0.8; }
-.btn-nav-back:hover { opacity: 1; text-decoration: underline; }
+.panel-container {
+  display: flex;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
 
-.edit-status { font-size: 10px; font-weight: 800; letter-spacing: 2px; color: #9ca3af; display: flex; align-items: center; gap: 8px; }
-.status-dot { width: 6px; height: 6px; border-radius: 50%; background: #2dd4bf; }
-.status-dot.is-dirty { background: #fbbf24; box-shadow: 0 0 8px #fbbf24; }
-.role-badge { background: #fbbf24; color: #000; padding: 2px 6px; border-radius: 2px; font-size: 9px; margin-left: 10px; }
+/* LEFT COLUMN STYLES */
+.identity-anchor-panel {
+  width: 420px;
+  background-color: #0a0b0d !important;
+  border-right: 1px solid #1c1f26 !important;
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
 
-/* PROTECTED RESET BUTTON */
-.btn-nav-clear { background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 6px 15px; border-radius: 4px; font-size: 10px; font-weight: 800; cursor: pointer; text-transform: uppercase; transition: 0.3s; }
-.btn-nav-clear:disabled { opacity: 0.25; color: #64748b; border-color: #64748b; cursor: not-allowed; filter: grayscale(1); }
-.btn-nav-clear:not(:disabled):hover { background: #ef4444; color: #fff; box-shadow: 0 0 15px rgba(239, 68, 68, 0.4); }
+.panel-badge {
+  font-size: 10px;
+  font-weight: bold;
+  color: #525966;
+  letter-spacing: 2px;
+  margin-bottom: 40px;
+}
 
-/* FORM GRID */
-.ledger-form { background: rgba(0, 0, 0, 0.2); padding: 40px; border-radius: 4px; }
-.form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 30px 25px; }
-.full-width { grid-column: span 3; }
-.input-box label { display: block; color: #fbbf24; font-size: 10px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; }
-input { width: 100%; padding: 10px 0; background: transparent !important; border: none !important; border-bottom: 1px solid rgba(251, 191, 36, 0.3) !important; color: #2dd4bf; font-family: 'Courier New', monospace; font-size: 16px; border-radius: 0 !important; }
-input:focus { outline: none; border-bottom: 2px solid #fbbf24 !important; background: rgba(251, 191, 36, 0.05) !important; }
-.readonly-field { color: #64748b !important; border-bottom: 1px dashed rgba(255, 255, 255, 0.1) !important; cursor: not-allowed; }
-textarea { width: 100%; background: rgba(0, 0, 0, 0.2); border: 1px solid rgba(251, 191, 36, 0.2); color: #e2e8f0; padding: 15px; font-family: 'Courier New', monospace; font-size: 15px; resize: vertical; border-radius: 4px; }
+.hero-identity-block {
+  margin-bottom: auto;
+}
 
-/* ACTIONS */
-.action-btns { display: flex; gap: 20px; margin-top: 50px; }
-.save-btn { background: #fbbf24; color: #064e3b; flex: 2; padding: 16px; border: none; font-weight: 900; text-transform: uppercase; cursor: pointer; border-radius: 4px; }
-.save-btn:disabled { opacity: 0.2; cursor: default; }
-.cancel-btn { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.2); flex: 1; padding: 16px; cursor: pointer; border-radius: 4px; }
+.meta-label {
+  font-size: 9px;
+  color: #626a7a;
+  letter-spacing: 1px;
+  display: block;
+  margin-bottom: 8px;
+}
 
-/* MODALS */
-.confirm-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.confirm-box { background: #064e3b; border: 2px solid #fbbf24; padding: 40px; border-radius: 8px; text-align: center; max-width: 400px; }
-.confirm-actions { display: flex; gap: 15px; margin-top: 25px; }
-.btn-discard { background: #ef4444; color: white; border: none; padding: 10px 20px; flex: 1; cursor: pointer; font-weight: bold; }
-.btn-stay { background: #fbbf24; color: #064e3b; border: none; padding: 10px 20px; flex: 1; cursor: pointer; font-weight: bold; }
-.toast-popup { position: fixed; bottom: 30px; right: 30px; background: #2dd4bf; color: #064e3b; padding: 15px 30px; border-radius: 4px; font-weight: 800; }
+.display-title {
+  font-family: 'Cinzel', serif;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: #ffffff;
+  margin: 0 0 12px 0;
+}
+
+.display-author {
+  font-size: 12px;
+  color: #a3a8b4;
+  margin: 0;
+}
+
+.system-status-matrix {
+  background-color: #111216;
+  border: 1px solid #1c1f26;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.status-node {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.status-node span { color: #525966; font-weight: bold; }
+.rank-badge { color: #10b981; text-transform: uppercase; }
+
+.panel-actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.btn {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 14px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: center;
+  transition: background-color 0.15s ease;
+}
+
+.btn-filled { background-color: #e2e4e9; color: #111216; }
+.btn-filled:hover { background-color: #cdd1da; }
+.btn-outline { border: 1px solid #2e333d; color: #e2e4e9; background: transparent; }
+.btn-outline:hover { background-color: rgba(255,255,255,0.03); }
+
+/* RIGHT COLUMN STYLES */
+.form-feed-column {
+  flex-grow: 1;
+  height: 100%;
+  overflow-y: auto;
+  background-color: #111216;
+}
+
+.form-scroll-wrapper {
+  padding: 48px 64px 64px 64px;
+  max-width: 900px;
+  box-sizing: border-box;
+}
+
+.form-feed-column::-webkit-scrollbar { width: 6px; }
+.form-feed-column::-webkit-scrollbar-track { background: #111216; }
+.form-feed-column::-webkit-scrollbar-thumb { background: #22252e; border-radius: 3px; }
+
+.form-fieldset {
+  border: none;
+  margin: 0 0 40px 0;
+  padding: 0;
+}
+
+.fieldset-legend {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #626a7a;
+  border-bottom: 1px solid #22252e;
+  width: 100%;
+  padding-bottom: 12px;
+  margin-bottom: 24px;
+}
+
+.form-row {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.form-row:last-child { margin-bottom: 0; }
+.split-2 > .field-container { width: 50%; }
+.split-3 > .field-container { width: 33.33%; }
+.full-width { width: 100%; }
+
+.field-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  padding: 14px 18px;
+  border-radius: 8px;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease;
+}
+
+.field-container:focus-within {
+  border-color: #4a5263;
+}
+
+.disabled-container {
+  background-color: #12141a !important;
+  border-color: #1c1f26 !important;
+}
+
+.contextual-bg {
+  background-color: #13151b;
+  border-color: #1e212a;
+}
+
+.input-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #525966;
+  letter-spacing: 0.5px;
+}
+
+.panel-input {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 14px;
+  padding: 2px 0 0 0;
+  width: 100%;
+}
+
+.panel-input:focus {
+  outline: none;
+}
+
+.font-emphasis {
+  font-family: 'Cinzel', serif;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.static-value {
+  font-size: 13px;
+  color: #444a57 !important;
+  font-weight: 700;
+  padding-top: 2px;
+}
+
+.font-bold { font-weight: bold; }
+.size-compact { font-size: 13px; }
+
+.text-amber { color: #f59e0b; }
+.text-blue { color: #3b82f6 !important; }
+.text-magenta { color: #ec4899 !important; }
+
+.plaintext-wrapper { padding: 16px; }
+
+.panel-textarea {
+  background: transparent;
+  border: none;
+  color: #e2e4e9;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+  padding-top: 4px;
+}
+
+.panel-textarea:focus {
+  outline: none;
+}
+
+/* TRANSACTION HUD OVERLAY MODAL STYLES */
+.modal-overlay-shroud {
+  position: fixed;
+  top: 0; left: 0; width: 100vw; height: 100vh;
+  background-color: rgba(10, 11, 13, 0.85);
+  backdrop-filter: blur(4px);
+  z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.modal-alert-box {
+  background-color: #16181f;
+  border-top: 4px solid #22252e;
+  padding: 40px;
+  border-radius: 8px;
+  width: 100%; max-width: 480px;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column;
+}
+
+.border-emerald { border-top-color: #10b981; }
+.border-crimson { border-top-color: #ef4444; }
+
+.modal-tag {
+  font-size: 10px; font-weight: 700; color: #525966; letter-spacing: 2px; margin-bottom: 16px;
+}
+
+.modal-heading {
+  font-size: 18px; font-weight: 700; color: #ffffff; margin: 0 0 16px 0; letter-spacing: 0.5px;
+}
+
+.modal-body-text {
+  font-size: 13px; line-height: 1.6; color: #a3a8b4; margin: 0 0 24px 0;
+}
+
+.countdown-ticker-bar {
+  background-color: #111216; border: 1px solid #1c1f26; padding: 12px; border-radius: 4px;
+  font-size: 11px; font-weight: bold; color: #626a7a; text-align: center; margin-bottom: 32px; letter-spacing: 0.5px;
+}
+
+.ticker-value { color: #ffffff; }
+
+.modal-button-row { display: flex; justify-content: flex-end; gap: 16px; }
+
+.m-btn {
+  font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer;
+}
+
+.bg-emerald { background-color: #10b981; color: #ffffff; }
+.bg-emerald:hover { background-color: #059669; }
+.bg-crimson { background-color: #ef4444; color: #ffffff; }
+.bg-crimson:hover { background-color: #dc2626; }
+
+.m-btn-dismiss { background-color: transparent; border: 1px solid #2e333d; color: #e2e4e9; }
+.m-btn-dismiss:hover { background-color: rgba(255,255,255,0.03); }
+
+.vault-loader {
+  width: 100%; height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px; background-color: #111216;
+}
+.minimal-spinner {
+  width: 16px; height: 16px; border: 1px solid rgba(226, 228, 233, 0.1);
+  border-top-color: #e2e4e9; border-radius: 50%; animation: spin 0.7s infinite linear;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-label { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: #626a7a; }
 </style>

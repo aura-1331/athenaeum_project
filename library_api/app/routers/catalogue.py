@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from psycopg2.extras import RealDictCursor
 from typing import Optional, List
 from datetime import datetime
+import httpx
 
 router = APIRouter(prefix="/catalogue", tags=["catalogue"])
 
@@ -35,7 +36,154 @@ def generate_record_id(serial_no: int):
     year = datetime.now().year
     return f"AO-REC-{year}-{str(serial_no).zfill(6)}"
 
-# --- ADDED: AUTHOR SEARCH SUGGESTIONS ENDPOINT ---
+def get_language_prefix(language: str) -> str:
+    lang = language.lower().strip()
+    if "malayalam" in lang: return "ML"
+    if "english" in lang: return "EN"
+    if "multi" in lang: return "MU"
+    if lang == "tamil": return "TA"
+    if lang == "telugu": return "TE"
+    if lang == "marathi": return "MR"
+    if lang == "malay": return "MA"
+    return language[:2].upper()
+
+def get_category_code(category: str) -> str:
+    cat = category.strip()
+    if cat == "Fiction": return "FIC"
+    if cat == "Non-Fiction": return "NF"
+    if cat == "Reference": return "REF"
+    if cat == "Religious": return "REL"
+    if cat == "Poetry": return "POE"
+    return "GEN"
+
+def normalize_lang_search(language: str) -> str:
+    lang = language.lower().strip()
+    if "multi" in lang:
+        return "%multi%"
+    return f"%{language}%"
+
+@router.get("/next-numbers")
+def get_next_numbers(language: str, category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT COALESCE(MAX(serial_no), 0) + 1 FROM public.items")
+        next_serial = cur.fetchone()[0]
+
+        lang_prefix = get_language_prefix(language)
+        search_term = normalize_lang_search(language)
+        
+        cur.execute("""
+            SELECT COUNT(*) + 1 
+            FROM public.items i
+            JOIN public.works w ON i.work_id = w.work_id
+            WHERE w.language ILIKE %s
+        """, (search_term,))
+        next_accession_count = cur.fetchone()[0]
+        allocated_accession = f"{lang_prefix}-{next_accession_count}"
+
+        allocated_call = None
+        if category:
+            cat_code = get_category_code(category)
+            lang_initial = lang_prefix if len(lang_prefix) == 2 else language[0].upper()
+            
+            cur.execute("""
+                SELECT COUNT(*) + 1 
+                FROM public.works 
+                WHERE language ILIKE %s AND category = %s
+            """, (search_term, category))
+            next_call_count = cur.fetchone()[0]
+            allocated_call = f"{lang_initial}-{cat_code}-{next_call_count}.0"
+
+        return {
+            "serial_no": next_serial,
+            "accession_no": allocated_accession,
+            "call_no": allocated_call
+        }
+    except Exception as e:
+        print(f"❌ Error calculating structural previews: {e}")
+        raise HTTPException(status_code=500, detail="Calculation of next numbers failed")
+    finally:
+        cur.close()
+        conn.close()
+
+@router.get("/isbn-lookup", response_model=dict)
+async def lookup_isbn(isbn: str, current_user: dict = Depends(get_current_user)):
+    clean_isbn = isbn.replace("-", "").strip()
+    if not clean_isbn:
+        raise HTTPException(status_code=400, detail="Invalid ISBN format provided")
+    
+    headers = {"User-Agent": "AthenaeumOrbisLibrarySystem/1.0"}
+    
+    async with httpx.AsyncClient(headers=headers, timeout=10.0) as client:
+        try:
+            google_url = f"https://www.googleapis.com/books/v1/volumes?q=isbn:{clean_isbn}"
+            google_res = await client.get(google_url)
+            
+            if google_res.status_code == 200:
+                g_data = google_res.json()
+                if "items" in g_data and len(g_data["items"]) > 0:
+                    info = g_data["items"][0]["volumeInfo"]
+                    
+                    authors_list = info.get("authors", [])
+                    author_name = authors_list[0] if authors_list else ""
+                    
+                    pub_date = info.get("publishedDate", "")
+                    pub_year = pub_date.split("-")[0] if pub_date else None
+                    
+                    categories = info.get("categories", [])
+                    extracted_genre = categories[0] if categories else ""
+                    
+                    ddc_val = None
+                    
+                    return {
+                        "title": info.get("title", ""),
+                        "author": author_name,
+                        "publisher": info.get("publisher", ""),
+                        "year": pub_year,
+                        "genre": extracted_genre,
+                        "ddc": ddc_val
+                    }
+        except Exception as e:
+            print(f"⚠️ Google Books API failed or timed out: {e}")
+
+        try:
+            ol_url = f"https://openlibrary.org/api/books?bibkeys=ISBN:{clean_isbn}&format=json&jscmd=data"
+            ol_res = await client.get(ol_url)
+            
+            if ol_res.status_code == 200:
+                ol_data = ol_res.json()
+                book_key = f"ISBN:{clean_isbn}"
+                
+                if book_key in ol_data:
+                    b_info = ol_data[book_key]
+                    
+                    ol_authors = b_info.get("authors", [])
+                    ol_author = ol_authors[0].get("name", "") if ol_authors else ""
+                    
+                    ol_date = b_info.get("publish_date", "")
+                    ol_year = None
+                    if ol_date:
+                        year_match = datetime.strptime(ol_date[-4:], "%Y") if ol_date[-4:].isdigit() else None
+                        if year_match:
+                            ol_year = str(year_match.year)
+                            
+                    ol_publishers = b_info.get("publishers", [])
+                    ol_pub = ol_publishers[0].get("name", "") if ol_publishers else ""
+                    
+                    return {
+                        "title": b_info.get("title", ""),
+                        "author": ol_author,
+                        "publisher": ol_pub,
+                        "year": ol_year,
+                        "genre": None,
+                        "ddc": None
+                    }
+        except Exception as e:
+            print(f"⚠️ Open Library API failed or timed out: {e}")
+            
+    raise HTTPException(status_code=404, detail="No metadata found for this ISBN")
+
 @router.get("/authors/search", response_model=List[str])
 def search_authors(q: str, current_user: dict = Depends(get_current_user)):
     conn = get_connection()
@@ -57,12 +205,57 @@ def search_authors(q: str, current_user: dict = Depends(get_current_user)):
         cur.close()
         conn.close()
 
-# --- ADDED: CREATE AUTHORITY RECORD AND PHYSICAL COPY ENDPOINT ---
+@router.get("/publishers/search", response_model=List[str])
+def search_publishers(q: str, current_user: dict = Depends(get_current_user)):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT DISTINCT publisher 
+            FROM public.works 
+            WHERE publisher ILIKE %s 
+            ORDER BY publisher 
+            LIMIT 10
+        """, (f"%{q}%",))
+        rows = cur.fetchall()
+        return [row[0] for row in rows]
+    except Exception as e:
+        print(f"❌ Database Error: {e}")
+        raise HTTPException(status_code=500, detail="Publisher lookup failed")
+    finally:
+        cur.close()
+        conn.close()
+
 @router.post("/create-work")
 def create_work(payload: WorkCreate, current_user: dict = Depends(get_current_user)):
     conn = get_connection()
     cur = conn.cursor()
     try:
+        lang_prefix = get_language_prefix(payload.language)
+        search_term = normalize_lang_search(payload.language)
+        
+        cur.execute("""
+            SELECT COUNT(*) + 1 
+            FROM public.items i
+            JOIN public.works w ON i.work_id = w.work_id
+            WHERE w.language ILIKE %s
+        """, (search_term,))
+        next_accession_count = cur.fetchone()[0]
+        final_accession_no = f"{lang_prefix}-{next_accession_count}"
+
+        final_call_no = payload.call_no
+        if payload.category and (not final_call_no or final_call_no.endswith('-')):
+            cat_code = get_category_code(payload.category)
+            lang_initial = lang_prefix if len(lang_prefix) == 2 else payload.language[0].upper()
+            
+            cur.execute("""
+                SELECT COUNT(*) + 1 
+                FROM public.works 
+                WHERE language ILIKE %s AND category = %s
+            """, (search_term, payload.category))
+            next_call_count = cur.fetchone()[0]
+            final_call_no = f"{lang_initial}-{cat_code}-{next_call_count}.0"
+
         work_query = """
             INSERT INTO public.works (
                 title, 
@@ -101,25 +294,22 @@ def create_work(payload: WorkCreate, current_user: dict = Depends(get_current_us
                 payload.translation_compilation or None,
                 safe_year,
                 payload.isbn or None,
-                payload.call_no or None
+                final_call_no
             )
         )
         work_id = cur.fetchone()[0]
-
-        cur.execute("SELECT generate_next_accession_no(%s)", (payload.language,))
-        accession_no = cur.fetchone()[0]
 
         item_query = """
             INSERT INTO public.items (
                 work_id, accession_no, call_no, availability_status, is_deleted, created_at
             ) VALUES (%s, %s, %s, 'AVAILABLE', 'f', NOW())
         """
-        cur.execute(item_query, (work_id, accession_no, payload.call_no or None))
+        cur.execute(item_query, (work_id, final_accession_no, final_call_no))
 
         conn.commit()
         return {
             "work_id": work_id,
-            "accession_no": accession_no
+            "accession_no": final_accession_no
         }
     except Exception as e:
         if conn:
@@ -130,7 +320,6 @@ def create_work(payload: WorkCreate, current_user: dict = Depends(get_current_us
         cur.close()
         conn.close()
 
-# --- 1. FETCH SINGLE RECORD (FOR DETAIL & EDIT VIEWS) ---
 @router.get("/{serial_no}")
 def get_book(serial_no: int, current_user: dict = Depends(get_current_user)):
     conn = get_connection()
@@ -140,7 +329,8 @@ def get_book(serial_no: int, current_user: dict = Depends(get_current_user)):
             SELECT  
                 i.serial_no, 
                 i.accession_no, 
-                i.shelf, 
+                i.shelf,
+                i.work_id, 
                 w.language as language,
                 w.title, 
                 w.author, 
@@ -172,7 +362,6 @@ def get_book(serial_no: int, current_user: dict = Depends(get_current_user)):
         cur.close()
         conn.close()
 
-# --- 2. FETCH PAGINATED CATALOGUE (WITH TOTAL COUNT FIX) ---
 @router.get("/")
 def get_catalogue(
     page: int = 1, 
@@ -218,7 +407,6 @@ def get_catalogue(
             params.append(f"%{category}%")
 
         where_clause = " AND ".join(filters)
-        visibility_filter = ""
         
         count_query = f"""
             SELECT COUNT(*) 
@@ -227,12 +415,11 @@ def get_catalogue(
             WHERE {where_clause}
         """
         cur.execute(count_query, params)
-        
         total_records = cur.fetchone()['count']
 
         query = f"""
             SELECT 
-                i.serial_no, i.accession_no, w.title, w.author, 
+                i.serial_no, i.accession_no, i.work_id, w.title, w.author, 
                 w.category, w.genre, w.year, w.publisher, 
                 i.shelf, w.language as language, w.isbn, 
                 w.ddc, w.call_no, 
@@ -261,7 +448,6 @@ def get_catalogue(
         cur.close()
         conn.close()
 
-# --- 3. ATOMIC SELECTIVE UPDATE (STOPS WIPEOUTS) ---
 @router.patch("/{serial_no}")
 async def update_ledger_record(serial_no: int, payload: dict, request: Request, current_user: dict = Depends(get_current_user)):
     if current_user.get('role') != "The Chief":
@@ -322,7 +508,6 @@ async def update_ledger_record(serial_no: int, payload: dict, request: Request, 
         cur.close()
         conn.close()
 
-# --- 4. WORK APPROVAL OPERATIONS ---
 @router.post("/approve/{work_id}", tags=["Admin Operations"])
 async def approve_work(
     work_id: int, action: str, reason: str, request: Request,
@@ -361,7 +546,6 @@ async def approve_work(
         cur.close()
         conn.close()
 
-# --- 5. SOFT DELETE OPERATIONS ---
 @router.delete("/{book_id}", tags=["Catalogue Operations"])
 async def soft_delete_book(
     book_id: int, reason: str, request: Request,

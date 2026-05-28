@@ -35,9 +35,9 @@ const lastUpdated = ref('')
 let timeInterval = null
 
 // --- AUTHENTICATION & USER VARIABLES ---
-const isAuthenticated = ref(true)
-const user_name = ref(localStorage.getItem("user_name") || "System Admin")
-const user_role = ref(localStorage.getItem("user_role") || "The Chief")
+const isAuthenticated = ref(false)
+const user_name = ref("Archive Operator")
+const user_role = ref("The Seeker")
 
 const updateClock = () => {
   const now = new Date()
@@ -66,6 +66,22 @@ function toggleTheme() {
   applyTheme(theme.value)
 }
 
+const checkAuthStatus = () => {
+  const storedToken = localStorage.getItem("access_token") || sessionStorage.getItem("access_token")
+  
+  if (!storedToken) {
+    isAuthenticated.value = false
+    if (route.path !== "/login") {
+      router.push("/login")
+    }
+    return
+  }
+
+  isAuthenticated.value = true
+  user_name.value = localStorage.getItem("user_name") || "Archive Operator"
+  user_role.value = localStorage.getItem("user_role") || "The Seeker"
+}
+
 const handleLogout = () => {
   localStorage.removeItem("access_token")
   localStorage.removeItem("refresh_token")
@@ -80,6 +96,14 @@ const handleLogout = () => {
   router.push("/login")
 }
 
+watch(
+  () => route.path,
+  () => {
+    updateSyncTime()
+    checkAuthStatus()
+  }
+)
+
 onMounted(async () => {
   document.title = "Athenaeum Orbis | Library Management System"
   updateClock()
@@ -90,25 +114,10 @@ onMounted(async () => {
   theme.value = saved
   applyTheme(saved)
 
-  const storedToken = localStorage.getItem("access_token") || sessionStorage.getItem("access_token")
-  if (!storedToken) {
-    isAuthenticated.value = false
-    router.push("/login")
-    return
-  }
-
-  user_name.value = localStorage.getItem("user_name") || "Archive Operator"
-  user_role.value = localStorage.getItem("user_role") || "The Seeker"
+  checkAuthStatus()
 
   window.addEventListener("auth-changed", () => {
-    const activeToken = localStorage.getItem("access_token") || sessionStorage.getItem("access_token")
-    if (activeToken) {
-      isAuthenticated.value = true
-      user_name.value = localStorage.getItem("user_name") || "Archive Operator"
-      user_role.value = localStorage.getItem("user_role") || "The Seeker"
-    } else {
-      isAuthenticated.value = false
-    }
+    checkAuthStatus()
   })
 
   if (window.__TAURI__) {
@@ -125,10 +134,6 @@ onMounted(async () => {
 onUnmounted(() => {
   if (timeInterval) clearInterval(timeInterval)
   if (unlistenNav) unlistenNav()
-})
-
-watch(() => route.path, () => {
-  updateSyncTime()
 })
 </script>
 
@@ -207,9 +212,8 @@ watch(() => route.path, () => {
     </main>
   </div>
 </template>
-<style>
 
-/* --- 1. CORE RESET & THEME BASE --- */
+<style>
 html, body, #app {
   margin: 0;
   padding: 0;
@@ -226,7 +230,6 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   background: var(--content-bg);
 }
 
-/* --- 2. SIDEBAR STRUCTURE --- */
 .sidebar {
   width: 260px;
   height: 100vh;
@@ -245,7 +248,6 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .sidebar::-webkit-scrollbar { width: 3px; }
 .sidebar::-webkit-scrollbar-thumb { background: var(--accent); border-radius: 10px; }
 
-/* --- 3. LOGO & ARCHIVAL SECTION LABELS --- */
 .logo-area { display: flex; align-items: center; gap: 12px; padding: 0 24px; margin-bottom: 50px; }
 
 .ao-seal {
@@ -266,7 +268,6 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   color: var(--text-muted); padding: 20px 20px 8px 24px; opacity: 0.6; font-weight: 700;
 }
 
-/* --- 4. NAVIGATION LINKS --- */
 .nav-links { display: flex; flex-direction: column; gap: 4px; }
 .sidebar a {
   display: flex; align-items: center; gap: 16px; text-decoration: none;
@@ -284,7 +285,6 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   position: relative; 
 }
 
-/* --- 5. MAIN CONTENT (NO GAP - MARGIN SYNCED) --- */
 .content-wrapper {
   flex: 1;
   display: flex;
@@ -305,7 +305,6 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 
 .breadcrumb { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; font-weight: 800; color: var(--text-muted); }
 
-/* --- 6. HEADER ACTIONS & LIVE META --- */
 .header-actions { display: flex; align-items: center; gap: 12px; }
 .live-meta { display: flex; align-items: center; gap: 15px; font-size: 13px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
 
@@ -323,7 +322,6 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .header-icon-btn:hover { color: var(--accent); background: rgba(184, 146, 90, 0.1); }
 .header-icon-btn.exit:hover { color: #f87171; background: rgba(239, 68, 68, 0.1); }
 
-/* --- 7. SIDEBAR USER PROFILE (RESTORED & STACKED) --- */
 .sidebar-user {
   margin-top: auto; padding: 20px; border-top: 1px solid rgba(184, 146, 90, 0.1);
   display: flex; align-items: center; gap: 12px; background: rgba(0, 0, 0, 0.2);
@@ -333,7 +331,6 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .user-name { font-size: 13px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
 .user-role { font-size: 10px; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
 
-/* --- 8. PAGE AREA & ANIMATIONS --- */
 .page-content { flex: 1; padding: 0 !important; overflow-y: auto; background: var(--content-bg); }
 .page-content::-webkit-scrollbar { display: none; }
 
@@ -347,7 +344,6 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 
 @keyframes sync-pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
 
-/* --- 9. SPECIAL THEMES & DETAILS VIEW --- */
 .content-area.full-screen-editor { margin-left: 0 !important; width: 100vw; height: 100vh; z-index: 100; }
 .content-wrapper.no-padding { width: 100vw; margin: 0; padding: 0; }
 
@@ -360,7 +356,6 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 
 .details-window-theme .title { color: #fbbf24 !important; border-bottom: 2px solid #d97706 !important; padding-bottom: 12px; margin-bottom: 30px; text-transform: uppercase; letter-spacing: 2px; font-weight: 800; display: inline-block; }
 
-/* --- 10. OFFICIAL ARCHIVE PRINT LAYOUT (FULLY RESTORED) --- */
 @media print {
   html, body, .app, .content-wrapper, .page-content, .details-page { background: white !important; color: black !important; margin: 0 !important; padding: 0 !important; height: auto !important; width: 100% !important; }
   .library-branding { border-left: 3px solid black !important; }
