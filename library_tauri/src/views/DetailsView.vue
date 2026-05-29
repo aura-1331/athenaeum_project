@@ -21,7 +21,12 @@
     <div v-else-if="book" class="editorial-scroll-frame">
       <header class="master-header">
         <div class="breadcrumb-trail" @click="returnToCatalogue">
-          CENTRAL_INDEX <span class="divider">/</span> {{ book.category }} <span class="divider">/</span> {{ book.genre }}
+          CENTRAL_INDEX <span class="divider">/</span> {{ book.category }} <span class="divider">/</span> 
+          <span class="inline-badge-stack">
+            <span v-for="tag in splitGenres" :key="tag" class="breadcrumb-genre-badge">
+              {{ tag }}
+            </span>
+          </span>
         </div>
         <div class="action-buttons-group">
           <button class="action-trigger text-link" @click="returnToCatalogue">← BACK_TO_INDEX</button>
@@ -103,7 +108,14 @@
           <div class="telemetry-rows-stack">
             <div class="telemetry-node"><span>TEXT LANGUAGE</span><strong>{{ book.language }}</strong></div>
             <div class="telemetry-node"><span>SOURCE LANGUAGE</span><strong>{{ book.original_language || book.language }}</strong></div>
-            <div class="telemetry-node"><span>CLASSIFICATION</span><strong>{{ book.work_nature || book.genre }}</strong></div>
+            <div class="telemetry-node">
+              <span>CLASSIFICATION</span>
+              <div class="inline-badge-stack justify-end">
+                <span v-for="tag in splitGenres" :key="tag" class="metadata-genre-badge">
+                  {{ tag }}
+                </span>
+              </div>
+            </div>
             <div class="telemetry-node"><span>IMPRINT PUBLISHER</span><strong>{{ book.publisher }}</strong></div>
             <div class="telemetry-node"><span>TEMPORAL EPOCH</span><strong>{{ book.year }}</strong></div>
             <div class="telemetry-node"><span>ISBN IDENTIFIER</span><strong>{{ book.isbn || 'N/A' }}</strong></div>
@@ -150,7 +162,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue"
+import { ref, onMounted, watch, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import axios from "axios"
 
@@ -173,6 +185,12 @@ const auditData = ref({
   ip: "192.168.1.105", 
   userName: "System Archivist",
   userRole: "The Chief"
+})
+
+const splitGenres = computed(() => {
+  const raw = book.value?.genre || book.value?.work_nature
+  if (!raw) return ['GENERAL']
+  return raw.split('/').map((g: string) => g.trim().toUpperCase()).filter((g: string) => g.length > 0)
 })
 
 function triggerPrint(layoutName: string) {
@@ -349,11 +367,45 @@ onMounted(() => fetchBookDetails())
   color: #626a7a;
   text-transform: uppercase;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .breadcrumb-trail .divider {
   color: #e2e4e9;
-  margin: 0 8px;
+  margin: 0 4px;
+}
+
+.inline-badge-stack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.justify-end {
+  justify-content: flex-end;
+}
+
+.breadcrumb-genre-badge {
+  font-size: 10px;
+  font-weight: bold;
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  color: #ffffff;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.metadata-genre-badge {
+  font-size: 10px;
+  font-weight: bold;
+  background-color: rgba(236, 72, 153, 0.08);
+  border: 1px solid rgba(236, 72, 153, 0.2);
+  color: #ec4899;
+  padding: 2px 8px;
+  border-radius: 4px;
 }
 
 .action-buttons-group {
@@ -570,7 +622,7 @@ onMounted(() => fetchBookDetails())
 .telemetry-node {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   font-size: 12px;
   border-bottom: 1px solid #1c1f26;
   padding: 10px 12px;
