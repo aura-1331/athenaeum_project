@@ -5,6 +5,19 @@
       <span class="loading-label">SYNCING_NODE_REGISTRY</span>
     </div>
 
+    <div v-else-if="error" class="error-fallback-terminal">
+      <div class="terminal-card-alert">
+        <div class="alert-status-badge">ERROR // DATABASE_ACCESS_REJECTED</div>
+        <h2 class="alert-title">RECORD_NOT_FOUND</h2>
+        <p class="alert-summary">
+          The requested system node sequence ID (#{{ $route.params.id }}) could not be mapped to an active asset matrix ledger footprint.
+        </p>
+        <button class="fallback-return-btn" @click="returnToAuthorsRegistry">
+          ← RETURN_TO_CLASSIFICATION_REGISTRY
+        </button>
+      </div>
+    </div>
+
     <div v-else-if="book" class="editorial-scroll-frame">
       <header class="master-header">
         <div class="breadcrumb-trail" @click="returnToCatalogue">
@@ -88,14 +101,14 @@
             </div>
           </div>
           <div class="telemetry-rows-stack">
-              <div class="telemetry-node"><span>TEXT LANGUAGE</span><strong>{{ book.language }}</strong></div>
-              <div class="telemetry-node"><span>SOURCE LANGUAGE</span><strong>{{ book.original_language || book.language }}</strong></div>
-              <div class="telemetry-node"><span>CLASSIFICATION</span><strong>{{ book.work_nature || book.genre }}</strong></div>
-              <div class="telemetry-node"><span>IMPRINT PUBLISHER</span><strong>{{ book.publisher }}</strong></div>
-              <div class="telemetry-node"><span>TEMPORAL EPOCH</span><strong>{{ book.year }}</strong></div>
-              <div class="telemetry-node"><span>ISBN IDENTIFIER</span><strong>{{ book.isbn || 'N/A' }}</strong></div>
-              <div class="telemetry-node"><span>DDC EXTENSION</span><strong>{{ book.ddc || '---' }}</strong></div>
-            </div>
+            <div class="telemetry-node"><span>TEXT LANGUAGE</span><strong>{{ book.language }}</strong></div>
+            <div class="telemetry-node"><span>SOURCE LANGUAGE</span><strong>{{ book.original_language || book.language }}</strong></div>
+            <div class="telemetry-node"><span>CLASSIFICATION</span><strong>{{ book.work_nature || book.genre }}</strong></div>
+            <div class="telemetry-node"><span>IMPRINT PUBLISHER</span><strong>{{ book.publisher }}</strong></div>
+            <div class="telemetry-node"><span>TEMPORAL EPOCH</span><strong>{{ book.year }}</strong></div>
+            <div class="telemetry-node"><span>ISBN IDENTIFIER</span><strong>{{ book.isbn || 'N/A' }}</strong></div>
+            <div class="telemetry-node"><span>DDC EXTENSION</span><strong>{{ book.ddc || '---' }}</strong></div>
+          </div>
         </section>
 
         <section class="grid-card full-width-notes-card">
@@ -149,6 +162,7 @@ import PrintTechnicalManifest from "@/components/print/PrintTechnicalManifest.vu
 const route = useRoute()
 const router = useRouter()
 const loading = ref(true)
+const error = ref(false)
 const book = ref<any>(null)
 
 const isPrinting = ref(false)
@@ -178,6 +192,7 @@ function generateRecordId(serialNo: number) {
 
 async function fetchBookDetails() {
   loading.value = true
+  error.value = false
   const id = route.params.id
   try {
     const response = await axios.get(`/catalogue/${id}`)
@@ -190,6 +205,7 @@ async function fetchBookDetails() {
     book.value = data
   } catch (err) {
     console.error("Pipeline breakdown:", err)
+    error.value = true
   } finally {
     loading.value = false
   }
@@ -220,6 +236,10 @@ function returnToCatalogue() {
   router.push("/catalogue")
 }
 
+function returnToAuthorsRegistry() {
+  router.push("/classification/authors")
+}
+
 onMounted(() => fetchBookDetails())
 </script>
 
@@ -235,6 +255,71 @@ onMounted(() => fetchBookDetails())
   overflow: hidden !important;
   font-family: 'JetBrains Mono', monospace;
   -webkit-font-smoothing: antialiased;
+}
+
+.error-fallback-terminal {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #111216;
+  padding: 32px;
+  box-sizing: border-box;
+}
+
+.terminal-card-alert {
+  background-color: #16181f;
+  border: 1px solid #ef4444;
+  padding: 48px;
+  border-radius: 12px;
+  max-width: 600px;
+  width: 100%;
+  box-shadow: 0 4px 32px rgba(239, 68, 68, 0.05);
+  text-align: left;
+}
+
+.alert-status-badge {
+  font-size: 10px;
+  font-weight: bold;
+  color: #f87171;
+  letter-spacing: 1.5px;
+  margin-bottom: 24px;
+}
+
+.alert-title {
+  font-size: 28px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0 0 16px 0;
+  letter-spacing: -0.5px;
+}
+
+.alert-summary {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #a3a8b4;
+  margin: 0 0 32px 0;
+}
+
+.fallback-return-btn {
+  background: rgba(245, 158, 11, 0.04);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #f59e0b;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  padding: 12px 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.fallback-return-btn:hover {
+  background-color: #f59e0b;
+  color: #ffffff;
+  border-color: #f59e0b;
 }
 
 .editorial-scroll-frame {
@@ -508,15 +593,6 @@ onMounted(() => fetchBookDetails())
   color: #626a7a;
 }
 
-.telemetry-node th {
-  font-weight: 600;
-  color: #ffffff;
-  max-width: 280px;
-  text-align: right;
-  overflow-wrap: break-word;
-  word-break: normal;
-}
-
 .log-text-area {
   font-size: 13px;
   line-height: 1.6;
@@ -558,7 +634,6 @@ onMounted(() => fetchBookDetails())
   display: none;
 }
 
-
 @media print {
   .athenaeum-vault,
   .editorial-scroll-frame,
@@ -579,6 +654,4 @@ onMounted(() => fetchBookDetails())
     padding: 0 !important;
   }
 }
-
-
 </style>

@@ -11,6 +11,8 @@ import EditItemView from "../views/EditItemView.vue"
 import DetailsView from "../views/DetailsView.vue"
 import SystemSettings from "../views/admin/SystemSettings.vue"
 import Login from "../views/Login.vue"
+import AuthorsView from "../views/AuthorsView.vue"
+import SubjectsView from "../views/SubjectsView.vue"
 
 const routes = [
   { path: "/login", name: "login", component: Login },
@@ -28,7 +30,10 @@ const routes = [
   { path: "/operations/:accession", name: "operations", component: Operations, meta: { requiresAuth: true } },
   { path: "/edit-item/:id", name: "edit-item", component: EditItemView, meta: { requiresAuth: true } },
 
-  { path: "/admin/settings", name: "admin-settings", component: SystemSettings, meta: { requiresAuth: true } }
+  { path: "/admin/settings", name: "admin-settings", component: SystemSettings, meta: { requiresAuth: true } },
+  /* REPLACED: Changed names to single words matching the components */
+  { path: "/classification/authors", name: "Authors", component: AuthorsView, meta: { requiresAuth: true } },
+  { path: "/classification/subjects", name: "Subjects", component: SubjectsView, meta: { requiresAuth: true } }
 ]
 
 const router = createRouter({

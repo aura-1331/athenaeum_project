@@ -350,11 +350,18 @@ def get_book(serial_no: int, current_user: dict = Depends(get_current_user)):
         """
         cur.execute(query, (serial_no,))
         result = cur.fetchone()
-        if result:
-            result["record_id"] = generate_record_id(result["serial_no"])
+        
         if not result:
-            raise HTTPException(status_code=404, detail="Book Record not found")
+            print("❌ Database Error: 404: Book Record not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="Book Record not found"
+            )
+            
+        result["record_id"] = generate_record_id(result["serial_no"])
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"❌ Database Error: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")

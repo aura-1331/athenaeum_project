@@ -26,7 +26,9 @@ const router = useRouter()
 import { listen } from '@tauri-apps/api/event'
 
 let unlistenNav = null
-const isEditing = computed(() => route.path.includes('edit-item'))
+const isEditing = computed(() => {
+  return route.path.includes('edit-item') || route.path.includes('/classification/')
+})
 
 const currentTime = ref('')
 const currentDate = ref('')
@@ -161,12 +163,18 @@ onUnmounted(() => {
         <RouterLink to="/create-item"><BookOpen :size="18" :stroke-width="1.5" /><span>Items</span></RouterLink>
         
         <div class="nav-section-label">Classification</div>
-        <RouterLink to="/authors"><Users :size="18" :stroke-width="1.5" /><span>Authors</span></RouterLink>
-        <RouterLink to="/subjects"><Tag :size="18" :stroke-width="1.5" /><span>Subjects</span></RouterLink>
+          <RouterLink to="/classification/authors">
+            <Users :size="18" :stroke-width="1.5" />
+            <span>Authors</span>
+          </RouterLink>
+          <RouterLink to="/classification/subjects">
+            <Tag :size="18" :stroke-width="1.5" />
+            <span>Subjects</span>
+          </RouterLink>
         
         <div class="nav-section-label">System</div>
-        <RouterLink to="/status-audit"><ShieldCheck :size="18" :stroke-width="1.5" /><span>Audit Trail</span></RouterLink>
-        <RouterLink to="/reports"><LayoutDashboard :size="18" :stroke-width="1.5" /><span>Reports</span></RouterLink>
+          <RouterLink to="/status-audit"><ShieldCheck :size="18" :stroke-width="1.5" /><span>Audit Trail</span></RouterLink>
+          <RouterLink to="/system/reports"><LayoutDashboard :size="18" :stroke-width="1.5" /><span>Reports</span></RouterLink>
       </nav>
 
       <div class="sidebar-user">
@@ -180,7 +188,13 @@ onUnmounted(() => {
       </div>
     </aside>
 
-    <main class="content-wrapper" :class="{ 'no-padding': route.path.includes('/details/'), 'authenticated-layout': isAuthenticated }">
+    <main 
+  class="content-wrapper" 
+  :class="{ 
+    'no-padding': route.path.includes('/details/'), 
+    'authenticated-layout': isAuthenticated && !isEditing 
+  }"
+>
       <header 
         v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" 
         class="global-header"
