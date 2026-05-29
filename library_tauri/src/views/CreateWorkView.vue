@@ -47,6 +47,29 @@ let typingTimer = null
 
 const extraLanguages = ["Arabic", "French", "German", "Russian", "Tamil", "Telugu", "Marathi", "Malay"]
 
+const genreGroupA = ref([
+  "ADVENTURE", "BIOGRAPHY", "CLASSIC", "DETECTIVE", "FANTASY", 
+  "FOLKLORE", "FOLKTALES", "HORROR", "MYSTERY", "NOVEL", 
+  "POETRY", "SATIRE", "SHORT STORIES", "TEMPLE SONGS"
+])
+
+const genreGroupB = ref([
+  "AETHISM", "ANIMAL HUSBANDRY", "AUTOBIOGRAPHY", "COLLECTION OF PROVERBS", 
+  "COLLECTION OF WORKS", "EDUCATIONAL", "ENCYCLOPEDIA", "ENGINEERING", 
+  "FORENSIC INVESTIGATIONS", "FUTURISM", "HISTORY", "HOBBY", "INVESTIGATION", 
+  "MEDICINE (AYURVEDA)", "MEMOIR", "PHILATELY", "PHILOSOPHY", "POLITICS", 
+  "PSYCHOLOGY", "SCIENCE", "SERVICE STORY", "STUDY", "VETERINARY"
+])
+
+const dynamicCommunityGenres = ref([])
+
+const selectedGroupAGenre = ref("")
+const selectedGroupBGenre = ref("")
+const selectedGroupCGenre = ref("")
+
+const showCustomManualGenreField = ref(false)
+const customManualGenreText = ref("")
+
 const isFrozen = computed(() => {
   return duplicateResult.value.severity === "strong" && !adminOverride.value
 })
@@ -78,6 +101,57 @@ const publisherSuggestions = computed(() => {
   return autocompletePublishers.value
 })
 
+const liveCompiledGenreChips = computed(() => {
+  if (!form.value.genre) return []
+  return form.value.genre.split('/').map(g => g.trim().toUpperCase()).filter(g => g.length > 0)
+})
+
+function syncGenreSelection() {
+  if (selectedGroupCGenre.value === "CUSTOM_MANUAL_OVERRIDE") {
+    showCustomManualGenreField.value = true
+    form.value.genre = customManualGenreText.value.trim().toUpperCase()
+    return
+  }
+  
+  showCustomManualGenreField.value = false
+  const activeSelectionArray = []
+  
+  if (selectedGroupAGenre.value) activeSelectionArray.push(selectedGroupAGenre.value)
+  if (selectedGroupBGenre.value) activeSelectionArray.push(selectedGroupBGenre.value)
+  if (selectedGroupCGenre.value && selectedGroupCGenre.value !== "CUSTOM_MANUAL_OVERRIDE") {
+    activeSelectionArray.push(selectedGroupCGenre.value)
+  }
+  
+  form.value.genre = activeSelectionArray.join('/')
+}
+
+function syncManualGenreInput() {
+  form.value.genre = customManualGenreText.value.trim().toUpperCase()
+}
+
+async function harvestSystemGenresMatrix() {
+  try {
+    const response = await axios.get('/catalogue?limit=1000')
+    const items = response.data?.data || []
+    const gatheredSet = new Set()
+
+    items.forEach((item) => {
+      if (!item.genre) return
+      item.genre.split('/').forEach((g) => {
+        const standardToken = g.trim().toUpperCase()
+        if (standardToken && standardToken !== "NO GENRE YET" && standardToken !== "GENERAL") {
+          if (!genreGroupA.value.includes(standardToken) && !genreGroupB.value.includes(standardToken)) {
+            gatheredSet.add(standardToken)
+          }
+        }
+      })
+    })
+    dynamicCommunityGenres.value = Array.from(gatheredSet).sort()
+  } catch (err) {
+    console.error("Failed to dynamically harvest global taxonomy metrics:", err)
+  }
+}
+
 async function fetchNextNumbers() {
   if (!form.value.language_id) return
   try {
@@ -107,7 +181,20 @@ async function handleIsbnLookup(cleanIsbn) {
       if (res.data.author) form.value.author = res.data.author
       if (res.data.publisher) form.value.publisher = res.data.publisher
       if (res.data.year) form.value.year = String(res.data.year)
-      if (res.data.genre) form.value.genre = res.data.genre
+      if (res.data.genre) {
+        form.value.genre = res.data.genre
+        const currentTokens = res.data.genre.split('/').map(g => g.trim().toUpperCase())
+        currentTokens.forEach(token => {
+          if (genreGroupA.value.includes(token)) selectedGroupAGenre.value = token
+          else if (genreGroupB.value.includes(token)) selectedGroupBGenre.value = token
+          else if (dynamicCommunityGenres.value.includes(token)) selectedGroupCGenre.value = token
+          else {
+            showCustomManualGenreField.value = true
+            customManualGenreText.value = res.data.genre
+            selectedGroupCGenre.value = "CUSTOM_MANUAL_OVERRIDE"
+          }
+        })
+      }
       if (res.data.ddc) form.value.ddc = res.data.ddc
     }
   } catch (err) {
@@ -115,6 +202,30 @@ async function handleIsbnLookup(cleanIsbn) {
   } finally {
     isbnLoading.value = false
   }
+}
+
+function selectAuthor(name) {
+  form.value.author = name
+  autocompleteAuthors.value = []
+  showAuthorSuggestions.value = false
+}
+
+function selectPublisher(name) {
+  form.value.publisher = name
+  autocompletePublishers.value = []
+  showPublisherSuggestions.value = false
+}
+
+function hideSuggestionsWithDelay(type) {
+  setTimeout(() => {
+    if (type === 'author') showAuthorSuggestions.value = false
+    else showPublisherSuggestions.value = false
+  }, 250)
+}
+
+function handleBlurAction(fieldName) {
+  sanitizeField(fieldName)
+  hideSuggestionsWithDelay(fieldName)
 }
 
 watch(
@@ -292,16 +403,6 @@ function handleMetadataPaste() {
   }, 400)
 }
 
-function selectAuthor(name) {
-  form.value.author = name
-  showAuthorSuggestions.value = false
-}
-
-function selectPublisher(name) {
-  form.value.publisher = name
-  showPublisherSuggestions.value = false
-}
-
 async function checkDuplicate() {
   try {
     const res = await axios.post("/catalogue/check-duplicate", {
@@ -319,6 +420,13 @@ async function checkDuplicate() {
 
 function clearField(fieldName) {
   form.value[fieldName] = ""
+  if (fieldName === 'genre') {
+    selectedGroupAGenre.value = ""
+    selectedGroupBGenre.value = ""
+    selectedGroupCGenre.value = ""
+    customManualGenreText.value = ""
+    showCustomManualGenreField.value = false
+  }
 }
 
 function confirmPrefill(work) {
@@ -330,6 +438,20 @@ function confirmPrefill(work) {
   form.value.category = work.category || ""
   form.value.publisher = work.publisher || ""
   form.value.year = work.year || ""
+  if (work.genre) {
+    form.value.genre = work.genre
+    const currentTokens = work.genre.split('/').map(g => g.trim().toUpperCase())
+    currentTokens.forEach(token => {
+      if (genreGroupA.value.includes(token)) selectedGroupAGenre.value = token
+      else if (genreGroupB.value.includes(token)) selectedGroupBGenre.value = token
+      else if (dynamicCommunityGenres.value.includes(token)) selectedGroupCGenre.value = token
+      else {
+        showCustomManualGenreField.value = true
+        customManualGenreText.value = work.genre
+        selectedGroupCGenre.value = "CUSTOM_MANUAL_OVERRIDE"
+      }
+    })
+  }
 }
 
 function useExistingAuthority(work) {
@@ -350,6 +472,10 @@ async function submitWork() {
     Object.keys(form.value).forEach(key => {
       cleanedForm[key] = form.value[key] === "" ? null : form.value[key]
     })
+
+    if (!cleanedForm.genre || cleanedForm.genre.trim() === "") {
+      cleanedForm.genre = "GENERAL"
+    }
 
     const payload = { 
       ...cleanedForm, 
@@ -387,8 +513,9 @@ function handleKeyDown(e) {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener("keydown", handleKeyDown)
+  await harvestSystemGenresMatrix()
   focusNextField("parser-field-input")
 })
 
@@ -513,14 +640,14 @@ onUnmounted(() => {
 
         <div class="floating-group">
           <select v-model="form.category" class="form-select" :class="{ 'has-value': form.category }">
-            <option disabled value="">Select Category</option>
+            <option value="">-- Choose Category (Optional) --</option>
             <option value="Fiction">Fiction</option>
             <option value="Non-Fiction">Non-Fiction</option>
             <option value="Reference">Reference</option>
             <option value="Religious">Religious</option>
             <option value="Poetry">Poetry</option>
           </select>
-          <label class="floating-label">Select Category</label>
+          <label class="floating-label">Select Category (Optional)</label>
         </div>
 
         <div class="floating-group">
@@ -538,8 +665,8 @@ onUnmounted(() => {
         <div class="floating-group">
           <input 
             v-model="form.author" 
-            @blur="sanitizeField('author')" 
             @focus="showAuthorSuggestions = true"
+            @blur="handleBlurAction('author')"
             maxlength="150" 
             placeholder=" " 
             autocomplete="off"
@@ -554,7 +681,7 @@ onUnmounted(() => {
             <div 
               v-for="author in authorSuggestions" 
               :key="author" 
-              @click="selectAuthor(author)"
+              @mousedown="selectAuthor(author)"
               class="suggestion-item"
             >
               {{ author }}
@@ -565,8 +692,8 @@ onUnmounted(() => {
         <div class="floating-group">
           <input 
             v-model="form.publisher" 
-            @blur="sanitizeField('publisher')" 
             @focus="showPublisherSuggestions = true"
+            @blur="handleBlurAction('publisher')"
             placeholder=" " 
             autocomplete="off"
             class="form-input" 
@@ -579,7 +706,7 @@ onUnmounted(() => {
             <div 
               v-for="pub in publisherSuggestions" 
               :key="pub" 
-              @click="selectPublisher(pub)"
+              @mousedown="selectPublisher(pub)"
               class="suggestion-item"
             >
               {{ pub }}
@@ -587,16 +714,54 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="floating-group">
+        <div class="floating-group full-width">
+          <div class="chip-dock-wrapper">
+            <label class="dock-label">ACTIVE_COMPILED_GENRE_STRING_PREVIEW</label>
+            <div class="chip-assembly-dock">
+              <span v-for="chip in liveCompiledGenreChips" :key="chip" class="active-badge-chip">
+                {{ chip }}
+              </span>
+              <span v-if="liveCompiledGenreChips.length === 0" class="dock-empty-text">
+                NO_GENRES_SELECTED // DEFAULTING_TO_GENERAL
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="floating-group grid-column-span-3">
+          <div class="split-genre-selectors">
+            <div class="dropdown-wrapper">
+              <select v-model="selectedGroupAGenre" @change="syncGenreSelection" class="form-select select-compact">
+                <option value="">Genre Group A // Creative</option>
+                <option v-for="g in genreGroupA" :key="g" :value="g">{{ g }}</option>
+              </select>
+            </div>
+            <div class="dropdown-wrapper">
+              <select v-model="selectedGroupBGenre" @change="syncGenreSelection" class="form-select select-compact">
+                <option value="">Genre Group B // Factual</option>
+                <option v-for="g in genreGroupB" :key="g" :value="g">{{ g }}</option>
+              </select>
+            </div>
+            <div class="dropdown-wrapper">
+              <select v-model="selectedGroupCGenre" @change="syncGenreSelection" class="form-select select-compact">
+                <option value="">Genre Group C // User Added</option>
+                <option v-for="g in dynamicCommunityGenres" :key="g" :value="g">{{ g }}</option>
+                <option disabled class="dropdown-divider-line">────────────────────</option>
+                <option value="CUSTOM_MANUAL_OVERRIDE">[X] TYPE_MANUAL_INPUT</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="showCustomManualGenreField" class="floating-group full-width manual-override-animation">
           <input 
-            v-model="form.genre" 
-            @blur="sanitizeField('genre')" 
-            autocomplete="off"
-            class="form-input" 
-            :class="{ 'has-value': form.genre }"
+            type="text" 
+            v-model="customManualGenreText" 
+            @input="syncManualGenreInput"
+            placeholder="ENTER CUSTOM GENRES SEPARATED BY SLASH (E.G. ENGINEERING/PROPULSION)" 
+            class="form-input manual-text-input" 
           />
-          <label class="floating-label">Genre</label>
-          <button v-if="form.genre" @click="clearField('genre')" class="clear-btn" type="button" tabindex="-1">&times;</button>
+          <label class="floating-label active-amber-label">Manual Genre Override</label>
         </div>
 
         <div class="floating-group">
@@ -778,7 +943,7 @@ onUnmounted(() => {
   background: #181818;
   border: 1px solid #262626;
   border-radius: 4px;
-  color: #a3a3a3;
+  color: #a3a8b4;
   font-size: 13px;
   outline: none;
   box-sizing: border-box;
@@ -809,6 +974,10 @@ onUnmounted(() => {
 }
 
 .floating-group.full-width {
+  grid-column: span 2;
+}
+
+.grid-column-span-3 {
   grid-column: span 2;
 }
 
@@ -951,6 +1120,87 @@ onUnmounted(() => {
   color: #555555;
   opacity: 0;
   pointer-events: none;
+}
+
+.chip-dock-wrapper {
+  width: 100%;
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  border-radius: 6px;
+  padding: 14px 18px;
+  box-sizing: border-box;
+}
+
+.dock-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #525966;
+  letter-spacing: 0.5px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.chip-assembly-dock {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.active-badge-chip {
+  font-size: 10px;
+  font-weight: bold;
+  background-color: rgba(236, 72, 153, 0.08);
+  border: 1px solid rgba(236, 72, 153, 0.2);
+  color: #ec4899;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.dock-empty-text {
+  font-size: 12px;
+  color: #525966;
+  font-style: italic;
+}
+
+.split-genre-selectors {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  width: 100%;
+}
+
+.dropdown-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.select-compact {
+  height: 44px !important;
+  font-size: 13px !important;
+  border-left: none !important;
+  cursor: pointer;
+}
+
+.dropdown-divider-line {
+  color: #2c2f36 !important;
+  text-align: center;
+}
+
+.manual-override-animation {
+  margin-top: 4px;
+}
+
+.manual-text-input {
+  border-color: rgba(245, 158, 11, 0.3) !important;
+}
+
+.manual-text-input:focus {
+  border-color: #f59e0b !important;
+}
+
+.active-amber-label {
+  color: #f59e0b !important;
 }
 
 .form-actions-footer {

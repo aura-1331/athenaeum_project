@@ -47,9 +47,26 @@
             </div>
 
             <div class="form-row">
-              <div class="field-container full-width">
+              <div class="field-container full-width relative-position">
                 <label class="input-label">PRIMARY_CREATOR_ORIGIN</label>
-                <input type="text" v-model="editableBook.author" class="panel-input" />
+                <input 
+                  type="text" 
+                  v-model="editableBook.author" 
+                  @input="searchAuthorsDebounced"
+                  @focus="showAuthorSuggestions = true"
+                  @blur="hideSuggestionsWithDelay('author')"
+                  class="panel-input" 
+                />
+                <div v-if="showAuthorSuggestions && authorSuggestions.length > 0" class="typeahead-overlay-tray">
+                  <div 
+                    v-for="suggestion in authorSuggestions" 
+                    :key="suggestion"
+                    @click="selectSuggestion('author', suggestion)"
+                    class="typeahead-node"
+                  >
+                    {{ suggestion }}
+                  </div>
+                </div>
               </div>
             </div>
           </fieldset>
@@ -110,23 +127,108 @@
                 <input type="text" v-model="editableBook.original_language" class="panel-input size-compact" />
               </div>
               <div class="field-container">
-                <label class="input-label">CLASSIFICATION</label>
-                <input type="text" v-model="editableBook.genre" class="panel-input size-compact" />
+                <label class="input-label">CORE_CATEGORY (OPTIONAL)</label>
+                <select v-model="editableBook.category" class="panel-select-menu size-compact">
+                  <option value="">-- NONE / UNASSIGNED --</option>
+                  <option value="Fiction">Fiction</option>
+                  <option value="Non-Fiction">Non-Fiction</option>
+                  <option value="Reference">Reference</option>
+                  <option value="Religious">Religious</option>
+                </select>
               </div>
             </div>
 
-            <div class="form-row split-3">
-              <div class="field-container">
+            <div class="form-row split-2">
+              <div class="field-container relative-position">
                 <label class="input-label">IMPRINT_PUBLISHER</label>
-                <input type="text" v-model="editableBook.publisher" class="panel-input size-compact" />
+                <input 
+                  type="text" 
+                  v-model="editableBook.publisher" 
+                  @input="searchPublishersDebounced"
+                  @focus="showPublisherSuggestions = true"
+                  @blur="hideSuggestionsWithDelay('publisher')"
+                  class="panel-input size-compact" 
+                />
+                <div v-if="showPublisherSuggestions && publisherSuggestions.length > 0" class="typeahead-overlay-tray">
+                  <div 
+                    v-for="suggestion in publisherSuggestions" 
+                    :key="suggestion"
+                    @click="selectSuggestion('publisher', suggestion)"
+                    class="typeahead-node"
+                  >
+                    {{ suggestion }}
+                  </div>
+                </div>
               </div>
               <div class="field-container">
                 <label class="input-label">TEMPORAL_EPOCH</label>
                 <input type="text" v-model="editableBook.year" class="panel-input size-compact font-mono" />
               </div>
+            </div>
+
+            <div class="form-row split-2">
               <div class="field-container">
                 <label class="input-label">ISBN_IDENTIFIER</label>
                 <input type="text" v-model="editableBook.isbn" class="panel-input size-compact font-mono" />
+              </div>
+              <div class="field-container">
+                <label class="input-label">DDC_EXTENSION</label>
+                <input type="text" v-model="editableBook.ddc" class="panel-input size-compact font-mono" />
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="field-container full-width layout-transparent">
+                <label class="input-label">ACTIVE_COMPILED_GENRE_STRING_PREVIEW</label>
+                <div class="chip-assembly-dock">
+                  <span v-for="chip in liveCompiledGenreChips" :key="chip" class="active-badge-chip">
+                    {{ chip }}
+                  </span>
+                  <span v-if="liveCompiledGenreChips.length === 0" class="dock-empty-text">
+                    NO_GENRES_SELECTED // DEFAULTING_TO_GENERAL
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row split-3">
+              <div class="field-container">
+                <label class="input-label">GENRE_GROUP_A // CREATIVE</label>
+                <select v-model="selectedGroupAGenre" @change="syncGenreSelection" class="panel-select-menu size-compact">
+                  <option value="">-- CHOOSE_GENRE --</option>
+                  <option v-for="g in genreGroupA" :key="g" :value="g">{{ g }}</option>
+                </select>
+              </div>
+
+              <div class="field-container">
+                <label class="input-label">GENRE_GROUP_B // FACTUAL</label>
+                <select v-model="selectedGroupBGenre" @change="syncGenreSelection" class="panel-select-menu size-compact">
+                  <option value="">-- CHOOSE_GENRE --</option>
+                  <option v-for="g in genreGroupB" :key="g" :value="g">{{ g }}</option>
+                </select>
+              </div>
+
+              <div class="field-container">
+                <label class="input-label">GENRE_GROUP_C // REGISTRY_ADDED</label>
+                <select v-model="selectedGroupCGenre" @change="syncGenreSelection" class="panel-select-menu size-compact">
+                  <option value="">-- CHOOSE_GENRE --</option>
+                  <option v-for="g in dynamicCommunityGenres" :key="g" :value="g">{{ g }}</option>
+                  <option disabled class="dropdown-divider-line">────────────────────</option>
+                  <option value="CUSTOM_MANUAL_OVERRIDE">[X] TYPE_MANUAL_INPUT</option>
+                </select>
+              </div>
+            </div>
+
+            <div v-if="showCustomManualGenreField" class="form-row">
+              <div class="field-container full-width border-amber">
+                <label class="input-label text-amber">MANUAL_GENRE_INPUT_OVERRIDE (USE SLASHER '/' FOR MULTIPLES)</label>
+                <input 
+                  type="text" 
+                  v-model="customManualGenreText" 
+                  @input="syncManualGenreInput"
+                  placeholder="E.G. HISTORY/SCIENCE/PROPULSION" 
+                  class="panel-input font-mono" 
+                />
               </div>
             </div>
           </fieldset>
@@ -184,7 +286,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from "vue"
+import { ref, onMounted, onBeforeUnmount, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import axios from "axios"
 
@@ -193,10 +295,40 @@ const router = useRouter()
 const loading = ref(true)
 const editableBook = ref<any>(null)
 
-// Confirmation HUD Reactive State Controllers
-const activeModalType = ref<string | null>(null) // Values: 'commit', 'abort', or null
+const activeModalType = ref<string | null>(null)
 const countdownTimerSeconds = ref<number>(0)
 let nativeIntervalReference: any = null
+
+const genreGroupA = ref([
+  "ADVENTURE", "BIOGRAPHY", "CLASSIC", "DETECTIVE", "FANTASY", 
+  "FOLKLORE", "FOLKTALES", "HORROR", "MYSTERY", "NOVEL", 
+  "POETRY", "SATIRE", "SHORT STORIES", "TEMPLE SONGS"
+])
+
+const genreGroupB = ref([
+  "AETHISM", "ANIMAL HUSBANDRY", "AUTOBIOGRAPHY", "COLLECTION OF PROVERBS", 
+  "COLLECTION OF WORKS", "EDUCATIONAL", "ENCYCLOPEDIA", "ENGINEERING", 
+  "FORENSIC INVESTIGATIONS", "FUTURISM", "HISTORY", "HOBBY", "INVESTIGATION", 
+  "MEDICINE (AYURVEDA)", "MEMOIR", "PHILATELY", "PHILOSOPHY", "POLITICS", 
+  "PSYCHOLOGY", "SCIENCE", "SERVICE STORY", "STUDY", "VETERINARY"
+])
+
+const dynamicCommunityGenres = ref<string[]>([])
+
+const selectedGroupAGenre = ref("")
+const selectedGroupBGenre = ref("")
+const selectedGroupCGenre = ref("")
+
+const showCustomManualGenreField = ref(false)
+const customManualGenreText = ref("")
+
+const authorSuggestions = ref<string[]>([])
+const publisherSuggestions = ref<string[]>([])
+const showAuthorSuggestions = ref(false)
+const showPublisherSuggestions = ref(false)
+
+let debounceAuthorTimeout: any = null
+let debouncePublisherTimeout: any = null
 
 const auditData = ref({
   deviceID: "EDITORIAL-CARDS-STATION-01",
@@ -205,12 +337,140 @@ const auditData = ref({
   userRole: "The Chief" 
 })
 
+const liveCompiledGenreChips = computed(() => {
+  if (!editableBook.value?.genre) return []
+  return editableBook.value.genre.split('/').map((g: string) => g.trim().toUpperCase()).filter((g: string) => g.length > 0)
+})
+
+function parseCurrentGenresIntoDropdowns(genreString: string) {
+  if (!genreString) return
+  const currentTokens = genreString.split('/').map((g: string) => g.trim().toUpperCase())
+  
+  currentTokens.forEach(token => {
+    if (genreGroupA.value.includes(token)) {
+      selectedGroupAGenre.value = token
+    } else if (genreGroupB.value.includes(token)) {
+      selectedGroupBGenre.value = token
+    } else if (dynamicCommunityGenres.value.includes(token)) {
+      selectedGroupCGenre.value = token
+    } else {
+      showCustomManualGenreField.value = true
+      customManualGenreText.value = genreString
+      selectedGroupCGenre.value = "CUSTOM_MANUAL_OVERRIDE"
+    }
+  })
+}
+
+function syncGenreSelection() {
+  if (selectedGroupCGenre.value === "CUSTOM_MANUAL_OVERRIDE") {
+    showCustomManualGenreField.value = true
+    editableBook.value.genre = customManualGenreText.value.trim().toUpperCase()
+    return
+  }
+  
+  showCustomManualGenreField.value = false
+  const activeSelectionArray: string[] = []
+  
+  if (selectedGroupAGenre.value) activeSelectionArray.push(selectedGroupAGenre.value)
+  if (selectedGroupBGenre.value) activeSelectionArray.push(selectedGroupBGenre.value)
+  if (selectedGroupCGenre.value && selectedGroupCGenre.value !== "CUSTOM_MANUAL_OVERRIDE") {
+    activeSelectionArray.push(selectedGroupCGenre.value)
+  }
+  
+  editableBook.value.genre = activeSelectionArray.join('/')
+}
+
+function syncManualGenreInput() {
+  editableBook.value.genre = customManualGenreText.value.trim().toUpperCase()
+}
+
+async function harvestSystemGenresMatrix() {
+  try {
+    const response = await axios.get('/catalogue?limit=1000')
+    const items = response.data?.data || []
+    const gatheredSet = new Set<string>()
+
+    items.forEach((item: any) => {
+      if (!item.genre) return
+      item.genre.split('/').forEach((g: string) => {
+        const standardToken = g.trim().toUpperCase()
+        if (standardToken && standardToken !== "NO GENRE YET" && standardToken !== "GENERAL") {
+          if (!genreGroupA.value.includes(standardToken) && !genreGroupB.value.includes(standardToken)) {
+            gatheredSet.add(standardToken)
+          }
+        }
+      })
+    })
+    dynamicCommunityGenres.value = Array.from(gatheredSet).sort()
+  } catch (err) {
+    console.error("Failed to dynamically harvest global taxonomy metrics:", err)
+  }
+}
+
+function searchAuthorsDebounced() {
+  if (debounceAuthorTimeout) clearTimeout(debounceAuthorTimeout)
+  debounceAuthorTimeout = setTimeout(async () => {
+    const query = editableBook.value.author.trim()
+    if (query.length < 2) {
+      authorSuggestions.value = []
+      return
+    }
+    try {
+      const response = await axios.get(`/catalogue/authors/search?q=${encodeURIComponent(query)}`)
+      authorSuggestions.value = response.data || []
+    } catch (err) {
+      console.error("Author micro-lookup breakdown:", err)
+    }
+  }, 200)
+}
+
+function searchPublishersDebounced() {
+  if (debouncePublisherTimeout) clearTimeout(debouncePublisherTimeout)
+  debouncePublisherTimeout = setTimeout(async () => {
+    const query = editableBook.value.publisher.trim()
+    if (query.length < 2) {
+      publisherSuggestions.value = []
+      return
+    }
+    try {
+      const response = await axios.get(`/catalogue/publishers/search?q=${encodeURIComponent(query)}`)
+      publisherSuggestions.value = response.data || []
+    } catch (err) {
+      console.error("Publisher micro-lookup breakdown:", err)
+    }
+  }, 200)
+}
+
+function selectSuggestion(type: 'author' | 'publisher', value: string) {
+  if (type === 'author') {
+    editableBook.value.author = value
+    authorSuggestions.value = []
+    showAuthorSuggestions.value = false
+  } else {
+    editableBook.value.publisher = value
+    publisherSuggestions.value = []
+    showPublisherSuggestions.value = false
+  }
+}
+
+function hideSuggestionsWithDelay(type: 'author' | 'publisher') {
+  setTimeout(() => {
+    if (type === 'author') showAuthorSuggestions.value = false
+    else showPublisherSuggestions.value = false
+  }, 250)
+}
+
 async function fetchRecordData() {
   loading.value = true
   const id = route.params.id
   try {
+    await harvestSystemGenresMatrix()
     const response = await axios.get(`/catalogue/${id}`)
     editableBook.value = { ...response.data }
+    
+    if (editableBook.value) {
+      parseCurrentGenresIntoDropdowns(editableBook.value.genre)
+    }
   } catch (err) {
     console.error("Database loading exception:", err)
   } finally {
@@ -219,11 +479,10 @@ async function fetchRecordData() {
 }
 
 function triggerActionConfirm(actionType: 'commit' | 'abort') {
-  // Clear any dangling interval tasks running in the loop context
   if (nativeIntervalReference) clearInterval(nativeIntervalReference)
   
   activeModalType.value = actionType
-  countdownTimerSeconds.value = 10 // Sets 10-second auto-action window tracking constraint
+  countdownTimerSeconds.value = 10
   
   nativeIntervalReference = setInterval(() => {
     countdownTimerSeconds.value--
@@ -253,6 +512,9 @@ function closeModalPrompt() {
 async function saveRecord() {
   const id = route.params.id || editableBook.value?.serial_no
   try {
+    if (!editableBook.value.genre || editableBook.value.genre.trim() === "") {
+      editableBook.value.genre = "GENERAL"
+    }
     await axios.patch(`/catalogue/${id}`, editableBook.value)
     router.push(`/details/${id}`)
   } catch (err) {
@@ -267,6 +529,8 @@ function cancelEdit() {
 
 onBeforeUnmount(() => {
   if (nativeIntervalReference) clearInterval(nativeIntervalReference)
+  if (debounceAuthorTimeout) clearTimeout(debounceAuthorTimeout)
+  if (debouncePublisherTimeout) clearTimeout(debouncePublisherTimeout)
 })
 
 onMounted(() => fetchRecordData())
@@ -278,319 +542,123 @@ onMounted(() => fetchRecordData())
 .control-panel-layout {
   background-color: #111216;
   color: #e2e4e9;
-  
   position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
+  top: 0 !important; left: 0 !important;
+  width: 100vw !important; height: 100vh !important;
   z-index: 9999 !important;
-  
-  display: flex;
-  overflow: hidden;
+  display: flex; overflow: hidden;
   font-family: 'JetBrains Mono', monospace;
   -webkit-font-smoothing: antialiased;
-  margin: 0 !important;
-  padding: 0 !important;
+  margin: 0 !important; padding: 0 !important;
 }
 
 .panel-container {
   display: flex;
-  width: 100% !important;
-  height: 100% !important;
-  margin: 0 !important;
-  padding: 0 !important;
+  width: 100% !important; height: 100% !important;
+  margin: 0 !important; padding: 0 !important;
 }
 
-/* LEFT COLUMN STYLES */
 .identity-anchor-panel {
-  width: 420px;
-  background-color: #0a0b0d !important;
+  width: 420px; background-color: #0a0b0d !important;
   border-right: 1px solid #1c1f26 !important;
-  padding: 48px;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-  flex-shrink: 0;
+  padding: 48px; display: flex; flex-direction: column; box-sizing: border-box; flex-shrink: 0;
 }
 
-.panel-badge {
-  font-size: 10px;
-  font-weight: bold;
-  color: #525966;
-  letter-spacing: 2px;
-  margin-bottom: 40px;
-}
-
-.hero-identity-block {
-  margin-bottom: auto;
-}
-
-.meta-label {
-  font-size: 9px;
-  color: #626a7a;
-  letter-spacing: 1px;
-  display: block;
-  margin-bottom: 8px;
-}
-
-.display-title {
-  font-family: 'Cinzel', serif;
-  font-size: 28px;
-  font-weight: 800;
-  line-height: 1.2;
-  color: #ffffff;
-  margin: 0 0 12px 0;
-}
-
-.display-author {
-  font-size: 12px;
-  color: #a3a8b4;
-  margin: 0;
-}
+.panel-badge { font-size: 10px; font-weight: bold; color: #525966; letter-spacing: 2px; margin-bottom: 40px; }
+.hero-identity-block { margin-bottom: auto; }
+.meta-label { font-size: 9px; color: #626a7a; letter-spacing: 1px; display: block; margin-bottom: 8px; }
+.display-title { font-family: 'Cinzel', serif; font-size: 28px; font-weight: 800; line-height: 1.2; color: #ffffff; margin: 0 0 12px 0; }
+.display-author { font-size: 12px; color: #a3a8b4; margin: 0; }
 
 .system-status-matrix {
-  background-color: #111216;
-  border: 1px solid #1c1f26;
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  background-color: #111216; border: 1px solid #1c1f26; border-radius: 8px; padding: 16px; margin-bottom: 32px; display: flex; flex-direction: column; gap: 12px;
 }
-
-.status-node {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 11px;
-}
-
+.status-node { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
 .status-node span { color: #525966; font-weight: bold; }
 .rank-badge { color: #10b981; text-transform: uppercase; }
 
-.panel-actions-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.btn {
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  padding: 14px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: center;
-  transition: background-color 0.15s ease;
-}
-
+.panel-actions-stack { display: flex; flex-direction: column; gap: 14px; }
+.btn { font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 14px; border: none; border-radius: 6px; cursor: pointer; text-align: center; transition: background-color 0.15s ease; }
 .btn-filled { background-color: #e2e4e9; color: #111216; }
 .btn-filled:hover { background-color: #cdd1da; }
 .btn-outline { border: 1px solid #2e333d; color: #e2e4e9; background: transparent; }
 .btn-outline:hover { background-color: rgba(255,255,255,0.03); }
 
-/* RIGHT COLUMN STYLES */
-.form-feed-column {
-  flex-grow: 1;
-  height: 100%;
-  overflow-y: auto;
-  background-color: #111216;
-}
-
-.form-scroll-wrapper {
-  padding: 48px 64px 64px 64px;
-  max-width: 900px;
-  box-sizing: border-box;
-}
-
+.form-feed-column { flex-grow: 1; height: 100%; overflow-y: auto; background-color: #111216; }
+.form-scroll-wrapper { padding: 48px 64px 64px 64px; max-width: 900px; box-sizing: border-box; }
 .form-feed-column::-webkit-scrollbar { width: 6px; }
 .form-feed-column::-webkit-scrollbar-track { background: #111216; }
 .form-feed-column::-webkit-scrollbar-thumb { background: #22252e; border-radius: 3px; }
 
-.form-fieldset {
-  border: none;
-  margin: 0 0 40px 0;
-  padding: 0;
-}
+.form-fieldset { border: none; margin: 0 0 40px 0; padding: 0; }
+.fieldset-legend { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; color: #626a7a; border-bottom: 1px solid #22252e; width: 100%; padding-bottom: 12px; margin-bottom: 24px; }
 
-.fieldset-legend {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: #626a7a;
-  border-bottom: 1px solid #22252e;
-  width: 100%;
-  padding-bottom: 12px;
-  margin-bottom: 24px;
-}
-
-.form-row {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 20px;
-}
-
+.form-row { display: flex; gap: 20px; margin-bottom: 20px; }
 .form-row:last-child { margin-bottom: 0; }
 .split-2 > .field-container { width: 50%; }
 .split-3 > .field-container { width: 33.33%; }
 .full-width { width: 100%; }
 
-.field-container {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background-color: #16181f;
-  border: 1px solid #22252e;
-  padding: 14px 18px;
-  border-radius: 8px;
-  box-sizing: border-box;
-  transition: border-color 0.2s ease;
-}
+.field-container { display: flex; flex-direction: column; gap: 4px; background-color: #16181f; border: 1px solid #22252e; padding: 14px 18px; border-radius: 8px; box-sizing: border-box; transition: border-color 0.2s ease; }
+.field-container:focus-within { border-color: #4a5263; }
+.disabled-container { background-color: #12141a !important; border-color: #1c1f26 !important; }
+.contextual-bg { background-color: #13151b; border-color: #1e212a; }
+.layout-transparent { background-color: transparent !important; border: 1px dashed #22252e !important; }
+.border-amber { border-color: rgba(245, 158, 11, 0.4) !important; }
 
-.field-container:focus-within {
-  border-color: #4a5263;
-}
+.input-label { font-size: 9px; font-weight: 700; color: #525966; letter-spacing: 0.5px; }
+.panel-input { background: transparent; border: none; color: #ffffff; font-family: inherit; font-size: 14px; padding: 2px 0 0 0; width: 100%; }
+.panel-input:focus { outline: none; }
 
-.disabled-container {
-  background-color: #12141a !important;
-  border-color: #1c1f26 !important;
-}
+.panel-select-menu { background: transparent; border: none; color: #ffffff; font-family: inherit; font-size: 14px; width: 100%; padding: 2px 0 0 0; cursor: pointer; }
+.panel-select-menu:focus { outline: none; }
+.panel-select-menu option { background-color: #16181f; color: #ffffff; }
 
-.contextual-bg {
-  background-color: #13151b;
-  border-color: #1e212a;
-}
+.chip-assembly-dock { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 4px; min-height: 24px; align-items: center; }
+.active-badge-chip { font-size: 10px; font-weight: bold; background-color: rgba(236, 72, 153, 0.08); border: 1px solid rgba(236, 72, 153, 0.2); color: #ec4899; padding: 2px 8px; border-radius: 4px; }
+.dock-empty-text { font-size: 12px; color: #525966; font-style: italic; }
 
-.input-label {
-  font-size: 9px;
-  font-weight: 700;
-  color: #525966;
-  letter-spacing: 0.5px;
-}
+.split-genre-selectors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; width: 100%; }
+.dropdown-wrapper { position: relative; width: 100%; }
+.select-compact { height: 44px !important; font-size: 13px !important; border-left: none !important; cursor: pointer; }
+.dropdown-divider-line { color: #2c2f36 !important; text-align: center; }
 
-.panel-input {
-  background: transparent;
-  border: none;
-  color: #ffffff;
-  font-family: inherit;
-  font-size: 14px;
-  padding: 2px 0 0 0;
-  width: 100%;
-}
+.relative-position { position: relative; }
+.typeahead-overlay-tray { position: absolute; top: 100%; left: 0; width: 100%; background-color: #12141a; border: 1px solid #2e333d; border-radius: 6px; margin-top: 4px; max-height: 180px; overflow-y: auto; z-index: 99; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+.typeahead-node { padding: 10px 16px; font-size: 13px; color: #e2e4e9; cursor: pointer; transition: background 0.15s ease; text-align: left; }
+.typeahead-node:hover { background-color: rgba(184, 146, 90, 0.15); color: #fbbf24; }
 
-.panel-input:focus {
-  outline: none;
-}
-
-.font-emphasis {
-  font-family: 'Cinzel', serif;
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.static-value {
-  font-size: 13px;
-  color: #444a57 !important;
-  font-weight: 700;
-  padding-top: 2px;
-}
-
+.font-emphasis { font-family: 'Cinzel', serif; font-size: 20px; font-weight: 700; }
+.static-value { font-size: 13px; color: #444a57 !important; font-weight: 700; padding-top: 2px; }
 .font-bold { font-weight: bold; }
 .size-compact { font-size: 13px; }
-
 .text-amber { color: #f59e0b; }
 .text-blue { color: #3b82f6 !important; }
 .text-magenta { color: #ec4899 !important; }
-
 .plaintext-wrapper { padding: 16px; }
+.panel-textarea { background: transparent; border: none; color: #e2e4e9; font-family: inherit; font-size: 13px; line-height: 1.6; resize: none; width: 100%; box-sizing: border-box; padding-top: 4px; }
+.panel-textarea:focus { outline: none; }
 
-.panel-textarea {
-  background: transparent;
-  border: none;
-  color: #e2e4e9;
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1.6;
-  resize: none;
-  width: 100%;
-  box-sizing: border-box;
-  padding-top: 4px;
-}
-
-.panel-textarea:focus {
-  outline: none;
-}
-
-/* TRANSACTION HUD OVERLAY MODAL STYLES */
-.modal-overlay-shroud {
-  position: fixed;
-  top: 0; left: 0; width: 100vw; height: 100vh;
-  background-color: rgba(10, 11, 13, 0.85);
-  backdrop-filter: blur(4px);
-  z-index: 10000;
-  display: flex; align-items: center; justify-content: center;
-}
-
-.modal-alert-box {
-  background-color: #16181f;
-  border-top: 4px solid #22252e;
-  padding: 40px;
-  border-radius: 8px;
-  width: 100%; max-width: 480px;
-  box-shadow: 0 20px 40px rgba(0,0,0,0.5);
-  display: flex; flex-direction: column;
-}
-
+.modal-overlay-shroud { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(10, 11, 13, 0.85); backdrop-filter: blur(4px); z-index: 10000; display: flex; align-items: center; justify-content: center; }
+.modal-alert-box { background-color: #16181f; border-top: 4px solid #22252e; padding: 40px; border-radius: 8px; width: 100%; max-width: 480px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
 .border-emerald { border-top-color: #10b981; }
 .border-crimson { border-top-color: #ef4444; }
-
-.modal-tag {
-  font-size: 10px; font-weight: 700; color: #525966; letter-spacing: 2px; margin-bottom: 16px;
-}
-
-.modal-heading {
-  font-size: 18px; font-weight: 700; color: #ffffff; margin: 0 0 16px 0; letter-spacing: 0.5px;
-}
-
-.modal-body-text {
-  font-size: 13px; line-height: 1.6; color: #a3a8b4; margin: 0 0 24px 0;
-}
-
-.countdown-ticker-bar {
-  background-color: #111216; border: 1px solid #1c1f26; padding: 12px; border-radius: 4px;
-  font-size: 11px; font-weight: bold; color: #626a7a; text-align: center; margin-bottom: 32px; letter-spacing: 0.5px;
-}
-
+.modal-tag { font-size: 10px; font-weight: 700; color: #525966; letter-spacing: 2px; margin-bottom: 16px; }
+.modal-heading { font-size: 18px; font-weight: 700; color: #ffffff; margin: 0 0 16px 0; letter-spacing: 0.5px; }
+.modal-body-text { font-size: 13px; line-height: 1.6; color: #a3a8b4; margin: 0 0 24px 0; }
+.countdown-ticker-bar { background-color: #111216; border: 1px solid #1c1f26; padding: 12px; border-radius: 4px; font-size: 11px; font-weight: bold; color: #626a7a; text-align: center; margin-bottom: 32px; letter-spacing: 0.5px; }
 .ticker-value { color: #ffffff; }
-
 .modal-button-row { display: flex; justify-content: flex-end; gap: 16px; }
-
-.m-btn {
-  font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.5px;
-  padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer;
-}
-
+.m-btn { font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; }
 .bg-emerald { background-color: #10b981; color: #ffffff; }
 .bg-emerald:hover { background-color: #059669; }
 .bg-crimson { background-color: #ef4444; color: #ffffff; }
 .bg-crimson:hover { background-color: #dc2626; }
-
 .m-btn-dismiss { background-color: transparent; border: 1px solid #2e333d; color: #e2e4e9; }
 .m-btn-dismiss:hover { background-color: rgba(255,255,255,0.03); }
 
-.vault-loader {
-  width: 100%; height: 100%; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 16px; background-color: #111216;
-}
-.minimal-spinner {
-  width: 16px; height: 16px; border: 1px solid rgba(226, 228, 233, 0.1);
-  border-top-color: #e2e4e9; border-radius: 50%; animation: spin 0.7s infinite linear;
-}
+.vault-loader { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background-color: #111216; }
+.minimal-spinner { width: 16px; height: 16px; border: 1px solid rgba(226, 228, 233, 0.1); border-top-color: #e2e4e9; border-radius: 50%; animation: spin 0.7s infinite linear; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-label { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: #626a7a; }
 </style>

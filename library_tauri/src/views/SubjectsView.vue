@@ -1,5 +1,6 @@
 <template>
   <div class="classification-layout">
+    <!-- LEFT PANEL: STRUCTURAL METRICS -->
     <aside class="metric-sidebar">
       <router-link to="/dashboard" class="escape-matrix-link">
         <span class="escape-icon">←</span> RETURN_TO_SYSTEM_CORE
@@ -24,9 +25,11 @@
       </div>
     </aside>
 
+    <!-- RIGHT PANEL: SUBJECT GRID LIST / DRILL DOWN FEED -->
     <main class="registry-feed-column">
       <div class="feed-scroll-wrapper">
         
+        <!-- HEADER MODE A: TAXONOMY BROWSING -->
         <header v-if="!selectedSubject" class="feed-header">
           <div class="search-box-wrapper">
             <span class="search-icon">⌕</span>
@@ -39,6 +42,7 @@
           </div>
         </header>
 
+        <!-- HEADER MODE B: ACTIVE FILTRATION RESET -->
         <header v-else class="feed-header-isolated">
           <div class="filter-breadcrumb-badge">
             FILTER_ACTIVE // TAXONOMY: <span class="highlight">{{ selectedSubject.toUpperCase() }}</span>
@@ -49,6 +53,7 @@
         </header>
 
         <div class="table-container">
+          <!-- VIEW GRID A: PRIMARY SUBJECT AGGREGATIONS -->
           <table v-if="!selectedSubject" class="vault-table">
             <thead>
               <tr>
@@ -76,6 +81,7 @@
             </tbody>
           </table>
 
+          <!-- VIEW GRID B: ISOLATED SUBJECT ASSETS LINKED TO DETAILS VIEW -->
           <table v-else class="vault-table">
             <thead>
               <tr>
@@ -140,16 +146,23 @@ async function compileSubjectsRegistry() {
     const mapping: Record<string, { count: number; category: string }> = {}
 
     items.forEach((item: any) => {
-      const genreTag = item.genre ? item.genre.trim() : 'UNCLASSIFIED'
+      const rawGenre = item.genre ? item.genre.trim() : 'UNCLASSIFIED'
       const category = item.category || 'General'
       
-      if (!mapping[genreTag]) {
-        mapping[genreTag] = { count: 0, category: category }
-      }
-      mapping[genreTag].count++
+      // Split genres by slash, trim whitespace from each split token, and run aggregations on each individual part
+      const subGenres = rawGenre.split('/').map((g: string) => g.trim()).filter((g: string) => g.length > 0)
+
+      subGenres.forEach((genreTag: string) => {
+        // Enforce UPPERCASE formatting for grouping stability across listings
+        const standardizedTag = genreTag.toUpperCase()
+        
+        if (!mapping[standardizedTag]) {
+          mapping[standardizedTag] = { count: 0, category: category }
+        }
+        mapping[standardizedTag].count++
+      })
     })
 
-    // REPLACED: Changed sorting criteria from quantity density values to localized alphabetical strings comparison
     aggregatedSubjectsList.value = Object.keys(mapping).map(tag => ({
       tag,
       count: mapping[tag].count,
@@ -171,9 +184,15 @@ const filteredSubjects = computed(() => {
 
 const targetedSubjectBooks = computed(() => {
   if (!selectedSubject.value) return []
-  return masterCatalogueData.value.filter(
-    item => (item.genre ? item.genre.trim() : 'UNCLASSIFIED') === selectedSubject.value
-  )
+  const target = selectedSubject.value.toUpperCase()
+  
+  return masterCatalogueData.value.filter((item: any) => {
+    if (!item.genre) return target === 'UNCLASSIFIED'
+    
+    // Split item's subgenres array to match cross-referenced keys accurately
+    const currentSubGenres = item.genre.split('/').map((g: string) => g.trim().toUpperCase())
+    return currentSubGenres.includes(target)
+  })
 })
 
 function selectSubject(tag: string) {
