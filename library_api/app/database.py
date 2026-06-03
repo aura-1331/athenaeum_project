@@ -18,7 +18,7 @@ print(f"--- ATTEMPTING CONNECTION ---")
 print(f"File looked for at: {ENV_FILE}")
 print(f"User: {DB_USER} | DB: {DB_NAME} | Pass Found: {DB_PASS is not None}")
 
-def get_connection():
+def get_connection(request: Request = None, username: str = None, role: str = None):
     try:
         conn = psycopg2.connect(
             host=os.getenv("DB_HOST"),
@@ -29,6 +29,39 @@ def get_connection():
             sslmode=os.getenv("DB_SSLMODE", "require")
         )
         conn.autocommit = False
+        
+        actor_name = username
+        actor_role = role
+        
+        if not actor_name and request is not None:
+            actor_role = getattr(request.state, "actor_role", None) or request.headers.get("X-User-Role")
+            
+            # Check if there is an explicit name header or state
+            token_user_id = getattr(request.state, "actor_name", None) or request.headers.get("X-User-Name")
+            
+            # If the username is a raw numeric string ID (like '3'), resolve it to the real name
+            if token_user_id and token_user_id.isdigit():
+                cur_lookup = conn.cursor()
+                try:
+                    cur_lookup.execute("SELECT name FROM public.users WHERE user_id = %s", (int(token_user_id),))
+                    row = cur_lookup.fetchone()
+                    actor_name = row[0] if row else token_user_id
+                except Exception:
+                    actor_name = token_user_id
+                finally:
+                    cur_lookup.close()
+            else:
+                actor_name = token_user_id
+            
+        actor_name = actor_name or "SYSTEM_UNKNOWN"
+        actor_role = actor_role or "SYSTEM_UNKNOWN"
+            
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT public.set_audit_session_context(%s, %s);", (actor_name, actor_role))
+        finally:
+            cur.close()
+                
         return conn
     except Exception as e:
         print(f"DATABASE CONNECTION ERROR: {e}")

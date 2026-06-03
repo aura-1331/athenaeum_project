@@ -18,6 +18,13 @@ axios.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    const activeUser = localStorage.getItem("user_name") || "Archive Operator";
+    const activeRole = localStorage.getItem("user_role") || "The Seeker";
+    
+    config.headers["X-User-Name"] = activeUser;
+    config.headers["X-User-Role"] = activeRole;
+
     return config;
   },
   (error) => Promise.reject(error)

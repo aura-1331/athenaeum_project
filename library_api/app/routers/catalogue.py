@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Header, status
 from app.auth import get_current_user
 from app.database import get_connection, record_audit
 from pydantic import BaseModel
@@ -19,7 +19,7 @@ class RecommendationRequest(BaseModel):
 
 class WorkCreate(BaseModel):
     title: str
-    author: str
+    author: Optional[str] = "Unknown"  
     category: str
     language: str
     publisher: Optional[str] = None
@@ -31,7 +31,7 @@ class WorkCreate(BaseModel):
     genre: Optional[str] = None
     original_language: Optional[str] = None
     notes: Optional[str] = None
-
+    
 def generate_record_id(serial_no: int):
     year = datetime.now().year
     return f"AO-REC-{year}-{str(serial_no).zfill(6)}"
@@ -227,10 +227,30 @@ def search_publishers(q: str, current_user: dict = Depends(get_current_user)):
         conn.close()
 
 @router.post("/create-work")
-def create_work(payload: WorkCreate, current_user: dict = Depends(get_current_user)):
+def create_work(
+    payload: WorkCreate, 
+    request: Request, 
+    current_user: dict = Depends(get_current_user),
+    x_change_reason: Optional[str] = Header(default="New registration initialization sequencing"),
+    x_device_id: Optional[str] = Header(default="Desktop Browser Workstation"),
+    x_ip_address: Optional[str] = Header(default="127.0.0.1")
+):
     conn = get_connection()
     cur = conn.cursor()
     try:
+        token_user_id = current_user.get("user_id")
+        cur.execute("SELECT name FROM public.users WHERE user_id = %s", (token_user_id,))
+        user_row = cur.fetchone()
+        real_name = user_row[0] if user_row else "SYSTEM_UNKNOWN"
+        real_role = current_user.get("role") or "SYSTEM_UNKNOWN"
+
+        cur.execute("SET LOCAL request.jwt.claim.username = %s;", (real_name,))
+        cur.execute("SET LOCAL request.jwt.claim.role = %s;", (real_role,))
+        cur.execute("SET LOCAL request.jwt.claim.user_id = %s;", (str(token_user_id),))
+        cur.execute("SET LOCAL request.custom.change_reason = %s;", (x_change_reason,))
+        cur.execute("SET LOCAL request.custom.device_id = %s;", (x_device_id,))
+        cur.execute("SET LOCAL request.custom.ip_address = %s;", (x_ip_address,))
+
         lang_prefix = get_language_prefix(payload.language)
         search_term = normalize_lang_search(payload.language)
         
@@ -258,21 +278,9 @@ def create_work(payload: WorkCreate, current_user: dict = Depends(get_current_us
 
         work_query = """
             INSERT INTO public.works (
-                title, 
-                language,
-                category,
-                genre,
-                author,
-                publisher, 
-                original_language,
-                ddc,
-                notes,
-                translation_compilation,
-                year,
-                isbn,
-                call_no,
-                created_at,
-                updated_at
+                title, language, category, genre, author, publisher, 
+                original_language, ddc, notes, translation_compilation,
+                year, isbn, call_no, created_at, updated_at
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
             RETURNING work_id
         """
@@ -282,18 +290,18 @@ def create_work(payload: WorkCreate, current_user: dict = Depends(get_current_us
         cur.execute(
             work_query,
             (
-                payload.title,
-                payload.language,
-                payload.category,
+                payload.title, 
+                payload.language, 
+                payload.category, 
                 payload.genre or None,
-                payload.author,
-                payload.publisher or None,
+                payload.author if (payload.author and payload.author.strip() != "") else "Unknown", 
+                payload.publisher or None, 
                 payload.original_language or None,
-                payload.ddc or None,
-                payload.notes or None,
+                payload.ddc or None, 
+                payload.notes or None, 
                 payload.translation_compilation or None,
-                safe_year,
-                payload.isbn or None,
+                safe_year, 
+                payload.isbn or None, 
                 final_call_no
             )
         )
@@ -456,13 +464,40 @@ def get_catalogue(
         conn.close()
 
 @router.patch("/{serial_no}")
-async def update_ledger_record(serial_no: int, payload: dict, request: Request, current_user: dict = Depends(get_current_user)):
-    if current_user.get('role') != "The Chief":
+async def update_ledger_record(
+    serial_no: int, 
+    payload: dict, 
+    request: Request, 
+    current_user: dict = Depends(get_current_user),
+    x_change_reason: Optional[str] = Header(default="Routine operational adjustment"),
+    x_device_id: Optional[str] = Header(default="Desktop Browser Workstation"),
+    x_ip_address: Optional[str] = Header(default="127.0.0.1")
+):
+    if current_user.get('role') != "The Chief" and current_user.get('role') != "Sys_Arch":
         raise HTTPException(status_code=403, detail="Chief Authorization Required")
 
-    conn = get_connection()
+    lookup_conn = get_connection()
+    lookup_cur = lookup_conn.cursor()
+    try:
+        token_user_id = int(current_user.get("user_id"))
+        lookup_cur.execute("SELECT name FROM public.users WHERE user_id = %s", (token_user_id,))
+        user_row = lookup_cur.fetchone()
+        real_name = user_row[0] if user_row else "SYSTEM_UNKNOWN"
+        real_role = current_user.get("role") or "SYSTEM_UNKNOWN"
+    finally:
+        lookup_cur.close()
+        lookup_conn.close()
+
+    conn = get_connection(username=real_name, role=real_role)
     cur = conn.cursor()
     try:
+        cur.execute("SET LOCAL request.jwt.claim.username = %s;", (real_name,))
+        cur.execute("SET LOCAL request.jwt.claim.role = %s;", (real_role,))
+        cur.execute("SET LOCAL request.jwt.claim.user_id = %s;", (str(token_user_id),))
+        cur.execute("SET LOCAL request.custom.change_reason = %s;", (x_change_reason,))
+        cur.execute("SET LOCAL request.custom.device_id = %s;", (x_device_id,))
+        cur.execute("SET LOCAL request.custom.ip_address = %s;", (x_ip_address,))
+
         cur.execute("""
             UPDATE public.items SET 
                 shelf = COALESCE(NULLIF(%s, ''), shelf),

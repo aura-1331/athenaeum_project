@@ -2,7 +2,7 @@ import { createRouter, createWebHashHistory } from "vue-router"
 
 import Dashboard from "../views/Dashboard.vue"
 import Search from "../views/Search.vue"
-import Audit from "../views/Audit.vue"
+import AuditTrailView from '../views/AuditTrailView.vue'
 import CatalogueView from "../views/CatalogueView.vue"
 import CreateWorkView from "../views/CreateWorkView.vue"
 import CreateItemView from "../views/CreateItemView.vue"
@@ -22,7 +22,7 @@ const routes = [
   { path: "/dashboard", name: "dashboard", component: Dashboard, meta: { requiresAuth: true } },
   { path: "/catalogue", name: "catalogue", component: CatalogueView, meta: { requiresAuth: true } },
   { path: "/search", name: "search", component: Search, meta: { requiresAuth: true } },
-  { path: "/status-audit", name: "audit", component: Audit, meta: { requiresAuth: true } },
+  { path: '/audit-trail', name: 'audit-trail', component: AuditTrailView, meta: { requiresAuth: true } },
   { path: "/details/:id", name: "details", component: DetailsView, meta: { requiresAuth: true } },
 
   { path: "/create-work", name: "create-work", component: CreateWorkView, meta: { requiresAuth: true } },
@@ -31,7 +31,6 @@ const routes = [
   { path: "/edit-item/:id", name: "edit-item", component: EditItemView, meta: { requiresAuth: true } },
 
   { path: "/admin/settings", name: "admin-settings", component: SystemSettings, meta: { requiresAuth: true } },
-  /* REPLACED: Changed names to single words matching the components */
   { path: "/classification/authors", name: "Authors", component: AuthorsView, meta: { requiresAuth: true } },
   { path: "/classification/subjects", name: "Subjects", component: SubjectsView, meta: { requiresAuth: true } }
 ]
