@@ -263,6 +263,16 @@
           }}
         </p>
 
+        <div v-if="activeModalType === 'commit'" class="modal-input-field-block">
+          <label class="modal-input-label">SPECIFY_OPERATIONAL_CHANGE_JUSTIFICATION</label>
+          <input 
+            type="text" 
+            v-model="changeReason" 
+            placeholder="e.g., Fixing spelling error / Adding storage context notes..." 
+            class="modal-reason-input"
+          />
+        </div>
+
         <div class="countdown-ticker-bar">
           AUTO-RESOLVING IN: <span class="ticker-value">{{ countdownTimerSeconds }}s</span>
         </div>
@@ -296,6 +306,7 @@ const loading = ref(true)
 const editableBook = ref<any>(null)
 
 const activeModalType = ref<string | null>(null)
+const changeReason = ref<string>("")
 const countdownTimerSeconds = ref<number>(0)
 let nativeIntervalReference: any = null
 
@@ -389,19 +400,6 @@ async function harvestSystemGenresMatrix() {
     const response = await axios.get('/catalogue?limit=1000')
     const items = response.data?.data || []
     const gatheredSet = new Set<string>()
-
-    items.forEach((item: any) => {
-      if (!item.genre) return
-      item.genre.split('/').forEach((g: string) => {
-        const standardToken = g.trim().toUpperCase()
-        if (standardToken && standardToken !== "NO GENRE YET" && standardToken !== "GENERAL") {
-          if (!genreGroupA.value.includes(standardToken) && !genreGroupB.value.includes(standardToken)) {
-            gatheredSet.add(standardToken)
-          }
-        }
-      })
-    })
-    dynamicCommunityGenres.value = Array.from(gatheredSet).sort()
   } catch (err) {
     console.error("Failed to dynamically harvest global taxonomy metrics:", err)
   }
@@ -482,7 +480,8 @@ function triggerActionConfirm(actionType: 'commit' | 'abort') {
   if (nativeIntervalReference) clearInterval(nativeIntervalReference)
   
   activeModalType.value = actionType
-  countdownTimerSeconds.value = 10
+  changeReason.value = ""
+  countdownTimerSeconds.value = 15
   
   nativeIntervalReference = setInterval(() => {
     countdownTimerSeconds.value--
@@ -495,13 +494,13 @@ function triggerActionConfirm(actionType: 'commit' | 'abort') {
 
 function executeConfirmedAction() {
   const targetAction = activeModalType.value
-  closeModalPrompt()
   
   if (targetAction === 'commit') {
     saveRecord()
   } else if (targetAction === 'abort') {
     cancelEdit()
   }
+  closeModalPrompt()
 }
 
 function closeModalPrompt() {
@@ -515,7 +514,17 @@ async function saveRecord() {
     if (!editableBook.value.genre || editableBook.value.genre.trim() === "") {
       editableBook.value.genre = "GENERAL"
     }
-    await axios.patch(`/catalogue/${id}`, editableBook.value)
+    
+    const operationalReason = changeReason.value.trim() || "Routine operational adjustment"
+    
+    await axios.patch(`/catalogue/${id}`, editableBook.value, {
+      headers: {
+        'X-Change-Reason': operationalReason,
+        'X-Device-ID': auditData.value.deviceID,
+        'X-IP-Address': auditData.value.ip
+      }
+    })
+    
     router.push(`/details/${id}`)
   } catch (err) {
     console.error("Transaction commit rejected:", err)
@@ -618,11 +627,6 @@ onMounted(() => fetchRecordData())
 .active-badge-chip { font-size: 10px; font-weight: bold; background-color: rgba(236, 72, 153, 0.08); border: 1px solid rgba(236, 72, 153, 0.2); color: #ec4899; padding: 2px 8px; border-radius: 4px; }
 .dock-empty-text { font-size: 12px; color: #525966; font-style: italic; }
 
-.split-genre-selectors { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; width: 100%; }
-.dropdown-wrapper { position: relative; width: 100%; }
-.select-compact { height: 44px !important; font-size: 13px !important; border-left: none !important; cursor: pointer; }
-.dropdown-divider-line { color: #2c2f36 !important; text-align: center; }
-
 .relative-position { position: relative; }
 .typeahead-overlay-tray { position: absolute; top: 100%; left: 0; width: 100%; background-color: #12141a; border: 1px solid #2e333d; border-radius: 6px; margin-top: 4px; max-height: 180px; overflow-y: auto; z-index: 99; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
 .typeahead-node { padding: 10px 16px; font-size: 13px; color: #e2e4e9; cursor: pointer; transition: background 0.15s ease; text-align: left; }
@@ -646,6 +650,12 @@ onMounted(() => fetchRecordData())
 .modal-tag { font-size: 10px; font-weight: 700; color: #525966; letter-spacing: 2px; margin-bottom: 16px; }
 .modal-heading { font-size: 18px; font-weight: 700; color: #ffffff; margin: 0 0 16px 0; letter-spacing: 0.5px; }
 .modal-body-text { font-size: 13px; line-height: 1.6; color: #a3a8b4; margin: 0 0 24px 0; }
+
+.modal-input-field-block { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+.modal-input-label { font-size: 10px; font-weight: 700; color: #f59e0b; letter-spacing: 1px; }
+.modal-reason-input { background-color: #111216; border: 1px solid #22252e; border-radius: 4px; padding: 12px; font-family: inherit; font-size: 13px; color: #ffffff; width: 100%; box-sizing: border-box; }
+.modal-reason-input:focus { outline: none; border-color: #f59e0b; }
+
 .countdown-ticker-bar { background-color: #111216; border: 1px solid #1c1f26; padding: 12px; border-radius: 4px; font-size: 11px; font-weight: bold; color: #626a7a; text-align: center; margin-bottom: 32px; letter-spacing: 0.5px; }
 .ticker-value { color: #ffffff; }
 .modal-button-row { display: flex; justify-content: flex-end; gap: 16px; }

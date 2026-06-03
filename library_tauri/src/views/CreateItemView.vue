@@ -115,6 +115,7 @@
 <script setup>
 import { ref, watch } from "vue"
 import axios from "axios"
+import { dispatchAuditTrail } from "../utils/audit"
 
 const form = ref({
   work_id: "",
@@ -164,6 +165,13 @@ async function createItem() {
     )
 
     result.value = res.data
+
+    await dispatchAuditTrail(
+      "CREATE",
+      "CATALOGUE",
+      res.data.accession_no,
+      `Allocated asset tracking token. Accessioned new copy volume link for authority ID: #${form.value.work_id}`
+    )
 
     alert(`Volume Copy Accessioned Successfully • ${res.data.accession_no}`)
 
