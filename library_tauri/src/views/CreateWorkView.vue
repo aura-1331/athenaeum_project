@@ -17,51 +17,6 @@
       />
     </div>
 
-    <div v-if="duplicateLoading || isbnLoading" class="skeleton-loader-banner">
-      <div class="skeleton-line header-pulse"></div>
-      <div class="skeleton-line card-pulse"></div>
-    </div>
-
-    <div
-      v-if="duplicateResult.severity !== 'none' && !duplicateLoading"
-      class="banner-alert"
-      :class="duplicateResult.severity"
-    >
-      <div class="banner-header">
-        <span v-if="duplicateResult.severity === 'strong'">🔒 Authority Freeze Active — Exact work exists</span>
-        <span v-if="duplicateResult.severity === 'medium'">⚠️ Similar work exists</span>
-        <span v-if="duplicateResult.severity === 'weak'">ℹ️ Possible related works</span>
-      </div>
-
-      <div class="matches-list">
-        <div
-          v-for="m in duplicateResult.matches"
-          :key="m.work_id"
-          class="match-card"
-        >
-          <div class="match-details" @click="confirmPrefill(m)">
-            <span class="match-title">{{ m.title }}</span>
-            <span class="match-meta">{{ m.author }} • {{ m.language }}</span>
-          </div>
-
-          <button
-            v-if="duplicateResult.severity === 'strong'"
-            class="action-btn-secondary"
-            @click="useExistingAuthority(m)"
-          >
-            Use Existing Authority
-          </button>
-        </div>
-      </div>
-
-      <div v-if="duplicateResult.severity === 'strong'" class="override-container">
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="adminOverride" class="custom-checkbox" />
-          <span>Admin Override — allow creation anyway</span>
-        </label>
-      </div>
-    </div>
-
     <div class="form-section">
       <div class="form-grid">
         <div class="floating-group">
@@ -78,6 +33,7 @@
           <label class="floating-label">Title *</label>
           <button v-if="form.title" @click="clearField('title')" class="clear-btn" type="button" tabindex="-1">&times;</button>
           <span class="char-counter">{{ form.title.length }}/255</span>
+          <div v-show="duplicateLoading || isbnLoading" class="embedded-input-spinner"></div>
         </div>
 
         <div class="floating-group">
@@ -196,13 +152,13 @@
                 {{ chip }}
               </span>
               <span v-if="liveCompiledGenreChips.length === 0" class="dock-empty-text">
-                NO_GENRES_SELECTED // DEFAULTING_TO_GENERAL
+                NO GENRES SELECTED
               </span>
             </div>
           </div>
         </div>
 
-        <div class="floating-group grid-column-span-3">
+        <div class="floating-group full-width">
           <div class="split-genre-selectors">
             <div class="dropdown-wrapper">
               <select v-model="selectedGroupAGenre" @change="syncGenreSelection" class="form-select select-compact">
@@ -227,7 +183,7 @@
           </div>
         </div>
 
-        <div v-if="showCustomManualGenreField" class="floating-group full-width manual-override-animation">
+        <div class="floating-group full-width manual-override-animation" v-if="showCustomManualGenreField">
           <input 
             type="text" 
             v-model="customManualGenreText" 
@@ -337,6 +293,53 @@
           <button v-if="form.notes" @click="clearField('notes')" class="clear-btn" type="button" tabindex="-1">&times;</button>
         </div>
       </div>
+
+      <div class="system-feedback-panel">
+        <div class="skeleton-loader-banner" v-show="duplicateLoading || isbnLoading">
+          <div class="skeleton-line header-pulse"></div>
+          <div class="skeleton-line card-pulse"></div>
+        </div>
+
+        <div
+          v-if="duplicateResult.severity !== 'none' && !duplicateLoading"
+          class="banner-alert"
+          :class="duplicateResult.severity"
+        >
+          <div class="banner-header">
+            <span v-if="duplicateResult.severity === 'strong'">🔒 Authority Freeze Active — Exact work exists</span>
+            <span v-if="duplicateResult.severity === 'medium'">⚠️ Similar work exists</span>
+            <span v-if="duplicateResult.severity === 'weak'">ℹ️ Possible related works</span>
+          </div>
+
+          <div class="matches-list">
+            <div
+              v-for="m in duplicateResult.matches"
+              :key="m.work_id"
+              class="match-card"
+            >
+              <div class="match-details" @click="confirmPrefill(m)">
+                <span class="match-title">{{ m.title }}</span>
+                <span class="match-meta">{{ m.author }} • {{ m.language }}</span>
+              </div>
+
+              <button
+                v-if="duplicateResult.severity === 'strong'"
+                class="action-btn-secondary"
+                @click="useExistingAuthority(m)"
+              >
+                Use Existing Authority
+              </button>
+            </div>
+          </div>
+
+          <div class="override-container" v-if="duplicateResult.severity === 'strong'">
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="adminOverride" class="custom-checkbox" />
+              <span>Admin Override — allow creation anyway</span>
+            </label>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="form-actions-footer">
@@ -352,7 +355,7 @@
       <span class="shortcut-legend">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to save</span>
     </div>
 
-    <div v-if="showPromptModal" class="modal-overlay-shroud">
+    <div class="modal-overlay-shroud" v-if="showPromptModal">
       <div class="modal-alert-box border-emerald">
         <div class="modal-tag">SYSTEM_TRANSACTION_ALERT</div>
         
@@ -383,8 +386,35 @@
       </div>
     </div>
 
-    <div v-if="result" class="result-container">
-      <pre class="json-output">{{ result }}</pre>
+    <div v-if="result" class="operational-response-deck">
+      <div v-if="result.work_id" class="status-card-panel border-emerald">
+        <div class="deck-tag text-emerald">TRANSACTION_SUCCESSFUL // REGISTRY_LINK_ACTIVE</div>
+        <div class="panel-main-row">
+          <div class="stat-block">
+            <span class="stat-label">ASSIGNED_WORK_ID</span>
+            <span class="stat-value text-white">#{{ result.work_id }}</span>
+          </div>
+          <div class="stat-block">
+            <span class="stat-label">GENERATED_ACCESSION_NO</span>
+            <span class="stat-value text-gold">{{ result.accession_no }}</span>
+          </div>
+        </div>
+        <div class="panel-footer-message">
+          <div class="spinner-inline"></div>
+          <span>Redirecting to local item ledger initialization sequences...</span>
+        </div>
+        <div class="progress-bar-container">
+          <div class="progress-fill fill-emerald"></div>
+        </div>
+      </div>
+
+      <div v-else class="status-card-panel border-crimson">
+        <div class="deck-tag text-crimson">TRANSACTION_ABORTED // SCHEMA_VALIDATION_FAILURE</div>
+        <h4 class="error-heading">Operational Request Interrupted</h4>
+        <p class="error-description">
+          {{ result.detail || result.error || "The remote catalog authority engine rejected this entity context structure layout mapping." }}
+        </p>
+      </div>
     </div>
   </div>
 </template>
@@ -521,7 +551,7 @@ function syncGenreSelection() {
     activeSelectionArray.push(selectedGroupCGenre.value)
   }
   
-  form.value.genre = activeSelectionArray.join('/')
+  form.value.genre = activeSelectionArray.join('/') || ""
 }
 
 function syncManualGenreInput() {
@@ -862,12 +892,27 @@ function triggerCreationPrompt() {
     alert("Title and Language are mandatory fields.")
     return
   }
+  
+  const yearInt = parseInt(form.value.year, 10);
+  if (form.value.year && (isNaN(yearInt) || yearInt < 1000 || yearInt > 2026)) {
+    alert("Invalid year: Please enter a valid 4-digit year between 1000 and 2026.");
+    focusNextField("year-input-field");
+    return;
+  }
+
   if (isFrozen.value || loading.value) return
   creationReason.value = ""
   showPromptModal.value = true
 }
 
 async function executeConfirmedCreation() {
+  const yearInt = parseInt(form.value.year, 10);
+  if (form.value.year && (isNaN(yearInt) || yearInt < 1000 || yearInt > 2026)) {
+    alert("Transaction aborted: The year provided is invalid.");
+    showPromptModal.value = false;
+    return;
+  }
+
   showPromptModal.value = false
   loading.value = true
   result.value = null
@@ -879,13 +924,12 @@ async function executeConfirmedCreation() {
     })
 
     if (!cleanedForm.genre || cleanedForm.genre.trim() === "") {
-      cleanedForm.genre = "GENERAL"
+      cleanedForm.genre = null
     }
 
-    // 🌟 FIX: Fallback mandatory string types to prevent backend structural validation drops
     const payload = { 
       ...cleanedForm, 
-      author: form.value.author.trim() || "Unknown", // Guarantees a valid string
+      author: form.value.author.trim() || "Unknown",
       language: form.value.language_id || null,
       call_no: form.value.call_no || null 
     }
@@ -1012,10 +1056,14 @@ onUnmounted(() => {
 }
 
 .form-section {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 32px;
   background: #111111;
   border: 1px solid #1c1c1c;
   border-radius: 6px;
   padding: 24px;
+  align-items: start;
 }
 
 .form-grid {
@@ -1024,25 +1072,38 @@ onUnmounted(() => {
   gap: 24px;
 }
 
+.system-feedback-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+  min-height: 200px;
+}
+
 .floating-group {
   position: relative;
   display: flex;
   align-items: center;
   width: 100%;
+  height: 48px !important;
+  max-height: 48px !important;
+  min-height: 48px !important;
+  box-sizing: border-box !important;
 }
 
 .floating-group.full-width {
   grid-column: span 2;
-}
-
-.grid-column-span-3 {
-  grid-column: span 2;
+  height: auto !important;
+  max-height: none !important;
+  min-height: auto !important;
 }
 
 .form-input, 
 .form-select {
   width: 100%;
-  height: 48px;
+  height: 48px !important;
+  max-height: 48px !important;
+  min-height: 48px !important;
   padding: 0 40px 0 16px;
   background: #161616;
   border: 1px solid #282828;
@@ -1050,7 +1111,8 @@ onUnmounted(() => {
   color: #e0e0e0;
   font-size: 14px;
   outline: none;
-  box-sizing: border-box;
+  box-sizing: border-box !important;
+  line-height: 46px !important;
 }
 
 .mandatory-field {
@@ -1076,13 +1138,15 @@ onUnmounted(() => {
 .floating-label {
   position: absolute;
   left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 50% !important;
+  transform: translateY(-50%) !important;
   color: #555555;
   font-size: 14px;
   pointer-events: none;
   background: #111111;
   padding: 0 4px;
+  transition: transform 0.15s ease, top 0.15s ease, font-size 0.15s ease;
+  line-height: 1 !important;
 }
 
 .read-only-group .floating-label {
@@ -1100,7 +1164,8 @@ onUnmounted(() => {
 .form-select:focus ~ .floating-label,
 .form-select.has-value ~ .floating-label,
 .structural-lock ~ .floating-label {
-  top: 0;
+  top: 0 !important;
+  transform: translateY(-50%) !important;
   font-size: 11px;
   color: #cfb997;
 }
@@ -1167,17 +1232,34 @@ onUnmounted(() => {
 }
 
 .floating-group:focus-within .char-counter {
-  opacity: 1;
+  opacity: 0.6;
 }
 
 .char-counter {
   position: absolute;
-  bottom: -16px;
-  right: 4px;
+  right: 40px;
+  bottom: 4px;
   font-size: 10px;
   color: #555555;
   opacity: 0;
   pointer-events: none;
+  z-index: 5;
+  line-height: 1 !important;
+}
+
+.embedded-input-spinner {
+  position: absolute;
+  right: 40px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border: 2px solid #282828;
+  border-top-color: #cfb997;
+  border-radius: 50%;
+  animation: spinInline 0.6s linear infinite;
+  pointer-events: none;
+  z-index: 4;
 }
 
 .chip-dock-wrapper {
@@ -1238,11 +1320,6 @@ onUnmounted(() => {
   font-size: 13px !important;
   border-left: none !important;
   cursor: pointer;
-}
-
-.dropdown-divider-line {
-  color: #2c2f36 !important;
-  text-align: center;
 }
 
 .manual-override-animation {
@@ -1312,9 +1389,10 @@ kbd {
 
 .banner-alert {
   padding: 16px;
-  margin-bottom: 24px;
   border-radius: 6px;
   font-size: 14px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .banner-alert.strong {
@@ -1348,8 +1426,8 @@ kbd {
 
 .match-card {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
   padding: 10px 14px;
   background: #141414;
   border: 1px solid #242424;
@@ -1382,6 +1460,7 @@ kbd {
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
+  width: 100%;
 }
 
 .action-btn-secondary:hover {
@@ -1408,14 +1487,19 @@ kbd {
 }
 
 .skeleton-loader-banner {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
   background: #141414;
   border: 1px solid #1c1c1c;
   border-radius: 6px;
   padding: 18px;
-  margin-bottom: 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  z-index: 5;
 }
 
 .skeleton-line {
@@ -1426,7 +1510,7 @@ kbd {
 }
 
 .skeleton-line.header-pulse {
-  width: 200px;
+  width: 120px;
   height: 14px;
 }
 
@@ -1440,29 +1524,12 @@ kbd {
   100% { background-position: -200% 0; }
 }
 
-.result-container {
-  margin-top: 24px;
-  background: #141414;
-  border: 1px solid #2d2d2d;
-  border-radius: 4px;
-  padding: 16px;
-}
-
-.json-output {
-  margin: 0;
-  font-family: monospace;
-  font-size: 13px;
-  color: #a3a3a3;
-  overflow-x: auto;
-}
-
-/* Modal Overlay shroud context styles matching Edit view precisely */
 .modal-overlay-shroud { 
   position: fixed; 
   top: 0; 
   left: 0; 
   width: 100vw; 
-  height: 100vh; /* 🌟 Changed to Viewport Height */
+  height: 100vh; 
   background-color: rgba(10, 11, 13, 0.85); 
   backdrop-filter: blur(4px); 
   z-index: 10000; 
@@ -1486,4 +1553,137 @@ kbd {
 .bg-emerald:hover { background-color: #059669; }
 .m-btn-dismiss { background-color: transparent; border: 1px solid #2e333d; color: #e2e4e9; }
 .m-btn-dismiss:hover { background-color: rgba(255,255,255,0.03); }
+
+.operational-response-deck {
+  margin-top: 28px;
+  width: 100%;
+}
+
+.status-card-panel {
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  border-top: 4px solid #22252e;
+  border-radius: 6px;
+  padding: 24px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.border-crimson {
+  border-top-color: #ef4444 !important;
+}
+
+.text-emerald {
+  color: #10b981 !important;
+}
+
+.text-crimson {
+  color: #ef4444 !important;
+}
+
+.text-white {
+  color: #ffffff;
+}
+
+.text-gold {
+  color: #cfb997;
+}
+
+.deck-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-bottom: 16px;
+  text-transform: uppercase;
+}
+
+.panel-main-row {
+  display: flex;
+  gap: 40px;
+  margin-bottom: 20px;
+}
+
+.stat-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-block .stat-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #525966;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  font-family: monospace;
+}
+
+.panel-footer-message {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #8c8c8c;
+  margin-bottom: 12px;
+}
+
+.spinner-inline {
+  width: 12px;
+  height: 12px;
+  border: 2px solid #22252e;
+  border-top-color: #10b981;
+  border-radius: 50%;
+  animation: spinInline 0.8s linear infinite;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 3px;
+  background-color: #111216;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  animation: loadTransition 0.4s forwards cubic-bezier(0.1, 0.8, 0.3, 1);
+}
+
+.fill-emerald {
+  background-color: #10b981;
+}
+
+.error-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e2e4e9;
+  margin: 0 0 6px 0;
+}
+
+.error-description {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #a3a8b4;
+  margin: 0;
+  font-family: monospace;
+  background-color: #0f1015;
+  padding: 12px;
+  border: 1px solid #1c1e24;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+@keyframes spinInline {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes loadTransition {
+  to { width: 100%; }
+}
 </style>

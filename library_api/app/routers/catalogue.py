@@ -20,7 +20,7 @@ class RecommendationRequest(BaseModel):
 class WorkCreate(BaseModel):
     title: str
     author: Optional[str] = "Unknown"  
-    category: str
+    category: Optional[str] = None
     language: str
     publisher: Optional[str] = None
     year: Optional[str] = None
@@ -31,6 +31,10 @@ class WorkCreate(BaseModel):
     genre: Optional[str] = None
     original_language: Optional[str] = None
     notes: Optional[str] = None
+
+class DuplicateCheckRequest(BaseModel):
+    title: str
+    author: Optional[str] = None
     
 def generate_record_id(serial_no: int):
     year = datetime.now().year
@@ -38,8 +42,8 @@ def generate_record_id(serial_no: int):
 
 def get_language_prefix(language: str) -> str:
     lang = language.lower().strip()
-    if "malayalam" in lang: return "ML"
-    if "english" in lang: return "EN"
+    if lang == "malayalam": return "ML"
+    if lang == "english": return "EN"
     if "multi" in lang: return "MU"
     if lang == "tamil": return "TA"
     if lang == "telugu": return "TE"
@@ -56,12 +60,6 @@ def get_category_code(category: str) -> str:
     if cat == "Poetry": return "POE"
     return "GEN"
 
-def normalize_lang_search(language: str) -> str:
-    lang = language.lower().strip()
-    if "multi" in lang:
-        return "%multi%"
-    return f"%{language}%"
-
 @router.get("/next-numbers")
 def get_next_numbers(language: str, category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     conn = get_connection()
@@ -71,14 +69,14 @@ def get_next_numbers(language: str, category: Optional[str] = None, current_user
         next_serial = cur.fetchone()[0]
 
         lang_prefix = get_language_prefix(language)
-        search_term = normalize_lang_search(language)
+        clean_lang = language.strip()
         
         cur.execute("""
             SELECT COUNT(*) + 1 
             FROM public.items i
             JOIN public.works w ON i.work_id = w.work_id
-            WHERE w.language ILIKE %s
-        """, (search_term,))
+            WHERE w.language = %s
+        """, (clean_lang,))
         next_accession_count = cur.fetchone()[0]
         allocated_accession = f"{lang_prefix}-{next_accession_count}"
 
@@ -90,8 +88,8 @@ def get_next_numbers(language: str, category: Optional[str] = None, current_user
             cur.execute("""
                 SELECT COUNT(*) + 1 
                 FROM public.works 
-                WHERE language ILIKE %s AND category = %s
-            """, (search_term, category))
+                WHERE language = %s AND category = %s
+            """, (clean_lang, category))
             next_call_count = cur.fetchone()[0]
             allocated_call = f"{lang_initial}-{cat_code}-{next_call_count}.0"
 
@@ -252,14 +250,14 @@ def create_work(
         cur.execute("SET LOCAL request.custom.ip_address = %s;", (x_ip_address,))
 
         lang_prefix = get_language_prefix(payload.language)
-        search_term = normalize_lang_search(payload.language)
+        clean_lang = payload.language.strip()
         
         cur.execute("""
             SELECT COUNT(*) + 1 
             FROM public.items i
             JOIN public.works w ON i.work_id = w.work_id
-            WHERE w.language ILIKE %s
-        """, (search_term,))
+            WHERE w.language = %s
+        """, (clean_lang,))
         next_accession_count = cur.fetchone()[0]
         final_accession_no = f"{lang_prefix}-{next_accession_count}"
 
@@ -271,8 +269,8 @@ def create_work(
             cur.execute("""
                 SELECT COUNT(*) + 1 
                 FROM public.works 
-                WHERE language ILIKE %s AND category = %s
-            """, (search_term, payload.category))
+                WHERE language = %s AND category = %s
+            """, (clean_lang, payload.category))
             next_call_count = cur.fetchone()[0]
             final_call_no = f"{lang_initial}-{cat_code}-{next_call_count}.0"
 
@@ -292,8 +290,8 @@ def create_work(
             (
                 payload.title, 
                 payload.language, 
-                payload.category, 
-                payload.genre or None,
+                payload.category or None, 
+                payload.genre if (payload.genre and payload.genre.strip() != "") else None,
                 payload.author if (payload.author and payload.author.strip() != "") else "Unknown", 
                 payload.publisher or None, 
                 payload.original_language or None,
@@ -511,6 +509,34 @@ async def update_ledger_record(
             raise HTTPException(status_code=404, detail="Item not found")
         work_id = res[0]
 
+        cur.execute("SELECT language, category, call_no FROM public.works WHERE work_id = %s", (work_id,))
+        current_work = cur.fetchone()
+        current_lang = current_work[0]
+        current_cat = current_work[1]
+        current_call = current_work[2]
+
+        new_cat = payload.get('category')
+        provided_call = payload.get('call_no')
+        
+        if provided_call in ["", "---", None]:
+            provided_call = None
+            
+        final_call_no = provided_call or current_call
+
+        if new_cat and new_cat.strip() != "" and (new_cat != current_cat or not final_call_no or final_call_no == "---"):
+            lang_prefix = get_language_prefix(current_lang)
+            cat_code = get_category_code(new_cat)
+            lang_initial = lang_prefix if len(lang_prefix) == 2 else current_lang[0].upper()
+            clean_lang = current_lang.strip()
+
+            cur.execute("""
+                SELECT COUNT(*) + 1 
+                FROM public.works 
+                WHERE language = %s AND category = %s
+            """, (clean_lang, new_cat))
+            next_call_count = cur.fetchone()[0]
+            final_call_no = f"{lang_initial}-{cat_code}-{next_call_count}.0"
+
         cur.execute("""
             UPDATE public.works SET 
                 title = COALESCE(NULLIF(%s, ''), title),
@@ -519,11 +545,12 @@ async def update_ledger_record(
                 isbn = COALESCE(NULLIF(%s, ''), isbn),
                 ddc = COALESCE(NULLIF(%s, ''), ddc),
                 year = COALESCE(NULLIF(%s, 0)::text::integer, year),
-                category = COALESCE(NULLIF(%s, ''), category),
-                genre = COALESCE(NULLIF(%s, ''), genre),
+                category = NULLIF(%s, ''),
+                genre = %s,
                 original_language = COALESCE(NULLIF(%s, ''), original_language),
                 translation_compilation = %s,
-                notes = %s
+                notes = %s,
+                call_no = COALESCE(NULLIF(%s, ''), call_no)
             WHERE work_id = %s
         """, (
             payload.get('title'),
@@ -532,16 +559,20 @@ async def update_ledger_record(
             payload.get('isbn'),
             payload.get('ddc'),
             payload.get('year'),
-            payload.get('category'),
-            payload.get('genre'),
+            new_cat,
+            payload.get('genre') if (payload.get('genre') and payload.get('genre').strip() != "") else None,
             payload.get('original_language'),
             payload.get('translation_compilation'),
             payload.get('notes'),
+            final_call_no,
             work_id
         ))
 
+        if final_call_no:
+            cur.execute("UPDATE public.items SET call_no = %s WHERE work_id = %s", (final_call_no, work_id))
+
         conn.commit()
-        return {"status": "success"}
+        return {"status": "success", "call_no": final_call_no}
     except Exception as e:
         if conn: conn.rollback()
         print(f"❌ Database Error: {e}")
@@ -617,6 +648,25 @@ async def soft_delete_book(
     except Exception as e:
         if conn: conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+@router.post("/check-duplicate")
+def check_duplicate(payload: DuplicateCheckRequest, current_user: dict = Depends(get_current_user)):
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT COUNT(*) 
+            FROM public.works 
+            WHERE title ILIKE %s AND author ILIKE %s
+        """, (payload.title.strip(), f"%{payload.author.strip()}%" if payload.author else "%Unknown%"))
+        count = cur.fetchone()[0]
+        return {"is_duplicate": count > 0}
+    except Exception as e:
+        print(f"❌ Duplicate check failure: {e}")
+        raise HTTPException(status_code=500, detail="Duplicate verification failed")
     finally:
         cur.close()
         conn.close()

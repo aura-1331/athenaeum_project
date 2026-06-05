@@ -11,25 +11,25 @@
         <div class="panel-badge">REVISION_STATION_01</div>
         
         <div class="hero-identity-block">
-          <span class="meta-label">CURRENTLY_EDITING</span>
+          <span class="meta-label">CURRENTLY EDITING</span>
           <h1 class="display-title">{{ editableBook.title }}</h1>
           <p class="display-author">BY {{ editableBook.author || 'UNKNOWN' }}</p>
         </div>
 
         <div class="system-status-matrix">
           <div class="status-node">
-            <span>REGISTRY_RANK</span>
+            <span>REGISTRY RANK</span>
             <strong class="rank-badge">{{ auditData.userRole }}</strong>
           </div>
           <div class="status-node">
-            <span>INDEX_MARKER</span>
+            <span>INDEX MARKER</span>
             <strong class="font-mono">#{{ editableBook.serial_no }}</strong>
           </div>
         </div>
 
         <div class="panel-actions-stack">
-          <button class="btn btn-filled" @click="triggerActionConfirm('commit')">COMMIT_CHANGES</button>
-          <button class="btn btn-outline" @click="triggerActionConfirm('abort')">ABORT_TRANSACTION</button>
+          <button class="btn btn-filled" @click="triggerActionConfirm('commit')">COMMIT CHANGES</button>
+          <button class="btn btn-outline" @click="triggerActionConfirm('abort')">ABORT TRANSACTION</button>
         </div>
       </aside>
 
@@ -37,18 +37,18 @@
         <div class="form-scroll-wrapper">
           
           <fieldset class="form-fieldset">
-            <legend class="fieldset-legend">01 // CORE SYSTEM IDENTITY</legend>
+            <legend class="fieldset-legend">01 // CORE PROFILE IDENTITY</legend>
             
             <div class="form-row">
               <div class="field-container full-width">
-                <label class="input-label">ASSET_TITLE_REGISTER</label>
+                <label class="input-label">BOOK TITLE</label>
                 <input type="text" v-model="editableBook.title" class="panel-input font-emphasis" />
               </div>
             </div>
 
             <div class="form-row">
               <div class="field-container full-width relative-position">
-                <label class="input-label">PRIMARY_CREATOR_ORIGIN</label>
+                <label class="input-label">AUTHOR</label>
                 <input 
                   type="text" 
                   v-model="editableBook.author" 
@@ -79,22 +79,22 @@
             
             <div class="form-row split-2">
               <div class="field-container disabled-container">
-                <label class="input-label">RECORD_IDENTIFIER (LOCKED)</label>
+                <label class="input-label">RECORD IDENTIFIER</label>
                 <div class="static-value font-mono">{{ editableBook.record_id }}</div>
               </div>
               <div class="field-container disabled-container">
-                <label class="input-label">DATABASE_WORK_ID (LOCKED)</label>
+                <label class="input-label">WORK ID</label>
                 <div class="static-value font-mono text-amber">{{ editableBook.work_id }}</div>
               </div>
             </div>
 
             <div class="form-row split-2">
               <div class="field-container disabled-container">
-                <label class="input-label">ACCESSION_SEQUENCE_NO (LOCKED)</label>
+                <label class="input-label">ACCESSION NO</label>
                 <div class="static-value font-mono text-blue">{{ editableBook.accession_no }}</div>
               </div>
               <div class="field-container disabled-container">
-                <label class="input-label">SERIAL_INDEX_SEQUENCE (LOCKED)</label>
+                <label class="input-label">SERIAL NO</label>
                 <div class="static-value font-mono text-magenta">{{ editableBook.serial_no }}</div>
               </div>
             </div>
@@ -104,30 +104,30 @@
             v-if="auditData.userRole === 'The Chief' || auditData.userRole === 'The Keeper'" 
             class="form-fieldset"
           >
-            <legend class="fieldset-legend">03 // PHYSICAL SPATIAL VECTORS</legend>
+            <legend class="fieldset-legend">03 // LOCATION & METADATA VECTORS</legend>
             
             <div class="form-row split-2">
               <div class="field-container contextual-bg">
-                <label class="input-label">SHELF_LOCATION_COORDINATES</label>
+                <label class="input-label">SHELF LOCATION</label>
                 <input type="text" v-model="editableBook.shelf" class="panel-input font-mono font-bold" />
               </div>
               <div class="field-container contextual-bg">
-                <label class="input-label">CALL_SIGNATURE_MARKER</label>
+                <label class="input-label">CALL NUMBER</label>
                 <input type="text" v-model="editableBook.call_no" class="panel-input font-mono font-bold" />
               </div>
             </div>
 
             <div class="form-row split-3">
-              <div class="field-container">
-                <label class="input-label">TEXT_LANGUAGE</label>
-                <input type="text" v-model="editableBook.language" class="panel-input size-compact" />
+              <div class="field-container disabled-container">
+                <label class="input-label">TEXT LANGUAGE</label>
+                <div class="static-value font-bold text-gray-lock">{{ editableBook.language }}</div>
               </div>
               <div class="field-container">
-                <label class="input-label">SOURCE_ORIGIN</label>
+                <label class="input-label">ORIGINAL LANGUAGE</label>
                 <input type="text" v-model="editableBook.original_language" class="panel-input size-compact" />
               </div>
               <div class="field-container">
-                <label class="input-label">CORE_CATEGORY (OPTIONAL)</label>
+                <label class="input-label">CATEGORY</label>
                 <select v-model="editableBook.category" class="panel-select-menu size-compact">
                   <option value="">-- NONE / UNASSIGNED --</option>
                   <option value="Fiction">Fiction</option>
@@ -140,7 +140,7 @@
 
             <div class="form-row split-2">
               <div class="field-container relative-position">
-                <label class="input-label">IMPRINT_PUBLISHER</label>
+                <label class="input-label">PUBLISHER</label>
                 <input 
                   type="text" 
                   v-model="editableBook.publisher" 
@@ -161,31 +161,31 @@
                 </div>
               </div>
               <div class="field-container">
-                <label class="input-label">TEMPORAL_EPOCH</label>
+                <label class="input-label">YEAR</label>
                 <input type="text" v-model="editableBook.year" class="panel-input size-compact font-mono" />
               </div>
             </div>
 
             <div class="form-row split-2">
               <div class="field-container">
-                <label class="input-label">ISBN_IDENTIFIER</label>
+                <label class="input-label">ISBN</label>
                 <input type="text" v-model="editableBook.isbn" class="panel-input size-compact font-mono" />
               </div>
               <div class="field-container">
-                <label class="input-label">DDC_EXTENSION</label>
+                <label class="input-label">DDC</label>
                 <input type="text" v-model="editableBook.ddc" class="panel-input size-compact font-mono" />
               </div>
             </div>
 
             <div class="form-row">
               <div class="field-container full-width layout-transparent">
-                <label class="input-label">ACTIVE_COMPILED_GENRE_STRING_PREVIEW</label>
+                <label class="input-label">GENRE PREVIEW</label>
                 <div class="chip-assembly-dock">
                   <span v-for="chip in liveCompiledGenreChips" :key="chip" class="active-badge-chip">
                     {{ chip }}
                   </span>
                   <span v-if="liveCompiledGenreChips.length === 0" class="dock-empty-text">
-                    NO_GENRES_SELECTED // DEFAULTING_TO_GENERAL
+                    NO GENRES SELECTED
                   </span>
                 </div>
               </div>
@@ -193,35 +193,35 @@
 
             <div class="form-row split-3">
               <div class="field-container">
-                <label class="input-label">GENRE_GROUP_A // CREATIVE</label>
+                <label class="input-label">CREATIVE GENRES (GROUP A)</label>
                 <select v-model="selectedGroupAGenre" @change="syncGenreSelection" class="panel-select-menu size-compact">
-                  <option value="">-- CHOOSE_GENRE --</option>
+                  <option value="">-- CHOOSE GENRE --</option>
                   <option v-for="g in genreGroupA" :key="g" :value="g">{{ g }}</option>
                 </select>
               </div>
 
               <div class="field-container">
-                <label class="input-label">GENRE_GROUP_B // FACTUAL</label>
+                <label class="input-label">FACTUAL GENRES (GROUP B)</label>
                 <select v-model="selectedGroupBGenre" @change="syncGenreSelection" class="panel-select-menu size-compact">
-                  <option value="">-- CHOOSE_GENRE --</option>
+                  <option value="">-- CHOOSE GENRE --</option>
                   <option v-for="g in genreGroupB" :key="g" :value="g">{{ g }}</option>
                 </select>
               </div>
 
               <div class="field-container">
-                <label class="input-label">GENRE_GROUP_C // REGISTRY_ADDED</label>
+                <label class="input-label">USER ADDED GENRES (GROUP C)</label>
                 <select v-model="selectedGroupCGenre" @change="syncGenreSelection" class="panel-select-menu size-compact">
-                  <option value="">-- CHOOSE_GENRE --</option>
+                  <option value="">-- CHOOSE GENRE --</option>
                   <option v-for="g in dynamicCommunityGenres" :key="g" :value="g">{{ g }}</option>
                   <option disabled class="dropdown-divider-line">────────────────────</option>
-                  <option value="CUSTOM_MANUAL_OVERRIDE">[X] TYPE_MANUAL_INPUT</option>
+                  <option value="CUSTOM_MANUAL_OVERRIDE">[X] TYPE MANUAL INPUT</option>
                 </select>
               </div>
             </div>
 
             <div v-if="showCustomManualGenreField" class="form-row">
               <div class="field-container full-width border-amber">
-                <label class="input-label text-amber">MANUAL_GENRE_INPUT_OVERRIDE (USE SLASHER '/' FOR MULTIPLES)</label>
+                <label class="input-label text-amber">MANUAL GENRE OVERRIDE (USE '/' FOR MULTIPLES)</label>
                 <input 
                   type="text" 
                   v-model="customManualGenreText" 
@@ -234,10 +234,10 @@
           </fieldset>
 
           <fieldset class="form-fieldset">
-            <legend class="fieldset-legend">04 // ADMINISTRATIVE CURATORIAL LOG</legend>
+            <legend class="fieldset-legend">04 // CURATORIAL REMARKS & LOGS</legend>
             <div class="form-row">
               <div class="field-container full-width plaintext-wrapper">
-                <label class="input-label">REVISE_NOTATIONS_REMARKS</label>
+                <label class="input-label">NOTES / REMARKS</label>
                 <textarea v-model="editableBook.notes" class="panel-textarea" rows="6"></textarea>
               </div>
             </div>
@@ -246,6 +246,11 @@
         </div>
       </main>
 
+    </div>
+
+    <div v-if="toast" class="toast-banner-notification" :class="toast.type">
+      <span class="toast-indicator"></span>
+      <span class="toast-message-label">{{ toast.message }}</span>
     </div>
 
     <div v-if="activeModalType" class="modal-overlay-shroud">
@@ -264,7 +269,7 @@
         </p>
 
         <div v-if="activeModalType === 'commit'" class="modal-input-field-block">
-          <label class="modal-input-label">SPECIFY_OPERATIONAL_CHANGE_JUSTIFICATION</label>
+          <label class="modal-input-label">SPECIFY OPERATIONAL CHANGE JUSTIFICATION</label>
           <input 
             type="text" 
             v-model="changeReason" 
@@ -310,6 +315,12 @@ const changeReason = ref<string>("")
 const countdownTimerSeconds = ref<number>(0)
 let nativeIntervalReference: any = null
 
+interface ToastNotification {
+  message: string
+  type: 'success' | 'error'
+}
+const toast = ref<ToastNotification | null>(null)
+
 const genreGroupA = ref([
   "ADVENTURE", "BIOGRAPHY", "CLASSIC", "DETECTIVE", "FANTASY", 
   "FOLKLORE", "FOLKTALES", "HORROR", "MYSTERY", "NOVEL", 
@@ -329,7 +340,6 @@ const dynamicCommunityGenres = ref<string[]>([])
 const selectedGroupAGenre = ref("")
 const selectedGroupBGenre = ref("")
 const selectedGroupCGenre = ref("")
-
 const showCustomManualGenreField = ref(false)
 const customManualGenreText = ref("")
 
@@ -353,29 +363,42 @@ const liveCompiledGenreChips = computed(() => {
   return editableBook.value.genre.split('/').map((g: string) => g.trim().toUpperCase()).filter((g: string) => g.length > 0)
 })
 
+function triggerToastNotification(message: string, type: 'success' | 'error') {
+  toast.value = { message, type }
+  setTimeout(() => {
+    toast.value = null
+  }, 4000)
+}
+
 function parseCurrentGenresIntoDropdowns(genreString: string) {
   if (!genreString) return
   const currentTokens = genreString.split('/').map((g: string) => g.trim().toUpperCase())
   
+  let matchedAny = false
   currentTokens.forEach(token => {
     if (genreGroupA.value.includes(token)) {
       selectedGroupAGenre.value = token
+      matchedAny = true
     } else if (genreGroupB.value.includes(token)) {
       selectedGroupBGenre.value = token
+      matchedAny = true
     } else if (dynamicCommunityGenres.value.includes(token)) {
       selectedGroupCGenre.value = token
-    } else {
-      showCustomManualGenreField.value = true
-      customManualGenreText.value = genreString
-      selectedGroupCGenre.value = "CUSTOM_MANUAL_OVERRIDE"
+      matchedAny = true
     }
   })
+
+  if (!matchedAny && genreString.trim() !== "") {
+    showCustomManualGenreField.value = true
+    selectedGroupCGenre.value = "CUSTOM_MANUAL_OVERRIDE"
+    customManualGenreText.value = genreString
+  }
 }
 
 function syncGenreSelection() {
   if (selectedGroupCGenre.value === "CUSTOM_MANUAL_OVERRIDE") {
     showCustomManualGenreField.value = true
-    editableBook.value.genre = customManualGenreText.value.trim().toUpperCase()
+    editableBook.value.genre = customManualGenreText.value.trim().toUpperCase() || null
     return
   }
   
@@ -388,18 +411,18 @@ function syncGenreSelection() {
     activeSelectionArray.push(selectedGroupCGenre.value)
   }
   
-  editableBook.value.genre = activeSelectionArray.join('/')
+  editableBook.value.genre = activeSelectionArray.join('/') || null
+  customManualGenreText.value = editableBook.value.genre || ""
 }
 
 function syncManualGenreInput() {
-  editableBook.value.genre = customManualGenreText.value.trim().toUpperCase()
+  editableBook.value.genre = customManualGenreText.value.trim().toUpperCase() || null
 }
 
 async function harvestSystemGenresMatrix() {
   try {
     const response = await axios.get('/catalogue?limit=1000')
     const items = response.data?.data || []
-    const gatheredSet = new Set<string>()
   } catch (err) {
     console.error("Failed to dynamically harvest global taxonomy metrics:", err)
   }
@@ -511,13 +534,9 @@ function closeModalPrompt() {
 async function saveRecord() {
   const id = route.params.id || editableBook.value?.serial_no
   try {
-    if (!editableBook.value.genre || editableBook.value.genre.trim() === "") {
-      editableBook.value.genre = "GENERAL"
-    }
-    
     const operationalReason = changeReason.value.trim() || "Routine operational adjustment"
     
-    await axios.patch(`/catalogue/${id}`, editableBook.value, {
+    const response = await axios.patch(`/catalogue/${id}`, editableBook.value, {
       headers: {
         'X-Change-Reason': operationalReason,
         'X-Device-ID': auditData.value.deviceID,
@@ -525,10 +544,18 @@ async function saveRecord() {
       }
     })
     
-    router.push(`/details/${id}`)
+    if (response.data && response.data.call_no) {
+      editableBook.value.call_no = response.data.call_no
+    }
+    
+    triggerToastNotification("Authority entry modifications saved successfully.", "success")
+    
+    setTimeout(() => {
+      router.push(`/details/${id}`)
+    }, 1500)
   } catch (err) {
     console.error("Transaction commit rejected:", err)
-    alert("Write Failure: Transaction aborted or field formatting rules syntax error.")
+    triggerToastNotification("Write Failure: Transaction aborted or validation syntax error.", "error")
   }
 }
 
@@ -615,7 +642,7 @@ onMounted(() => fetchRecordData())
 .layout-transparent { background-color: transparent !important; border: 1px dashed #22252e !important; }
 .border-amber { border-color: rgba(245, 158, 11, 0.4) !important; }
 
-.input-label { font-size: 9px; font-weight: 700; color: #525966; letter-spacing: 0.5px; }
+.input-label { font-size: 10px; font-weight: 700; color: #626a7a; letter-spacing: 0.5px; }
 .panel-input { background: transparent; border: none; color: #ffffff; font-family: inherit; font-size: 14px; padding: 2px 0 0 0; width: 100%; }
 .panel-input:focus { outline: none; }
 
@@ -639,9 +666,31 @@ onMounted(() => fetchRecordData())
 .text-amber { color: #f59e0b; }
 .text-blue { color: #3b82f6 !important; }
 .text-magenta { color: #ec4899 !important; }
+.text-gray-lock { color: #525966 !important; }
 .plaintext-wrapper { padding: 16px; }
 .panel-textarea { background: transparent; border: none; color: #e2e4e9; font-family: inherit; font-size: 13px; line-height: 1.6; resize: none; width: 100%; box-sizing: border-box; padding-top: 4px; }
 .panel-textarea:focus { outline: none; }
+
+.toast-banner-notification {
+  position: fixed; top: 24px; right: 24px;
+  padding: 16px 24px; border-radius: 6px;
+  background-color: #16181f; border: 1px solid #22252e;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  display: flex; align-items: center; gap: 12px;
+  z-index: 20000; font-size: 13px; font-weight: 500;
+  animation: slideInToast 0.3s cubic-bezier(0.1, 0.8, 0.3, 1);
+}
+.toast-indicator { width: 8px; height: 8px; border-radius: 50%; }
+.toast-banner-notification.success { border-left: 4px solid #10b981; }
+.toast-banner-notification.success .toast-indicator { background-color: #10b981; }
+.toast-banner-notification.error { border-left: 4px solid #ef4444; }
+.toast-banner-notification.error .toast-indicator { background-color: #ef4444; }
+.toast-message-label { color: #ffffff; }
+
+@keyframes slideInToast {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
 
 .modal-overlay-shroud { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(10, 11, 13, 0.85); backdrop-filter: blur(4px); z-index: 10000; display: flex; align-items: center; justify-content: center; }
 .modal-alert-box { background-color: #16181f; border-top: 4px solid #22252e; padding: 40px; border-radius: 8px; width: 100%; max-width: 480px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
