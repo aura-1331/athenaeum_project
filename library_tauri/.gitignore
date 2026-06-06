@@ -22,7 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-public/logo.png
-src/assets/logo.png
+#public/logo.png
+#src/assets/logo.png
 src/assets/logo1.png
 src/assets/logo2.png
