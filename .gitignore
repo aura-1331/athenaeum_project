@@ -1,26 +1,6 @@
-# --- Python & Backend ---
-library_api/venv*/
+backups/
+.env
+*.pem
+venv/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.db
-library_api/*.sql
-library_api/.env*
-
-# --- Node / Tauri / Frontend ---
-node_modules/
-library_tauri/node_modules/
-library_tauri/dist/
-library_tauri/src-tauri/target/
-library_tauri/.env*
-.env*
-
-# --- Editor & OS ---
 .vscode/
-.idea/
-.DS_Store
-Thumbs.db
-*.log
-library_api/private.pem
-library_api/public.pem
