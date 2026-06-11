@@ -423,6 +423,7 @@
 import { ref, watch, computed, onMounted, onUnmounted } from "vue"
 import { useRouter } from "vue-router"
 import axios from "axios"
+import { dispatchAuditTrail } from '@/utils/audit';
 
 const router = useRouter()
 const pasteInput = ref("")
@@ -913,18 +914,18 @@ async function executeConfirmedCreation() {
     return;
   }
 
-  showPromptModal.value = false
-  loading.value = true
-  result.value = null
+  showPromptModal.value = false;
+  loading.value = true;
+  result.value = null;
 
   try {
-    const cleanedForm = {}
+    const cleanedForm = {};
     Object.keys(form.value).forEach(key => {
-      cleanedForm[key] = form.value[key] === "" ? null : form.value[key]
-    })
+      cleanedForm[key] = form.value[key] === "" ? null : form.value[key];
+    });
 
     if (!cleanedForm.genre || cleanedForm.genre.trim() === "") {
-      cleanedForm.genre = null
+      cleanedForm.genre = null;
     }
 
     const payload = { 
@@ -932,9 +933,9 @@ async function executeConfirmedCreation() {
       author: form.value.author.trim() || "Unknown",
       language: form.value.language_id || null,
       call_no: form.value.call_no || null 
-    }
+    };
     
-    const operationalReason = creationReason.value.trim() || "New registration initialization sequencing"
+    const operationalReason = creationReason.value.trim() || "New registration initialization sequencing";
 
     const res = await axios.post("/catalogue/create-work", payload, {
       headers: {
@@ -942,10 +943,19 @@ async function executeConfirmedCreation() {
         'X-Device-ID': auditData.value.deviceID,
         'X-IP-Address': auditData.value.ip
       }
-    })
+    });
     
-    const data = res.data
-    result.value = data
+    const data = res.data;
+    result.value = data;
+
+    // --- ADD THIS CALL TO FINISH AUDITING ---
+    await dispatchAuditTrail(
+      "CREATE",
+      "CATALOGUE",
+      data.work_id,
+      `Registered new authority work: ${payload.title}`,
+      operationalReason
+    );
 
     setTimeout(() => {
       router.push({
@@ -954,13 +964,13 @@ async function executeConfirmedCreation() {
           work_id: data.work_id, 
           language_id: form.value.language_id 
         }
-      })
-    }, 400)
+      });
+    }, 400);
   } catch (err) {
-    console.error(err)
-    result.value = err.response?.data || { error: "Request failed." }
+    console.error(err);
+    result.value = err.response?.data || { error: "Request failed." };
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 

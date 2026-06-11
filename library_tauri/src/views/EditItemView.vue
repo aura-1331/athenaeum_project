@@ -304,6 +304,7 @@
 import { ref, onMounted, onBeforeUnmount, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import axios from "axios"
+import { dispatchAuditTrail } from '@/utils/audit';
 
 const route = useRoute()
 const router = useRouter()
@@ -532,30 +533,36 @@ function closeModalPrompt() {
 }
 
 async function saveRecord() {
-  const id = route.params.id || editableBook.value?.serial_no
+  const id = route.params.id || editableBook.value?.serial_no;
   try {
-    const operationalReason = changeReason.value.trim() || "Routine operational adjustment"
+    const operationalReason = changeReason.value.trim() || "Routine operational adjustment";
     
+    // 1. Perform the database update
     const response = await axios.patch(`/catalogue/${id}`, editableBook.value, {
       headers: {
-        'X-Change-Reason': operationalReason,
-        'X-Device-ID': auditData.value.deviceID,
-        'X-IP-Address': auditData.value.ip
+        'X-Change-Reason': operationalReason
       }
-    })
+    });
     
-    if (response.data && response.data.call_no) {
-      editableBook.value.call_no = response.data.call_no
-    }
+    // 2. Dispatch the Audit Trail entry
+    await dispatchAuditTrail(
+      'UPDATE',
+      'CATALOGUE',
+      id,
+      `Updated record details for ${editableBook.value.title}`,
+      operationalReason,
+      null, // oldState
+      editableBook.value // newState
+    );
     
-    triggerToastNotification("Authority entry modifications saved successfully.", "success")
+    triggerToastNotification("Authority entry modifications saved successfully.", "success");
     
     setTimeout(() => {
-      router.push(`/details/${id}`)
-    }, 1500)
+      router.push(`/details/${id}`);
+    }, 1500);
   } catch (err) {
-    console.error("Transaction commit rejected:", err)
-    triggerToastNotification("Write Failure: Transaction aborted or validation syntax error.", "error")
+    console.error("Transaction commit rejected:", err);
+    triggerToastNotification("Write Failure: Transaction aborted.", "error");
   }
 }
 
