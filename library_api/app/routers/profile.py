@@ -1,14 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from app.auth import get_current_user
 from app.database import get_connection
+from app.audit_utils import audit_action  # 🛡️ Standardized auditing
 
 router = APIRouter(prefix="/profile", tags=["User Profile"])
 
+@audit_action("VIEW_PROFILE")  # 🛡️ Tracks profile access
 @router.get("/me")
-async def get_my_profile(current_user: dict = Depends(get_current_user)):
+async def get_my_profile(request: Request, current_user: dict = Depends(get_current_user)):
     conn = get_connection()
     cur = conn.cursor()
     try:
+        user_id = current_user['user_id']
+
         # 1. Get Active Loans
         cur.execute("""
             SELECT l.loan_id, l.serial_no, w.title, l.due_date 
@@ -16,7 +20,7 @@ async def get_my_profile(current_user: dict = Depends(get_current_user)):
             JOIN public.items i ON l.serial_no = i.serial_no
             JOIN public.works w ON i.work_id = w.work_id
             WHERE l.user_id = %s AND l.status = 'ACTIVE'
-        """, (current_user['user_id'],))
+        """, (user_id,))
         loans = cur.fetchall()
 
         # 2. Get Unpaid Fines
@@ -24,7 +28,7 @@ async def get_my_profile(current_user: dict = Depends(get_current_user)):
             SELECT fine_id, amount, status 
             FROM fines 
             WHERE user_id = %s AND status = 'UNPAID'
-        """, (current_user['user_id'],))
+        """, (user_id,))
         fines = cur.fetchall()
 
         return {
@@ -44,5 +48,4 @@ async def get_my_profile(current_user: dict = Depends(get_current_user)):
             "total_debt": sum(float(f[1]) for f in fines)
         }
     finally:
-        cur.close()
-        conn.close()
+        cur.close(); conn.close()

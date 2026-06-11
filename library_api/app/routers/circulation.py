@@ -2,33 +2,26 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from datetime import datetime, timedelta, timezone  # 🛡️ Added 'timedelta' and 'timezone'
-from app.auth import get_current_user
+from app.auth import get_current_user, require_role
 from app.database import get_connection, record_audit, get_config_value
 from pydantic import BaseModel
-
+from app.audit_utils import audit_action
 router = APIRouter(prefix="/circulation", tags=["Circulation & Fines"])
 
 class ReturnRequest(BaseModel):
     notes: str | None = None
-
-# --- CONSTANTS ---
-# Replace the hardcoded rate with:
-
 # ---------------------------------------------------------------------------------------------------------------------#
 # ---------------------------------BOOK ISSUING LOGIC------------------------------------------------------------------#
 # ----------------------------------------------------------------------------------------------------------------------#
-
-@router.post("/issue/{serial_no}", status_code=201)
+@audit_action("ISSUE_BOOK")
+@router.post("/issue/{serial_no}", status_code=201, dependencies=[Depends(require_role(["The Keeper", "The Chief"]))])
 async def issue_book(
     serial_no: int,
     borrower_id: int,
     days: int = 14,
     request: Request = None,
     current_user: dict = Depends(get_current_user)
-):
-    if current_user['role'] not in ["The Keeper", "The Chief"]:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
+):    
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -80,16 +73,14 @@ async def issue_book(
 # -------------------------------------------------BOOK  RETURNING LOGIC------------------------------------------------------------------#
 # ----------------------------------------------------------------------------------------------------------------------------------------#        
 
-@router.post("/return/{serial_no}")
+@audit_action("RETURN_BOOK")
+@router.post("/return/{serial_no}", dependencies=[Depends(require_role(["The Keeper", "The Chief"]))])
 async def return_book(
     serial_no: int,
     request: Request,
     return_data: ReturnRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    if current_user['role'] not in ["The Keeper", "The Chief"]:
-        raise HTTPException(status_code=403, detail="Forbidden")
-
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -131,13 +122,11 @@ async def return_book(
 # -------------------------------------------------RETURNING OVERDUE LOGIC------------------------------------------------------------------#
 # ----------------------------------------------------------------------------------------------------------------------------------------#        
 
-
-@router.get("/overdue", tags=["Circulation Monitoring"])
+@audit_action("LIST_OVERDUE")
+@router.get("/overdue", tags=["Circulation Monitoring"], dependencies=[Depends(require_role(["The Keeper", "The Chief"]))])
 async def list_overdue_books(current_user: dict = Depends(get_current_user)):
     """Lists all books that are past their due date but haven't been returned."""
-    if current_user['role'] not in ["The Keeper", "The Chief"]:
-        raise HTTPException(status_code=403, detail="Access denied.")
-
+    
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -174,17 +163,15 @@ async def list_overdue_books(current_user: dict = Depends(get_current_user)):
 # -------------------------------------------------------LATE FINE LOGIC------------------------------------------------------------------#
 # ----------------------------------------------------------------------------------------------------------------------------------------#        
 
-
-@router.post("/fines/pay/{fine_id}")
+@audit_action("PAY_FINE")
+@router.post("/fines/pay/{fine_id}", dependencies=[Depends(require_role(["The Keeper", "The Chief"]))])
 async def pay_fine(
     fine_id: int,
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """Records payment of a fine."""
-    if current_user['role'] not in ["The Keeper", "The Chief"]:
-        raise HTTPException(status_code=403, detail="Staff only.")
-
+    
     conn = get_connection()
     cur = conn.cursor()
     try:

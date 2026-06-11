@@ -1,15 +1,15 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from app.database import get_connection
+from app.auth import get_current_user
+from app.audit_utils import audit_action  # 🛡️ Integrated Auditing
 
 router = APIRouter(prefix="/items", tags=["items"])
 
-# 1. GET THE BOOK DATA (Fixes the "Could not find" error)
 @router.get("/{serial_no}")
-def get_item(serial_no: int):
+def get_item(serial_no: int, current_user: dict = Depends(get_current_user)):
     conn = get_connection()
     cur = conn.cursor()
     try:
-        # We join works and items so we get the full data for the edit form
         cur.execute("""
             SELECT w.title, w.author, w.language, w.publisher, w.year, w.genre, w.notes
             FROM works w
@@ -18,28 +18,30 @@ def get_item(serial_no: int):
         
         row = cur.fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail="Book not found in database")
+            raise HTTPException(status_code=404, detail="Book not found")
             
         return {
-            "title": row[0],
-            "author": row[1],
-            "language": row[2],
-            "publisher": row[3],
-            "year": row[4],
-            "genre": row[5],
-            "notes": row[6]
+            "title": row[0], "author": row[1], "language": row[2],
+            "publisher": row[3], "year": row[4], "genre": row[5], "notes": row[6]
         }
     finally:
-        cur.close()
-        conn.close()
+        cur.close(); conn.close()
 
-# 2. SAVE THE CHANGES (Updates both tables so search results change)
+@audit_action("UPDATE_ITEM") # 🛡️ Tracks data integrity changes
 @router.put("/{serial_no}")
-def update_item(serial_no: int, payload: dict):
+def update_item(
+    serial_no: int, 
+    payload: dict, 
+    request: Request, # 🛡️ Required for audit metadata
+    current_user: dict = Depends(get_current_user)
+):
+    if current_user["role"] not in ["The Keeper", "The Chief"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     conn = get_connection()
     cur = conn.cursor()
     try:
-        # Update the WORKS table (This is what the Search screen shows)
+        # Update WORKS table
         cur.execute("""
             UPDATE works 
             SET title = %s, author = %s, language = %s, publisher = %s, year = %s, genre = %s, notes = %s
@@ -50,7 +52,7 @@ def update_item(serial_no: int, payload: dict):
             payload.get("notes"), serial_no
         ))
 
-        # Update the ITEMS table (The physical copy record)
+        # Update ITEMS table
         cur.execute("""
             UPDATE items 
             SET title = %s, author = %s, language = %s
@@ -65,5 +67,4 @@ def update_item(serial_no: int, payload: dict):
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        cur.close()
-        conn.close()
+        cur.close(); conn.close()

@@ -1,12 +1,12 @@
-# app/routers/analytics.py
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from app.auth import get_current_user, require_role # 1. Import dependencies
 from app.database import get_connection
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-
-@router.get("/status-transitions")
-def status_transition_counts():
+@router.get("/status-transitions", dependencies=[Depends(require_role(["The Chief"]))]) # 2. Add Security Guard
+def status_transition_counts(current_user: dict = Depends(get_current_user)):
+    # 3. Manual role check removed
     conn = None
     cursor = None
     try:
@@ -23,24 +23,10 @@ def status_transition_counts():
         )
 
         rows = cursor.fetchall()
-
-        data = []
-        for r in rows:
-            data.append(
-                {
-                    "old_status": r[0],
-                    "new_status": r[1],
-                    "count": r[2],
-                }
-            )
-
-        return data
+        return [{"old_status": r[0], "new_status": r[1], "count": r[2]} for r in rows]
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
     finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        if cursor: cursor.close()
+        if conn: conn.close()

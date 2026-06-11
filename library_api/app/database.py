@@ -1,5 +1,6 @@
 import os
 import psycopg2
+
 from dotenv import load_dotenv
 from pathlib import Path
 from fastapi import Request
@@ -86,6 +87,7 @@ def get_config_value(key: str):
             conn.close()
 
 async def record_audit(
+    
     user_id: int,
     action_type: str,
     request: Request,
@@ -93,6 +95,7 @@ async def record_audit(
     details: str = None,
     valid_reason: str = "SYSTEM"
 ):
+    
     conn = None
     cur = None
     try:
@@ -109,14 +112,15 @@ async def record_audit(
         else:
             equipment = "COMPUTER"
 
+        # Updated to match the columns in your audit_logs table
         cur.execute("""
             INSERT INTO audit_logs (
-                user_id,
-                action_type,
-                target_id,
-                details,
-                ip_address,
-                equipment,
+                user_id, 
+                action_type, 
+                target_id, 
+                details, 
+                ip_address, 
+                equipment, 
                 valid_reason
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s)

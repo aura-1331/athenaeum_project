@@ -14,16 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
 from jose import jwt, JWTError
+from app.audit_utils import audit_action
 
 from pdf.pdf_generator import generate_pdf
 from app.database import get_connection, record_audit
-from app.auth import (
-    PUBLIC_KEY,
-    ALGORITHM,
-    create_token,
-    get_current_user,
-    router as auth_router
-)
+from app.token_manager import PUBLIC_KEY, ALGORITHM, create_token
+from app.auth import router as auth_router, get_current_user
 
 from app.utils.security import (
     hash_password,
@@ -106,12 +102,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 # Chief Review / Final Decision
 # ----------------------------
 
+@audit_action("CHIEF_DECISION") # Add this decorator
 @app.post("/chief/decide-request/{request_id}")
 async def chief_decide_request(
+    request: Request, # Ensure Request is added if missing
     request_id: int,
     req: ChiefDecisionModel,
     current_user: dict = Depends(get_current_user)
 ):
+    # ... logic ...
     if current_user["role"] != "The Chief":
         raise HTTPException(
             status_code=403,

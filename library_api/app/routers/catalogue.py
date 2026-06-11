@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Header, status
-from app.auth import get_current_user
+from app.auth import get_current_user, require_role
 from app.database import get_connection, record_audit
+from app.audit_utils import audit_action  # 1. Added automated audit import
 from pydantic import BaseModel
 from psycopg2.extras import RealDictCursor
 from typing import Optional, List
@@ -224,6 +225,7 @@ def search_publishers(q: str, current_user: dict = Depends(get_current_user)):
         cur.close()
         conn.close()
 
+@audit_action("CREATE_WORK")
 @router.post("/create-work")
 def create_work(
     payload: WorkCreate, 
@@ -461,7 +463,8 @@ def get_catalogue(
         cur.close()
         conn.close()
 
-@router.patch("/{serial_no}")
+@audit_action("UPDATE_LEDGER")
+@router.patch("/{serial_no}", dependencies=[Depends(require_role(["The Chief"]))]) # <--- ADD THIS
 async def update_ledger_record(
     serial_no: int, 
     payload: dict, 
@@ -470,10 +473,7 @@ async def update_ledger_record(
     x_change_reason: Optional[str] = Header(default="Routine operational adjustment"),
     x_device_id: Optional[str] = Header(default="Desktop Browser Workstation"),
     x_ip_address: Optional[str] = Header(default="127.0.0.1")
-):
-    if current_user.get('role') != "The Chief" and current_user.get('role') != "Sys_Arch":
-        raise HTTPException(status_code=403, detail="Chief Authorization Required")
-
+):    
     lookup_conn = get_connection()
     lookup_cur = lookup_conn.cursor()
     try:
@@ -581,14 +581,12 @@ async def update_ledger_record(
         cur.close()
         conn.close()
 
-@router.post("/approve/{work_id}", tags=["Admin Operations"])
+@audit_action("WORK_APPROVAL")
+@router.post("/approve/{work_id}", tags=["Admin Operations"], dependencies=[Depends(require_role(["The Chief"]))]) # <--- ADD THIS
 async def approve_work(
     work_id: int, action: str, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)
-):
-    if current_user['role'] != "The Chief":
-        raise HTTPException(status_code=403, detail="Chief only.")
-
+):    
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -603,13 +601,6 @@ async def approve_work(
         if not row:
             raise HTTPException(status_code=404, detail="Work not found.")
 
-        await record_audit(
-            user_id=current_user['user_id'],
-            action_type=f"WORK_{new_status}",
-            request=request,
-            target_id=str(work_id),
-            details=f"Decision: {new_status}. Reason: {reason}"
-        )
         conn.commit()
         return {"message": f"Work '{row[0]}' {new_status}."}
     except Exception as e:
@@ -619,14 +610,12 @@ async def approve_work(
         cur.close()
         conn.close()
 
-@router.delete("/{book_id}", tags=["Catalogue Operations"])
+@audit_action("SOFT_DELETE")
+@router.delete("/{book_id}", tags=["Catalogue Operations"], dependencies=[Depends(require_role(["The Chief"]))]) # <--- ADD THIS
 async def soft_delete_book(
     book_id: int, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)
-):
-    if current_user['role'] != "The Chief":
-        raise HTTPException(status_code=403, detail="Chief only.")
-
+):    
     conn = get_connection()
     cur = conn.cursor()
     try:
@@ -636,13 +625,6 @@ async def soft_delete_book(
             WHERE serial_no = %s
         """, (reason, book_id))
         
-        await record_audit(
-            user_id=current_user['user_id'],
-            action_type="SOFT_DELETE",
-            request=request,
-            target_id=str(book_id),
-            details=f"Reason: {reason}"
-        )
         conn.commit()
         return {"status": "success"}
     except Exception as e:
