@@ -152,41 +152,44 @@ watch(
 
 async function createItem() {
   if (!form.value.work_id || !form.value.language_id) {
-    return alert("Provide Work ID and Language Profile")
+    return alert("Provide Work ID and Language Profile");
   }
 
-  loading.value = true
-  result.value = null
+  // 1. Force the user to justify this new entry
+  const reason = prompt("Enter justification for accessioning this new copy:");
+  if (!reason) {
+    alert("Action cancelled: Justification is required for security audits.");
+    return;
+  }
+
+  loading.value = true;
+  result.value = null;
 
   try {
-    const res = await axios.post(
-      "/catalogue/create-item",
-      form.value
-    )
+    const res = await axios.post("/catalogue/create-item", form.value);
 
-    result.value = res.data
+    result.value = res.data;
 
+    // 2. Dispatch the audit with the provided reason
     await dispatchAuditTrail(
       "CREATE",
       "CATALOGUE",
       res.data.accession_no,
-      `Allocated asset tracking token. Accessioned new copy volume link for authority ID: #${form.value.work_id}`
-    )
+      `Allocated asset tracking token for Work ID: #${form.value.work_id}`,
+      reason // <--- The captured reason
+    );
 
-    alert(`Volume Copy Accessioned Successfully • ${res.data.accession_no}`)
+    alert(`Volume Copy Accessioned Successfully • ${res.data.accession_no}`);
 
-    form.value.work_id = ""
-    form.value.language_id = ""
-    authority.value = null
-
+    form.value.work_id = "";
+    form.value.language_id = "";
+    authority.value = null;
   } catch (err) {
     result.value = {
-      error:
-        err.response?.data?.detail ||
-        "Failed to catalog copy"
-    }
+      error: err.response?.data?.detail || "Failed to catalog copy"
+    };
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 </script>

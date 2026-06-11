@@ -1,6 +1,14 @@
 import axios from 'axios'
 
-export async function dispatchAuditTrail(actionType, targetModule, targetId, description, oldState = null, newState = null) {
+export async function dispatchAuditTrail(
+  actionType: string, 
+  targetModule: string, 
+  targetId: string | number | null, 
+  description: string, 
+  reason: string, 
+  oldState: any = null, 
+  newState: any = null
+) {
   try {
     const sessionUser = localStorage.getItem('username') || localStorage.getItem('user') || 'UNKNOWN_ACTOR'
     const sessionRole = localStorage.getItem('user_role') || localStorage.getItem('role') || 'GUEST'
@@ -14,6 +22,7 @@ export async function dispatchAuditTrail(actionType, targetModule, targetId, des
       target_module: targetModule.toUpperCase(),
       target_id: targetId ? String(targetId) : null,
       description: description,
+      change_reason: reason,
       old_value: oldState,
       new_value: newState,
       device_id: deviceSignature,
