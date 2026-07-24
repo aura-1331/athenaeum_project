@@ -428,7 +428,7 @@ async def login(
     try:
         cur.execute(
             """
-            SELECT user_id, hashed_password, role, status, expires_at
+            SELECT user_id, hashed_password, role, status, expires_at, name
             FROM users
             WHERE UPPER(operator_id)=UPPER(%s)
             """,
@@ -504,10 +504,12 @@ async def login(
         )
 
         # Base response payload
+        
         response_payload = {
             "access_token": access_token,
             "token_type": "bearer",
-            "role": normalized_role
+            "role": normalized_role,
+            "user_name": user[5]  # <-- This grabs the name from the database!
         }
 
         # ONLY generate and save a refresh token if they checked the box

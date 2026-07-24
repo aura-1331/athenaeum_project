@@ -272,6 +272,7 @@ const verifyPassword = async () => {
     }
     
     localStorage.setItem('user_role', data.role)
+    localStorage.setItem('user_name', data.user_name)
 
     window.dispatchEvent(new Event("auth-changed"))
 
