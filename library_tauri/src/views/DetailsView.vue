@@ -686,6 +686,55 @@ onMounted(() => fetchBookDetails())
   display: none;
 }
 
+/* =====================================================
+   📱 MOBILE RESPONSIVENESS FIXES
+===================================================== */
+@media (max-width: 768px) {
+  .master-header {
+    padding: 20px 16px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .action-buttons-group {
+    flex-wrap: wrap;
+    width: 100%;
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  .action-trigger {
+    padding: 8px 12px;
+    font-size: 10px;
+  }
+
+  .asymmetric-cards-grid {
+    display: flex; /* Stacks the cards vertically instead of using the complex 12-column grid */
+    flex-direction: column;
+    padding: 0 16px 32px 16px;
+    gap: 16px;
+  }
+
+  .grid-card {
+    padding: 24px;
+    width: 100%;
+  }
+
+  .book-title {
+    font-size: 26px; /* Scales down the massive title font */
+  }
+
+  .telemetry-rows-stack {
+    grid-template-columns: 1fr; /* Stacks the telemetry nodes vertically */
+    gap: 12px;
+  }
+
+  .vectors-sub-grid {
+    grid-template-columns: 1fr; /* Stacks the shelf location and call sign vertically */
+  }
+}
+
 @media print {
   .athenaeum-vault,
   .editorial-scroll-frame,
