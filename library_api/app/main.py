@@ -9,7 +9,7 @@ import secrets
 import string
 
 from datetime import datetime, timezone
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
@@ -419,7 +419,8 @@ def generate_operator_id(role):
 @app.post("/token", tags=["Security"])
 async def login(
     request: Request,
-    form_data: OAuth2PasswordRequestForm = Depends()
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    remember_me: bool = Form(False) # <-- Captures the checkbox from Vue
 ):
     conn = get_connection()
     cur = conn.cursor()
@@ -464,6 +465,7 @@ async def login(
                 status_code=403,
                 detail="Temporary access expired"
             )
+
         # Check 2FA
         cur.execute(
             """
@@ -492,6 +494,7 @@ async def login(
 
         normalized_role = normalize_role(user[2])
 
+        # Always create the short-lived access token
         access_token = create_token(
             {
                 "sub": str(user[0]),
@@ -500,50 +503,57 @@ async def login(
             token_type="access"
         )
 
-        refresh_token = create_token(
-            {
-                "sub": str(user[0]),
-                "role": normalized_role
-            },
-            token_type="refresh"
-        )
-
-        payload = jwt.decode(
-            refresh_token,
-            PUBLIC_KEY,
-            algorithms=[ALGORITHM],
-            audience="athenaeum-client",
-            issuer="athenaeum-api"
-        )
-
-        jti = payload["jti"]
-
-        expires = datetime.fromtimestamp(
-            payload["exp"],
-            tz=timezone.utc
-        )
-
-        cur.execute(
-            """
-            INSERT INTO refresh_tokens
-            (token_id, user_id, expires_at)
-            VALUES (%s, %s, %s)
-            """,
-            (
-                jti,
-                payload["sub"],
-                expires
-            )
-        )
-
-        conn.commit()
-
-        return {
+        # Base response payload
+        response_payload = {
             "access_token": access_token,
-            "refresh_token": refresh_token,
             "token_type": "bearer",
             "role": normalized_role
         }
+
+        # ONLY generate and save a refresh token if they checked the box
+        if remember_me:
+            refresh_token = create_token(
+                {
+                    "sub": str(user[0]),
+                    "role": normalized_role
+                },
+                token_type="refresh"
+            )
+
+            payload = jwt.decode(
+                refresh_token,
+                PUBLIC_KEY,
+                algorithms=[ALGORITHM],
+                audience="athenaeum-client",
+                issuer="athenaeum-api"
+            )
+
+            jti = payload["jti"]
+
+            expires = datetime.fromtimestamp(
+                payload["exp"],
+                tz=timezone.utc
+            )
+
+            cur.execute(
+                """
+                INSERT INTO refresh_tokens
+                (token_id, user_id, expires_at)
+                VALUES (%s, %s, %s)
+                """,
+                (
+                    jti,
+                    payload["sub"],
+                    expires
+                )
+            )
+            
+            # Add the refresh token to the payload we send to Vue
+            response_payload["refresh_token"] = refresh_token
+
+        conn.commit()
+
+        return response_payload
 
     finally:
         cur.close()

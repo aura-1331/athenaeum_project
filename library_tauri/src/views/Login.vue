@@ -237,6 +237,8 @@ const verifyPassword = async () => {
     const formData = new URLSearchParams()
     formData.append('username', fullOperatorId.value)
     formData.append('password', passkey.value)
+    // ADD THIS LINE: Send the checkbox value to the backend
+    formData.append('remember_me', rememberMe.value)
 
     const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
     const response = await fetch(`${baseUrl}/token`, {
@@ -254,52 +256,24 @@ const verifyPassword = async () => {
         currentStep.value = 3
         return
       }
-
       throw new Error(data.detail || 'Authentication failed')
     }
 
+    // UPDATED STORAGE LOGIC:
+    // Only save the refresh token if the backend actually sent one
     if (rememberMe.value) {
       localStorage.setItem('access_token', data.access_token)
-      localStorage.setItem('refresh_token', data.refresh_token)
+      if (data.refresh_token) {
+        localStorage.setItem('refresh_token', data.refresh_token)
+      }
     } else {
       sessionStorage.setItem('access_token', data.access_token)
-      sessionStorage.setItem('refresh_token', data.refresh_token)
+      // No refresh token is saved here because the backend didn't generate one!
     }
+    
     localStorage.setItem('user_role', data.role)
 
     window.dispatchEvent(new Event("auth-changed"))
-
-    router.push('/dashboard')
-
-  } catch (error) {
-    errorMessage.value = error.message
-  } finally {
-    loading.value = false
-  }
-}
-
-const verifyTwoFA = async () => {
-  loading.value = true
-  errorMessage.value = ''
-
-  try {
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
-    const response = await fetch(`${baseUrl}/verify-2fa`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('access_token')}`
-      },
-      body: JSON.stringify({
-        token: tokenPin.value
-      })
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(data.detail || 'Invalid code')
-    }
 
     router.push('/dashboard')
 

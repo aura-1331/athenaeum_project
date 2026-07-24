@@ -189,12 +189,12 @@ onUnmounted(() => {
     </aside>
 
     <main 
-  class="content-wrapper" 
-  :class="{ 
-    'no-padding': route.path.includes('/details/'), 
-    'authenticated-layout': isAuthenticated && !isEditing 
-  }"
->
+      class="content-wrapper" 
+      :class="{ 
+        'no-padding': route.path.includes('/details/'), 
+        'authenticated-layout': isAuthenticated && !isEditing 
+      }"
+    >
       <header 
         v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" 
         class="global-header"
@@ -381,5 +381,45 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   .section { background: white !important; border: 1px solid #ccc !important; break-inside: avoid; margin-bottom: 15px !important; padding: 15px !important; box-shadow: none !important; }
   .details-page::after { content: "Official Library Record - Athenaeum Orbis"; display: block; text-align: center; font-size: 8pt; color: #999; margin-top: 50px; border-top: 1px solid #eee; padding-top: 10px; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+}
+
+/* =====================================================
+   📱 MOBILE RESPONSIVENESS FIXES
+===================================================== */
+@media (max-width: 768px) {
+  /* 1. Stack the app layout vertically */
+  .app {
+    flex-direction: column;
+  }
+
+  /* 2. Un-fix the Sidebar so it doesn't overlap content */
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: relative; 
+    padding: 20px 0 10px 0;
+    border-right: none;
+    border-bottom: 1px solid rgba(184, 146, 90, 0.1);
+  }
+
+  /* 3. Remove the 260px left margin that is squishing the tables */
+  .content-wrapper.authenticated-layout {
+    margin-left: 0; 
+    height: auto;
+    overflow: visible;
+  }
+
+  /* 4. Adjust the Global Header for smaller screens */
+  .global-header {
+    padding: 0 15px; 
+    height: auto;
+    min-height: 60px;
+    flex-wrap: wrap; /* Allows header items to wrap if they run out of space */
+  }
+
+  /* 5. Make the logo area compact */
+  .logo-area {
+    margin-bottom: 20px;
+  }
 }
 </style>

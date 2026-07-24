@@ -378,4 +378,50 @@ onMounted(() => {
   color: #444444;
   padding: 0 4px;
 }
+
+/* =====================================================
+   📱 MOBILE RESPONSIVENESS FIXES
+===================================================== */
+@media (max-width: 768px) {
+  .catalogue-header {
+    padding: 16px 16px 12px 16px;
+  }
+
+  .header-top-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .pipe {
+    display: none; /* Hide the separator on mobile to save space */
+  }
+
+  .stats-tracker {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .ledger-table-wrapper {
+    padding: 16px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch; /* Smooth horizontal scrolling */
+  }
+
+  /* Force the table to be wider than the phone screen so it doesn't crush text */
+  .ledger-table {
+    min-width: 800px; 
+  }
+
+  .catalogue-footer {
+    padding: 16px;
+  }
+
+  .pagination-matrix {
+    flex-wrap: wrap; /* Allows pagination buttons to wrap to a new line if needed */
+    justify-content: center;
+  }
+}
 </style>
