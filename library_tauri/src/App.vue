@@ -179,7 +179,7 @@ onUnmounted(() => {
 
       <div class="sidebar-user">
         <div class="user-avatar">
-          <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Felix" alt="User Avatar" />
+          <img :src="'https://ui-avatars.com/api/?name=' + encodeURIComponent(user_name) + '&background=161412&color=b8a88a&bold=true'" alt="User Avatar" />
         </div>
         <div class="user-info">
           <span class="user-name">{{ user_name }}</span>
