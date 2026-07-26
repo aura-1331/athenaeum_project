@@ -89,12 +89,17 @@ app = FastAPI(
     swagger_ui_parameters={"deepLinking": True},
 )
 
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten in production
+    allow_origins=[
+        "http://localhost:1420",     # For Tauri Dev
+        "http://tauri.localhost",    # For Tauri Windows Production
+        "https://tauri.localhost"
+    ],
     allow_credentials=True,
-    allow_headers=["*"],
     allow_methods=["*"],
+    allow_headers=["*"],
 )
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
