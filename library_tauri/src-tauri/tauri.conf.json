@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "library_tauri",
+  "productName": "The Athenaeum",
   "version": "0.1.0",
   "identifier": "com.aura.library",
   
@@ -14,12 +14,13 @@
     "windows": [
   {
     "label": "main",
+    "title": "The Athenaeum",
     "url": "index.html"
   }
 ],
-    "security": {
-    "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000",
-    "capabilities": ["default"]
+  "security": {
+  "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000 https://athenaeum-api.onrender.com",
+  "capabilities": ["default"]
 }
   },
   "plugins": {},
