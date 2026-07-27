@@ -12,9 +12,14 @@ export default defineConfig(async () => ({
   },
 
   clearScreen: false,
-server: {
-  port: 1420,
-  strictPort: true,
-  host: true,
-}
+  
+  server: {
+    port: 1420,
+    strictPort: true,
+    host: true,
+    // Added this watch block to fix the Windows EBUSY error
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    }
+  }
 }));

@@ -13,6 +13,8 @@ import SystemSettings from "../views/admin/SystemSettings.vue"
 import Login from "../views/Login.vue"
 import AuthorsView from "../views/AuthorsView.vue"
 import SubjectsView from "../views/SubjectsView.vue"
+// 1. Import your new About page here
+import AboutView from "../views/AboutView.vue" 
 
 const routes = [
   { path: "/login", name: "login", component: Login },
@@ -32,7 +34,10 @@ const routes = [
 
   { path: "/admin/settings", name: "admin-settings", component: SystemSettings, meta: { requiresAuth: true } },
   { path: "/classification/authors", name: "Authors", component: AuthorsView, meta: { requiresAuth: true } },
-  { path: "/classification/subjects", name: "Subjects", component: SubjectsView, meta: { requiresAuth: true } }
+  { path: "/classification/subjects", name: "Subjects", component: SubjectsView, meta: { requiresAuth: true } },
+  
+  // 2. Add the route for the About page here
+  { path: "/about", name: "about", component: AboutView, meta: { requiresAuth: true } }
 ]
 
 const router = createRouter({
