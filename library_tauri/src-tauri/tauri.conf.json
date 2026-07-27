@@ -19,7 +19,7 @@
   }
 ],
   "security": {
-  "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000 https://athenaeum-api.onrender.com",
+  "csp": "default-src 'self'; img-src 'self' https://* data:; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000 https://athenaeum-api.onrender.com",
   "capabilities": ["default"]
 }
   },
