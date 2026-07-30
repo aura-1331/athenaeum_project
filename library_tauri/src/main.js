@@ -2,9 +2,11 @@ import "./assets/main.css"
 
 import { createApp } from "vue"
 import { createPinia } from 'pinia'
+import piniaPluginPersistedstate from 'pinia-plugin-persistedstate' // 1. Import the plugin
 import App from "./App.vue"
 import router from "./router"
 import axios from 'axios'
+import { useAuthStore } from "./stores/auth" // 2. Import your new store
 
 axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 
@@ -12,18 +14,24 @@ const refreshClient = axios.create({
   baseURL: axios.defaults.baseURL
 });
 
+// --- SET UP VUE AND PINIA FIRST ---
+// We have to create the app and pinia before Axios tries to use them
+const app = createApp(App)
+const pinia = createPinia()
+pinia.use(piniaPluginPersistedstate) // 3. Turn on the automatic backup
+
+// --- AXIOS INTERCEPTORS ---
 axios.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    // 4. Axios asks Pinia for the data, instead of looking in localStorage
+    const auth = useAuthStore(pinia) 
+    
+    if (auth.accessToken) {
+      config.headers.Authorization = `Bearer ${auth.accessToken}`;
     }
 
-    const activeUser = localStorage.getItem("user_name") || "Archive Operator";
-    const activeRole = localStorage.getItem("user_role") || "The Seeker";
-    
-    config.headers["X-User-Name"] = activeUser;
-    config.headers["X-User-Role"] = activeRole;
+    config.headers["X-User-Name"] = auth.userName;
+    config.headers["X-User-Role"] = auth.userRole;
 
     return config;
   },
@@ -40,12 +48,12 @@ axios.interceptors.response.use(
       !err.config.url.includes("/refresh")
     ) {
       err.config._retry = true;
-      const refresh = localStorage.getItem("refresh_token") || sessionStorage.getItem("refresh_token");
+      
+      const auth = useAuthStore(pinia)
+      const refresh = auth.refreshToken;
 
       if (!refresh) {
-        localStorage.clear();
-        sessionStorage.clear();
-        localStorage.setItem("logout", Date.now());
+        auth.logout(); // Pinia automatically clears localStorage for you!
         window.location.href = "/login";
         return;
       }
@@ -54,18 +62,13 @@ axios.interceptors.response.use(
         const res = await refreshClient.post("/refresh", { refresh_token: refresh });
         const newToken = res.data.access_token;
 
-        if (localStorage.getItem("refresh_token")) {
-          localStorage.setItem("access_token", newToken);
-        } else {
-          sessionStorage.setItem("access_token", newToken);
-        }
+        // 5. Update Pinia, which instantly updates the UI and saves to localStorage!
+        auth.accessToken = newToken;
 
         err.config.headers["Authorization"] = `Bearer ${newToken}`;
         return axios(err.config);
       } catch (refreshError) {
-        localStorage.clear();
-        sessionStorage.clear();
-        localStorage.setItem("logout", Date.now());
+        auth.logout();
         window.location.href = "/login";
       }
     }
@@ -75,13 +78,11 @@ axios.interceptors.response.use(
 
 window.addEventListener("storage", (event) => {
   if (event.key === "logout") {
-    sessionStorage.clear();
+    const auth = useAuthStore(pinia)
+    auth.logout();
     window.location.href = "/login";
   }
 });
-
-const app = createApp(App)
-const pinia = createPinia()
 
 app.use(pinia)
 app.use(router)

@@ -173,7 +173,10 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/auth' // 1. IMPORT THE STORE
+
 const router = useRouter()
+const authStore = useAuthStore() // 2. INITIALIZE THE STORE
 
 const currentStep = ref(1)
 
@@ -194,6 +197,7 @@ const handleIdentityInput = () => {
 const rememberMe = ref(false)
 const showPassword = ref(false)
 
+// --- STEP 1: IDENTITY ---
 const verifyIdentity = async () => {
   loading.value = true
   errorMessage.value = ''
@@ -229,6 +233,8 @@ const verifyIdentity = async () => {
   }
 }
 
+// --- STEP 2: PASSWORD ---
+// --- STEP 2: PASSWORD ---
 const verifyPassword = async () => {
   loading.value = true
   errorMessage.value = ''
@@ -237,7 +243,6 @@ const verifyPassword = async () => {
     const formData = new URLSearchParams()
     formData.append('username', fullOperatorId.value)
     formData.append('password', passkey.value)
-    // ADD THIS LINE: Send the checkbox value to the backend
     formData.append('remember_me', rememberMe.value)
 
     const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
@@ -250,6 +255,9 @@ const verifyPassword = async () => {
     })
 
     const data = await response.json()
+    
+    // DIAGNOSTIC LOG: This will show us exactly what the backend sent!
+    console.log("BACKEND LOGIN RESPONSE:", data)
 
     if (!response.ok) {
       if (data.detail === '2FA verification required') {
@@ -259,24 +267,80 @@ const verifyPassword = async () => {
       throw new Error(data.detail || 'Authentication failed')
     }
 
-    // UPDATED STORAGE LOGIC:
-    // Only save the refresh token if the backend actually sent one
-    if (rememberMe.value) {
-      localStorage.setItem('access_token', data.access_token)
-      if (data.refresh_token) {
-        localStorage.setItem('refresh_token', data.refresh_token)
-      }
-    } else {
-      sessionStorage.setItem('access_token', data.access_token)
-      // No refresh token is saved here because the backend didn't generate one!
-    }
+    // THE FIX: We must ensure access_token is actually present before logging in.
+    // Sometimes backends return 'token', 'access', or 'jwt' instead of 'access_token'.
+    const token = data.access_token || data.access || data.token
     
-    localStorage.setItem('user_role', data.role)
-    localStorage.setItem('user_name', data.user_name)
+    if (!token) {
+      throw new Error("Backend did not return a valid token. Check the console log.")
+    }
 
-    window.dispatchEvent(new Event("auth-changed"))
+    // 3. THE PINIA MAGIC
+    authStore.login(
+      { 
+        access_token: token, 
+        refresh_token: data.refresh_token // Safely undefined if not provided
+      },
+      { 
+        name: data.user_name || data.username || "Archive Operator", 
+        role: data.role || data.user_role || "The Seeker" 
+      }
+    )
 
-    router.push('/dashboard')
+    // Force a small delay so Pinia saves to localStorage before the router moves
+    setTimeout(() => {
+      router.push('/dashboard')
+    }, 50)
+
+  } catch (error) {
+    errorMessage.value = error.message
+  } finally {
+    loading.value = false
+  }
+}
+
+// --- STEP 3: 2FA ---
+const verifyTwoFA = async () => {
+  loading.value = true
+  errorMessage.value = ''
+
+  try {
+    const formData = new URLSearchParams()
+    formData.append('username', fullOperatorId.value)
+    formData.append('password', passkey.value)
+    formData.append('remember_me', rememberMe.value)
+    formData.append('totp_code', tokenPin.value)
+
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+    const response = await fetch(`${baseUrl}/token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: formData
+    })
+
+    const data = await response.json()
+    console.log("BACKEND 2FA RESPONSE:", data)
+
+    if (!response.ok) {
+      throw new Error(data.detail || '2FA verification failed')
+    }
+
+    const token = data.access_token || data.access || data.token
+    
+    if (!token) {
+      throw new Error("Backend did not return a valid token after 2FA.")
+    }
+
+    authStore.login(
+      { access_token: token, refresh_token: data.refresh_token },
+      { name: data.user_name || data.username || "Archive Operator", role: data.role || data.user_role || "The Seeker" }
+    )
+
+    setTimeout(() => {
+      router.push('/dashboard')
+    }, 50)
 
   } catch (error) {
     errorMessage.value = error.message
