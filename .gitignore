@@ -4,3 +4,21 @@ backups/
 venv/
 __pycache__/
 .vscode/
+library_api/env
+**/ .env
+library_api/.env
+library_tauri/.env
+# Environment files
+**/ .env
+**/ .env.*
+.env
+.env.*
+
+# Python / Backend secrets & caches
+library_api/venv/
+library_api/__pycache__/
+library_api/*.pem
+*.pem
+__pycache__/
+venv/
+backups/

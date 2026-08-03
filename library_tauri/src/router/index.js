@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory } from "vue-router"
+import { useAuthStore } from "@/stores/auth" // <-- 1. IMPORT PINIA STORE
 
 import Dashboard from "../views/Dashboard.vue"
 import Search from "../views/Search.vue"
@@ -13,7 +14,6 @@ import SystemSettings from "../views/admin/SystemSettings.vue"
 import Login from "../views/Login.vue"
 import AuthorsView from "../views/AuthorsView.vue"
 import SubjectsView from "../views/SubjectsView.vue"
-// 1. Import your new About page here
 import AboutView from "../views/AboutView.vue" 
 
 const routes = [
@@ -36,7 +36,6 @@ const routes = [
   { path: "/classification/authors", name: "Authors", component: AuthorsView, meta: { requiresAuth: true } },
   { path: "/classification/subjects", name: "Subjects", component: SubjectsView, meta: { requiresAuth: true } },
   
-  // 2. Add the route for the About page here
   { path: "/about", name: "about", component: AboutView, meta: { requiresAuth: true } }
 ]
 
@@ -45,19 +44,24 @@ const router = createRouter({
   routes
 })
 
+// 2. UPDATED BOUNCER LOGIC
 router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token")
+  // We must call useAuthStore INSIDE the beforeEach function
+  const auth = useAuthStore()
 
-  if (to.path === '/login' && token) {
+  // If they try to go to the login page but are already logged in
+  if (to.path === '/login' && auth.isAuthenticated) {
     next('/dashboard')
     return
   }
 
-  if (to.meta.requiresAuth && !token) {
+  // If the page requires login and they are NOT logged in
+  if (to.meta.requiresAuth && !auth.isAuthenticated) {
     next('/login')
     return
   }
 
+  // Otherwise, let them through!
   next()
 })
 

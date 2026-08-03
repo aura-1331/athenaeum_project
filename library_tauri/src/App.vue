@@ -1,6 +1,8 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from "vue"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
+import { storeToRefs } from 'pinia'
+import { useAuthStore } from '@/stores/auth' // <-- 1. IMPORT PINIA HERE
 import { 
   LayoutDashboard, 
   Library, 
@@ -17,14 +19,20 @@ import {
   ShieldCheck,
   Users,
   Tag,
-  Info
+  Info,
+  Menu
 } from 'lucide-vue-next'
+import { listen } from '@tauri-apps/api/event'
 
 const theme = ref("dark")
 const route = useRoute()
 const router = useRouter()
+const isMobileMenuOpen = ref(false)
 
-import { listen } from '@tauri-apps/api/event'
+// --- 2. PINIA AUTHENTICATION INTEGRATION ---
+const authStore = useAuthStore()
+// storeToRefs makes sure the template updates instantly when these change
+const { isAuthenticated, userName: user_name, userRole: user_role } = storeToRefs(authStore)
 
 let unlistenNav = null
 const isEditing = computed(() => {
@@ -33,27 +41,53 @@ const isEditing = computed(() => {
 
 const currentTime = ref('')
 const currentDate = ref('')
-const currentPlace = ref('')
+const currentPlace = ref('Locating...')
 const lastUpdated = ref('')
 let timeInterval = null
-
-// --- AUTHENTICATION & USER VARIABLES ---
-const isAuthenticated = ref(false)
-const user_name = ref("Archive Operator")
-const user_role = ref("The Seeker")
 
 const updateClock = () => {
   const now = new Date()
   currentTime.value = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   currentDate.value = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+  
+}
+// NEW FUNCTION: Fetches accurate location based on IP
+// NEW FUNCTION: Robust dynamic location fetching
+const fetchAccurateLocation = async () => {
+  currentPlace.value = 'Locating...'
+  
   try {
-    const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone
-    currentPlace.value = tzName.split('/').pop().replace('_', ' ')
-  } catch (e) {
-    currentPlace.value = 'Local'
+    // Attempt 1: ipwho.is (Very reliable for frontend/Tauri apps, no CORS issues)
+    const res1 = await fetch('https://ipwho.is/')
+    const data1 = await res1.json()
+    
+    if (data1.success && data1.city) {
+      currentPlace.value = `${data1.city}, ${data1.country_code}`
+      return
+    }
+
+    // Attempt 2: Fallback to ipinfo.io if the first one fails
+    const res2 = await fetch('https://ipinfo.io/json')
+    const data2 = await res2.json()
+    
+    if (data2.city) {
+      currentPlace.value = `${data2.city}, ${data2.country}`
+      return
+    }
+
+    throw new Error("Both location APIs failed to return a city.")
+
+  } catch (error) {
+    console.warn("Location fetch failed, falling back to timezone:", error)
+    // Absolute Last Resort
+    try {
+      const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone
+      currentPlace.value = tzName.split('/').pop().replace('_', ' ')
+    } catch (e) {
+      currentPlace.value = 'Offline'
+    }
   }
 }
-
 const updateSyncTime = () => {
   const now = new Date()
   lastUpdated.value = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -69,33 +103,9 @@ function toggleTheme() {
   applyTheme(theme.value)
 }
 
-const checkAuthStatus = () => {
-  const storedToken = localStorage.getItem("access_token") || sessionStorage.getItem("access_token")
-  
-  if (!storedToken) {
-    isAuthenticated.value = false
-    if (route.path !== "/login") {
-      router.push("/login")
-    }
-    return
-  }
-
-  isAuthenticated.value = true
-  user_name.value = localStorage.getItem("user_name") || "Archive Operator"
-  user_role.value = localStorage.getItem("user_role") || "The Seeker"
-}
-
+// --- 3. UPDATED LOGOUT FUNCTION ---
 const handleLogout = () => {
-  localStorage.removeItem("access_token")
-  localStorage.removeItem("refresh_token")
-  localStorage.removeItem("user_role")
-  localStorage.removeItem("user_name")
-
-  sessionStorage.clear()
-
-  isAuthenticated.value = false
-  window.dispatchEvent(new Event("auth-changed"))
-
+  authStore.logout() // Pinia does all the heavy lifting now!
   router.push("/login")
 }
 
@@ -103,7 +113,11 @@ watch(
   () => route.path,
   () => {
     updateSyncTime()
-    checkAuthStatus()
+    isMobileMenuOpen.value = false
+    // Security check: If they aren't authenticated and try to navigate, boot them to login
+    if (!isAuthenticated.value && route.path !== "/login") {
+      router.push("/login")
+    }
   }
 )
 
@@ -111,17 +125,17 @@ onMounted(async () => {
   document.title = "Athenaeum Orbis | Library Management System"
   updateClock()
   updateSyncTime()
+  fetchAccurateLocation()
   timeInterval = setInterval(updateClock, 1000)
 
   const saved = localStorage.getItem("ui-theme") || "dark"
   theme.value = saved
   applyTheme(saved)
 
-  checkAuthStatus()
-
-  window.addEventListener("auth-changed", () => {
-    checkAuthStatus()
-  })
+  // Initial security check on load
+  if (!isAuthenticated.value && route.path !== "/login") {
+    router.push("/login")
+  }
 
   if (window.__TAURI__) {
     try {
@@ -145,6 +159,7 @@ onUnmounted(() => {
     <aside 
       v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" 
       class="sidebar"
+      :class="{ 'mobile-open': isMobileMenuOpen }"
     >
       <div class="logo-area">
         <div class="ao-seal">AO</div>
@@ -192,7 +207,11 @@ onUnmounted(() => {
         </div>
       </div>
     </aside>
-
+    <div 
+      v-if="isMobileMenuOpen" 
+      class="mobile-overlay" 
+      @click="isMobileMenuOpen = false"
+    ></div>
     <main 
       class="content-wrapper" 
       :class="{ 
@@ -204,11 +223,26 @@ onUnmounted(() => {
         v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" 
         class="global-header"
       >
-        <div class="breadcrumb">{{ route.name || 'Admin Panel' }}</div>
+        <div class="header-left">
+          <button class="header-icon-btn mobile-menu-toggle" @click="isMobileMenuOpen = !isMobileMenuOpen">
+            <Menu :size="20" :stroke-width="1.5" />
+          </button>
+          <div class="breadcrumb">{{ route.name || 'Admin Panel' }}</div>
+        </div>
         
         <div class="header-actions">
           <div class="live-meta">
             <span class="division-tag">Archive Division</span>
+  
+            <!-- NEW LOCATION ELEMENT -->
+            <span class="location">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="location-icon">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
+                <circle cx="12" cy="10" r="3"></circle>
+              </svg>
+              {{ currentPlace }}
+            </span>
+
             <span class="date">{{ currentDate }}</span>
             <span class="time">{{ currentTime }}</span>
           </div>
@@ -326,7 +360,18 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 
 .header-actions { display: flex; align-items: center; gap: 12px; }
 .live-meta { display: flex; align-items: center; gap: 15px; font-size: 13px; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.location {
+  display: flex;
+  align-items: center;
+  color: var(--text-primary);
+  font-weight: 600;
+}
 
+.location-icon {
+  margin-right: 4px;
+  color: var(--accent);
+  opacity: 0.8;
+}
 .division-tag {
   color: var(--accent); text-transform: uppercase; letter-spacing: 1px; font-size: 11px;
   background: rgba(13, 148, 136, 0.1); padding: 4px 10px; border-radius: 4px;
@@ -374,6 +419,10 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .record-type { font-size: 10px; color: #2dd4bf; text-transform: uppercase; letter-spacing: 2px; margin-top: -2px; }
 
 .details-window-theme .title { color: #fbbf24 !important; border-bottom: 2px solid #d97706 !important; padding-bottom: 12px; margin-bottom: 30px; text-transform: uppercase; letter-spacing: 2px; font-weight: 800; display: inline-block; }
+.mobile-menu-toggle { display: none; }
+.mobile-overlay { display: none; }
+.header-left { display: flex; align-items: center; gap: 12px; }
+
 
 @media print {
   html, body, .app, .content-wrapper, .page-content, .details-page { background: white !important; color: black !important; margin: 0 !important; padding: 0 !important; height: auto !important; width: 100% !important; }
@@ -393,25 +442,54 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 ===================================================== */
 @media (max-width: 768px) {
   /* 1. Stack the app layout vertically */
+
+  .mobile-menu-toggle { 
+    display: block; 
+  }
   .app {
     flex-direction: column;
   }
 
   /* 2. Un-fix the Sidebar so it doesn't overlap content */
+  /* 2. Convert Sidebar to an off-screen drawer */
   .sidebar {
-    width: 100%;
-    height: auto;
-    position: relative; 
-    padding: 20px 0 10px 0;
-    border-right: none;
-    border-bottom: 1px solid rgba(184, 146, 90, 0.1);
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 260px;
+    height: 100vh;
+    transform: translateX(-100%); /* Hides it off the left edge */
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 1000;
+    background: var(--sidebar-bg);
+    border-right: 1px solid rgba(184, 146, 90, 0.2);
+    /* Mobile-specific padding adjustments if needed */
+    padding-bottom: 20px; 
+  }
+
+  /* 3. Slide it in when active */
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  /* 4. Display the dark backdrop overlay */
+  .mobile-overlay {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(2px);
+    z-index: 999; /* Sits just underneath the sidebar (1000) */
   }
 
   /* 3. Remove the 260px left margin that is squishing the tables */
   .content-wrapper.authenticated-layout {
     margin-left: 0; 
-    height: auto;
-    overflow: visible;
+    /* height: auto;
+    overflow: visible; */
   }
 
   /* 4. Adjust the Global Header for smaller screens */
@@ -419,6 +497,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
     padding: 0 15px; 
     height: auto;
     min-height: 60px;
+    gap: 10px;
     flex-wrap: wrap; /* Allows header items to wrap if they run out of space */
   }
 

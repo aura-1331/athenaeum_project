@@ -82,8 +82,11 @@
 import { ref, onMounted, computed } from "vue"
 import { useRouter } from "vue-router"
 import axios from "axios"
+import { useAuthStore } from '@/stores/auth.ts' // <-- 1. IMPORT PINIA
 
 const router = useRouter()
+const authStore = useAuthStore() // <-- 2. INITIALIZE PINIA
+
 const books = ref<any[]>([])
 const loading = ref(true)
 const totalBooks = ref(0)
@@ -130,7 +133,9 @@ async function fetchCatalogue() {
       order: "asc"
     }
 
-    const token = localStorage.getItem("access_token") || sessionStorage.getItem("access_token")
+    // 3. THE FIX: Grab the token directly from the Pinia store!
+    // We check both common naming conventions just to be safe.
+    const token = authStore.accessToken || authStore.access_token
 
     if (!token) {
       loading.value = false
@@ -145,7 +150,11 @@ async function fetchCatalogue() {
       }
     }
 
-    const response = await axios.get("/catalogue/", config)
+    // NOTE: Make sure your axios defaults have the base URL set, 
+    // or change this to your full URL (e.g., 'http://127.0.0.1:8000/catalogue/')
+    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+    const response = await axios.get(`${baseUrl}/catalogue/`, config)
+    
     books.value = response.data.data
     totalBooks.value = response.data.total
     
