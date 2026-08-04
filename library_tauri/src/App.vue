@@ -51,42 +51,43 @@ const updateClock = () => {
   currentDate.value = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
   
 }
-// NEW FUNCTION: Fetches accurate location based on IP
+
 // NEW FUNCTION: Robust dynamic location fetching
 const fetchAccurateLocation = async () => {
   currentPlace.value = 'Locating...'
-  
-  try {
-    // Attempt 1: ipwho.is (Very reliable for frontend/Tauri apps, no CORS issues)
-    const res1 = await fetch('https://ipwho.is/')
-    const data1 = await res1.json()
-    
-    if (data1.success && data1.city) {
-      currentPlace.value = `${data1.city}, ${data1.country_code}`
-      return
-    }
 
-    // Attempt 2: Fallback to ipinfo.io if the first one fails
-    const res2 = await fetch('https://ipinfo.io/json')
-    const data2 = await res2.json()
-    
-    if (data2.city) {
-      currentPlace.value = `${data2.city}, ${data2.country}`
-      return
-    }
-
-    throw new Error("Both location APIs failed to return a city.")
-
-  } catch (error) {
-    console.warn("Location fetch failed, falling back to timezone:", error)
-    // Absolute Last Resort
-    try {
-      const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone
-      currentPlace.value = tzName.split('/').pop().replace('_', ' ')
-    } catch (e) {
-      currentPlace.value = 'Offline'
-    }
+  if (!navigator.geolocation) {
+    currentPlace.value = 'Local Terminal'
+    return
   }
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      try {
+        const lat = position.coords.latitude
+        const lon = position.coords.longitude
+        
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`)
+        const data = await res.json()
+        
+        if (data && data.address) {
+          const city = data.address.city || data.address.town || data.address.village || data.address.state_district
+          const country = data.address.country_code ? data.address.country_code.toUpperCase() : ''
+          currentPlace.value = city ? `${city}, ${country}` : 'Thiruvananthapuram, IN'
+        } else {
+          currentPlace.value = 'Thiruvananthapuram, IN'
+        }
+      } catch (err) {
+        console.warn("Reverse geocoding failed:", err)
+        currentPlace.value = 'Thiruvananthapuram, IN'
+      }
+    },
+    (error) => {
+      console.warn("Geolocation permission denied:", error)
+      currentPlace.value = 'Thiruvananthapuram, IN'
+    },
+    { timeout: 10000, maximumAge: 60000 }
+  )
 }
 const updateSyncTime = () => {
   const now = new Date()
