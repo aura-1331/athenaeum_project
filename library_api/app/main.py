@@ -89,13 +89,13 @@ app = FastAPI(
     swagger_ui_parameters={"deepLinking": True},
 )
 
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:1420",     # For Tauri Dev
         "http://tauri.localhost",    # For Tauri Windows Production
-        "https://tauri.localhost"
+        "https://tauri.localhost",
+        "https://athenaeum-project.vercel.app"  # <-- ADD YOUR VERCEL URL HERE
     ],
     allow_credentials=True,
     allow_methods=["*"],
