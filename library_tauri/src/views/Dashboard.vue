@@ -1,763 +1,1541 @@
-<script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
-import { 
-  Database, Activity, Globe, Layers, 
-  Clock, ArrowRight, Book ,BookOpen,
-  FileText,
-  AlertTriangle,Search,
-  ShieldCheck
-} from 'lucide-vue-next'
-import axios from 'axios' // 🚀 1. The Hybrid Engine
-import logo from '@/assets/logo.png'
-// 2. DATA STATE
-const rawCatalogue = ref([]) 
-const summaryStats = ref({
-  total_items: 0,
-  total_books: 0,
-  total_works: 0,
-  recent_activity: [] // Initialized as empty array to prevent .slice() errors
-}) 
-const isLoading = ref(true)
+<style scoped>
 
-// LIVE DATE, TIME, AND PLACE STATE
-const currentTime = ref('')
-const currentDate = ref('')
-const currentPlace = ref('')
-let timeInterval = null
+/* ===========================================================
+   ATHENAEUM ORBIS
+   ARCHIVE INTELLIGENCE CONSOLE
+=========================================================== */
 
-const updateClock = () => {
-  const now = new Date()
-  
-  // Gets Time (e.g., 10:26:21 PM)
-  currentTime.value = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  
-  // Gets Date (e.g., Friday, March 13, 2026)
-  currentDate.value = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-  
-  // Gets Place safely via Timezone
-  try {
-    const tzName = Intl.DateTimeFormat().resolvedOptions().timeZone
-    currentPlace.value = tzName.split('/').pop().replace('_', ' ')
-  } catch (e) {
-    currentPlace.value = 'Local'
-  }
+.dashboard{
+
+    min-height:100vh;
+
+    background:var(--content-bg);
+
+    padding:28px;
+
+    color:var(--text-primary);
+
 }
 
-// 3. THE HYBRID FETCH FUNCTION
-onMounted(async () => {
-  // Start the clock immediately
-  updateClock()
-  timeInterval = setInterval(updateClock, 1000)
+/* ===========================================================
+   TOPBAR
+=========================================================== */
 
-  try {
-    // 🚀 We use Axios. The "Master Guard" in main.js handles the token!
-    // No need for 'http://127.0.0.1:8000' anymore.
-    const [summaryRes, catRes] = await Promise.all([
-      axios.get('/dashboard/summary'),
-      axios.get('/catalogue/', { params: { limit: 500 } }) 
-    ])
-    
-    // 📦 Axios puts the JSON data inside the .data property
-    const apiData = summaryRes.data
+.topbar{
 
-    summaryStats.value = summaryRes.data
-    console.log("FULL SUMMARY RESPONSE:", summaryRes.data)    
+    display:flex;
 
-    const catData = catRes.data
-    // Map the catalogue results to our local ref
-    rawCatalogue.value = catData.data || []
-    console.log("SUMMARY API:", summaryRes.data)
-    console.log("CATALOGUE API:", catData)
-    console.log("FIRST BOOK:", rawCatalogue.value[0])
-  } catch (err) { 
-    console.error("❌ CONNECTION FAILED:", err) 
-    // If token is expired, naturally redirect (requires router import if needed)
-    if (err.response?.status === 401) {
-       console.warn("🔐 Session expired. Please log in again.");
+    justify-content:space-between;
+
+    align-items:center;
+
+    margin-bottom:28px;
+
+}
+
+.brand{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:18px;
+
+}
+
+.brand-mark{
+
+    width:14px;
+
+    height:50px;
+
+    border-radius:30px;
+
+    background:var(--accent);
+
+    box-shadow:0 0 18px var(--hover-bg);
+
+}
+
+.eyebrow{
+
+    font-size:11px;
+
+    text-transform:uppercase;
+
+    letter-spacing:3px;
+
+    color:var(--accent);
+
+}
+
+.brand h1{
+
+    margin-top:6px;
+
+    font-family:"Cormorant Garamond",serif;
+
+    font-size:34px;
+
+    color:var(--text-primary);
+
+}
+
+/* ===========================================================
+   REFRESH BUTTON
+=========================================================== */
+
+.refresh-btn{
+
+    width:42px;
+
+    height:42px;
+
+    display:flex;
+
+    align-items:center;
+
+    justify-content:center;
+
+    border-radius:10px;
+
+    cursor:pointer;
+
+    background:var(--surface);
+
+    border:1px solid var(--border-main);
+
+    color:var(--accent);
+
+}
+
+.refresh-btn:hover{
+
+    background:var(--hover-bg);
+
+    border-color:var(--accent);
+
+    color:var(--accent);
+
+    transform:rotate(15deg);
+
+}
+
+
+.refresh-btn.is-loading svg{
+
+    animation:refresh-spin .8s linear infinite;
+
+}
+
+.refresh-btn:disabled{
+
+    cursor:wait;
+
+    opacity:.7;
+
+}
+
+@keyframes refresh-spin{
+
+    from{
+        transform:rotate(0deg);
     }
-  } finally {
-    isLoading.value = false
-  }
-})
 
-// Cleanup clock when leaving page
-onUnmounted(() => {
-  if (timeInterval) clearInterval(timeInterval)
-})
-
-// 4. THE LOGIC (Computed Properties)
-const totalCount = computed(() => rawCatalogue.value.length)
-
-// SMART FEED HELPER: Matches Audit log ID to Book Title
-const getBookTitle = (id) => {
-  if (!rawCatalogue.value.length) return null; // Return null so template knows it's missing
-  const book = rawCatalogue.value.find(b => String(b.serial_no) === String(id));
-  return book ? book.title : null;
-};
-
-// NEWEST ARRIVALS (Top 5 highest serial numbers)
-const newestArrivals = computed(() => {
-  if (!rawCatalogue.value.length) return []
-
-  return [...rawCatalogue.value]
-    .sort((a, b) => b.serial_no - a.serial_no)
-    .slice(0, 5)
-})
-
-// In Circulating Items
-const inCirculationCount = computed(() => {
-  return rawCatalogue.value.filter(
-    book => book.status === "ISSUED"
-  ).length
-})
-
-// CATEGORY BREAKDOWN
-const categoryStats = computed(() => {
-  const stats = { 'Fiction': 0, 'Non-Fiction': 0, 'Reference': 0, 'Religious': 0, 'Uncategorized': 0 }
-  rawCatalogue.value.forEach(book => {
-    const cat = book.category || 'Uncategorized'
-    if (stats[cat] !== undefined) stats[cat]++
-    else stats['Uncategorized']++
-  })
-  return stats
-})
-
-const totalGenres = computed(() => {
-  const genres = new Set()
-  rawCatalogue.value.forEach(book => {
-    if (book.genre) {
-      const parts = book.genre.split(/[/,]+/)
-      parts.forEach(g => genres.add(g.trim()))
+    to{
+        transform:rotate(360deg);
     }
-  })
-  return genres.size
-})
 
-const formatRelativeTime = (dateString) => {
-  if (!dateString) return "Unknown time"
-
-  const now = new Date()
-  const date = new Date(dateString)
-  const diffMs = now - date
-
-  const minutes = Math.floor(diffMs / 60000)
-  const hours = Math.floor(diffMs / 3600000)
-  const days = Math.floor(diffMs / 86400000)
-
-  if (minutes < 60) {
-    return `${minutes} minutes ago`
-  }
-
-  if (hours < 24) {
-    return `${hours} hours ago`
-  }
-
-  return `${days} days ago`
 }
 
-const formatDate = (dateString) => {
-  if (!dateString) return "Unknown Date"
+.refresh-btn{
 
-  return new Date(dateString).toLocaleDateString([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  })
+    transition:
+        background .2s ease,
+        border-color .2s ease,
+        color .2s ease,
+        transform .2s ease;
+
 }
 
-</script>
+/* ===========================================================
+   KPI
+=========================================================== */
 
+.kpi-grid{
+
+    display:grid;
+
+    grid-template-columns:repeat(6,1fr);
+
+    gap:18px;
+
+    margin-bottom:28px;
+
+}
+
+.kpi{
+
+    background:var(--surface);
+
+    border:1px solid var(--border-main);
+
+    border-radius:14px;
+
+    padding:18px;
+
+    transition:.25s;
+
+}
+
+.kpi:hover{
+
+    transform:translateY(-4px);
+
+    border-color:var(--accent);
+
+}
+
+.kpi-icon{
+
+    width:17px;
+    height:17px;
+
+    color:var(--accent);
+
+    margin-bottom:14px;
+
+    opacity:.85;
+
+}
+
+.kpi span{
+
+    display:block;
+
+    color:var(--text-muted);
+
+    text-transform:uppercase;
+
+    font-size:11px;
+
+    letter-spacing:1.2px;
+
+}
+
+.kpi h2{
+
+    margin-top:12px;
+
+    font-size:34px;
+
+    font-family:"Cormorant Garamond",serif;
+
+    color:var(--text-primary);
+
+}
+
+.danger h2{
+
+    color:#ef4444;
+
+}
+
+.warning h2{
+
+    color:#f59e0b;
+
+}
+
+/* ===========================================================
+   GRID
+=========================================================== */
+
+.grid{
+
+    display:grid;
+
+    grid-template-columns:1.15fr .85fr;
+
+    gap:18px;
+
+}
+
+.panel{
+
+    background:var(--surface);
+
+    border:1px solid var(--border-main);
+
+    border-radius:12px;
+
+    padding:20px;
+
+    box-shadow:var(--shadow);
+
+}
+
+.panel-header{
+
+    display:flex;
+
+    justify-content:space-between;
+
+    align-items:center;
+
+    margin-bottom:16px;
+
+}
+
+.panel-header h3{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:9px;
+
+    font-size:16px;
+
+    font-family:"Cormorant Garamond",serif;
+
+    font-weight:600;
+
+    letter-spacing:.3px;
+
+    color:var(--text-primary);
+
+}
+
+/* ===========================================================
+   ACTIVITY
+=========================================================== */
+
+.activity{
+
+    display:flex;
+
+    align-items:center;
+
+    gap:14px;
+
+    padding:12px 0;
+
+    border-bottom:1px solid var(--border-main);
+
+    transition:background .2s ease;
+
+}
+
+.activity:last-child{
+
+    border:none;
+
+}
+.activity:hover{
+
+    background:var(--hover-bg);
+
+}
+.timeline{
+
+    width:10px;
+
+    height:10px;
+
+    border-radius:50%;
+
+    background:var(--accent);
+
+    box-shadow:0 0 10px rgba(184,146,90,.4);
+
+}
+
+.activity-content{
+
+    flex:1;
+
+}
+
+.activity-content strong{
+
+    display:block;
+
+    margin-bottom:4px;
+
+    font-size:13px;
+
+    font-weight:600;
+
+    color:var(--text-primary);
+
+}
+
+.activity-content p{
+
+    color:var(--text-muted);
+
+    font-size:12px;
+
+    line-height:1.4;
+
+}
+
+/* ===========================================================
+   BOOKS
+=========================================================== */
+
+.book{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    padding:12px 0;
+    border-bottom:1px solid var(--border-main);
+    transition:background .2s ease;
+}
+
+.book:last-child{
+
+    border:none;
+
+}
+.book:hover{
+    background:var(--hover-bg);
+}
+.book-no{
+
+    width:90px;
+
+    color:var(--accent);
+
+    font-weight:700;
+
+    font-size:11px;
+
+    letter-spacing:.8px;
+
+    font-family:monospace;
+
+}
+
+.book-info{
+
+    flex:1;
+
+}
+
+.book-info strong{
+
+    display:block;
+
+    margin-bottom:4px;
+
+    font-size:13px;
+
+    font-weight:600;
+
+    color:var(--text-primary);
+
+    white-space:nowrap;
+
+    overflow:hidden;
+
+    text-overflow:ellipsis;
+
+}
+
+.book-info span{
+
+    color:var(--text-muted);
+
+    font-size:11px;
+
+}
+
+/* ===========================================================
+   BARS
+=========================================================== */
+
+.bar-row{
+
+    display:grid;
+
+    grid-template-columns:110px 1fr 35px;
+
+    gap:10px;
+
+    align-items:center;
+
+    margin:12px 0;
+
+}
+
+.bar{
+
+    height:8px;
+
+    background:var(--hover-bg);
+
+    border-radius:20px;
+
+    overflow:hidden;
+
+}
+
+.fill{
+
+    height:100%;
+
+    background:var(--accent);
+
+    border-radius:20px;
+
+}
+
+.genre-footer{
+
+    margin-top:22px;
+
+    color:var(--text-muted);
+
+}
+
+/* ===========================================================
+   ACTIONS
+=========================================================== */
+
+.actions{
+
+    display:grid;
+
+    grid-template-columns:repeat(2,1fr);
+
+    gap:14px;
+
+}
+
+.actions a{
+
+    display:flex;
+
+    align-items:center;
+
+    justify-content:space-between;
+
+    text-decoration:none;
+
+    color:var(--text-primary);
+
+    background:var(--content-bg);
+
+    border:1px solid var(--border-main);
+
+    border-radius:10px;
+
+    padding:14px 16px;
+
+    font-size:12px;
+
+    font-weight:600;
+
+    transition:.25s;
+
+}
+
+.actions a:hover{
+
+    border-color:var(--accent);
+
+    transform:translateY(-3px);
+
+}
+
+/* ===========================================================
+   STATUS
+=========================================================== */
+
+.status{
+
+    display:flex;
+
+    justify-content:space-between;
+
+    align-items:center;
+
+    padding:13px 0;
+
+    border-bottom:1px solid var(--border-main);
+
+    font-size:12px;
+
+}
+
+.status:last-child{
+
+    border:none;
+
+}
+
+.dot{
+
+    width:8px;
+
+    height:8px;
+
+    border-radius:50%;
+
+    background:#22c55e;
+
+    box-shadow:0 0 10px rgba(34,197,94,.65);
+
+}
+
+/* ===========================================================
+   DASHBOARD LOADING
+=========================================================== */
+.dashboard-loading{
+
+    min-height:420px;
+
+    display:flex;
+
+    flex-direction:column;
+
+    align-items:center;
+
+    justify-content:center;
+
+    gap:16px;
+
+    color:var(--text-muted);
+
+}
+
+.loading-ring{
+
+    width:28px;
+
+    height:28px;
+
+    border:2px solid var(--border-main);
+
+    border-top-color:var(--accent);
+
+    border-radius:50%;
+
+    animation:dashboard-loading-spin .8s linear infinite;
+
+}
+
+@keyframes dashboard-loading-spin{
+
+    to{
+        transform:rotate(360deg);
+    }
+
+}
+/* ===========================================================
+   MOBILE
+=========================================================== */
+
+@media(max-width:1200px){
+
+    .kpi-grid{
+
+        grid-template-columns:repeat(2,1fr);
+
+    }
+
+    .grid{
+
+        grid-template-columns:1fr;
+
+    }
+
+    .topbar{
+
+        flex-direction:column;
+
+        align-items:flex-start;
+
+        gap:18px;
+
+    }
+
+    .system-info{
+
+        flex-wrap:wrap;
+
+    }
+
+}
+
+@media(max-width:768px){
+
+    .dashboard{
+
+        padding:18px;
+
+    }
+
+    .kpi-grid{
+
+        grid-template-columns:1fr;
+
+    }
+
+    .actions{
+
+        grid-template-columns:1fr;
+
+    }
+
+    .bar-row{
+
+        grid-template-columns:90px 1fr 35px;
+
+    }
+
+}
+
+</style>
+```
 <template>
-  <div class="dashboard-wrapper">
 
-    <!-- THE NEW LAYERED HERO SECTION -->
-    <div class="hero-container">
-      
-      <!-- LAYER 1: The "Mystic" Background (Empty div, styles handle the image) -->
-      <div class="hero-wallpaper"></div>
+<div class="dashboard">
 
-      <!-- LAYER 2: This is where you add your code -->
-      <header class="hero-content">
-        <img :src="logo" alt="Athenaeum Logo" class="hero-logo" />
-        <p class="hero-label">ATHENAEUM ORBIS</p>
+  <div    v-if="loading"    class="dashboard-loading"
+ >
+ <div class="loading-ring"></div>
 
-        <h1 class="hero-title">
-          Digitised manuscripts <br />
-          and archives
-        </h1>
+    <span>
+        Loading archive data...
+    </span>
 
-        <!-- NEW: Decorative Divider -->
-        <div class="hero-divider">
-          <span class="line"></span>
-          <span class="diamond"></span>
-          <span class="line"></span>
+ </div>
+ <template v-else>
+    <!-- =====================================================
+         TOP BAR
+    ====================================================== -->
+
+    <section class="topbar">
+
+        <div class="brand">
+
+            <div class="brand-mark"></div>
+
+            <div>
+
+                <span class="eyebrow">
+
+                    ATHENAEUM ORBIS
+
+                </span>
+
+                <h1>
+
+                    Archive Intelligence Console
+
+                </h1>
+
+            </div>
+
         </div>
 
-        <p class="hero-subtitle">
-          View thousands of digitised manuscripts and archival documents.
-        </p>
+        <div class="system-info">
 
-        <!-- UPDATED: Search Button with Icon -->
-        <button class="hero-search-btn" @click="$router.push('/search')">
-          <Search :size="18" />
-          <span>Search the Archive</span>
-        </button>
-          
-      </header>
+            <!-- <div class="system-block">
 
-    </div>
+                <Clock :size="15"/>
 
-    <!-- KPI STRIP -->
-<div class="stats-row">
+                <span>{{ currentTime }}</span>
 
-  <!-- TOTAL ACCESSIONS -->
-  <div class="stat-card">
-    <BookOpen
-      class="stat-icon accessions-icon"
-      :size="34"
-    />
+            </div>
 
-    <div>
-      <h2>{{ summaryStats.total_accessions || 0 }}</h2>
-      <p>Total Accessions</p>
-    </div>
+            <div class="system-block">
+
+                {{ currentDate }}
+
+            </div>
+
+            <div class="system-block">
+
+                <Globe :size="15"/>
+
+                {{ currentPlace }}
+
+            </div> -->
+
+            <button
+                class="refresh-btn"
+                :class="{ 'is-loading': loading }"
+                :disabled="loading"
+                @click="loadDashboard"
+                title="Refresh archive data"
+            >
+                <RefreshCw :size="16"/>
+            </button>
+
+        </div>
+
+    </section>
+
+
+
+    <!-- =====================================================
+         KPI GRID
+    ====================================================== -->
+
+    <section class="kpi-grid">
+
+        <div class="kpi">
+
+            <BookOpen class="kpi-icon"/>
+
+            <span>
+
+                Works
+
+            </span>
+
+            <h2>
+
+                {{ summaryStats.total_accessions }}
+
+            </h2>
+
+        </div>
+
+
+        <div class="kpi">
+
+            <Book class="kpi-icon"/>
+
+            <span>
+
+                Items
+
+            </span>
+
+            <h2>
+
+                {{ totalItems }}
+
+            </h2>
+
+        </div>
+
+
+        <div class="kpi">
+
+            <FileText class="kpi-icon"/>
+
+            <span>
+
+                In Circulation
+
+            </span>
+
+            <h2>
+
+                {{ inCirculation }}
+
+            </h2>
+
+        </div>
+
+
+        <div class="kpi">
+
+    <Layers class="kpi-icon"/>
+
+    <span>
+        Categories
+    </span>
+
+    <h2>
+        {{ totalCategories }}
+    </h2>
+
   </div>
+        <div class="kpi danger">
+
+            <AlertTriangle class="kpi-icon"/>
+
+            <span>
+
+                Missing
+
+            </span>
+
+            <h2>
+
+                {{ summaryStats.missing_items }}
+
+            </h2>
+
+        </div>
+
+        
+
+        <div class="kpi warning">
+
+            <ShieldCheck class="kpi-icon"/>
+
+            <span>
+
+                Damaged
+
+            </span>
+
+            <h2>
+
+                {{ summaryStats.damaged_items }}
+
+            </h2>
+
+        </div>
+
+    </section>
 
 
-  <!-- IN CIRCULATION -->
-  <div class="stat-card">
-    <FileText
-      class="stat-icon"
-      :class="{
-        'icon-alert': inCirculationCount > 0
-      }"
-      :size="34"
-      :color="inCirculationCount > 0 ? '#00e676' : '#8db26f'"
-    />
 
-    <div>
-      <h2
-        :class="{
-          'active-count': inCirculationCount > 0
-        }"
-      >
-        {{ inCirculationCount }}
-      </h2>
-      <p>In Circulation</p>
-    </div>
-  </div>
+    <!-- =====================================================
+         MAIN GRID
+    ====================================================== -->
+
+    <section class="grid">
+
+        <!-- ===================================== -->
+
+        <div class="panel">
+
+            <div class="panel-header">
+
+                <h3>
+
+                    <Activity :size="17"/>
+
+                    Recent Activity
+
+                </h3>
+
+            </div>
+
+            <div
+
+                class="activity"
+
+                v-for="log in summaryStats.recent_activity"
+
+                :key="log.id"
+
+            >
+
+                <div class="timeline"></div>
+
+                <div class="activity-content">
+
+                    <strong>
+
+                        {{ log.action }}
+
+                    </strong>
+
+                    <p>
+
+                        {{ getBookTitle(log.serial_no) }}
+
+                    </p>
+
+                </div>
+
+                <small>
+
+                    {{ formatRelativeTime(log.changed_at) }}
+
+                </small>
+
+            </div>
+
+        </div>
+
+        <!-- ===================================== -->
+
+        <div class="panel">
+
+            <div class="panel-header">
+
+                <h3>
+
+                    <Book :size="17"/>
+
+                    Latest Accessions
+
+                </h3>
+
+            </div>
+
+            <div
+
+                class="book"
+
+                v-for="book in newestArrivals"
+
+                :key="book.serial_no"
+
+            >
+
+                <div class="book-no">
+
+                    {{ book.accession_no }}
+
+                </div>
+
+                <div class="book-info">
+
+                    <strong>
+
+                        {{ book.title }}
+
+                    </strong>
+
+                    <span>
+
+                        {{ book.author }}
+
+                    </span>
+
+                </div>
+
+                <small>
+
+                    {{ formatDate(book.created_at) }}
+
+                </small>
+
+            </div>
+
+        </div>
 
 
-  <!-- MISSING ITEMS -->
-  <div class="stat-card">
-    <AlertTriangle
-      class="stat-icon"
-      :class="{
-        'icon-alert': summaryStats.missing_items > 0
-      }"
-      :size="34"
-      :color="summaryStats.missing_items > 0 ? '#ff2d55' : '#d6a04b'"
-    />
 
-    <div>
-      <h2
-        :class="{
-          'danger-count': summaryStats.missing_items > 0
-        }"
-      >
-        {{ summaryStats.missing_items || 0 }}
-      </h2>
-      <p>Missing Items</p>
-    </div>
-  </div>
+        <!-- ===================================== -->
+
+        <div class="panel">
+
+            <div class="panel-header">
+
+                <h3>
+
+                    <Layers :size="17"/>
+
+                    Categories
+
+                </h3>
+
+            </div>
+
+            <div
+
+                class="bar-row"
+
+                v-for="(count,name) in categoryStats"
+
+                :key="name"
+
+            >
+
+                <label>
+
+                    {{ name }}
+
+                </label>
+
+                <div class="bar">
+
+                    <div
+
+                        class="fill"
+
+                        :style="{
+
+                            width:(count/totalItems*100)+'%'
+
+                        }"
+
+                    ></div>
+
+                </div>
+
+                <strong>
+
+                    {{ count }}
+
+                </strong>
+
+            </div>
+
+        </div>
 
 
-  <!-- DAMAGED ITEMS -->
-  <div class="stat-card">
-    <ShieldCheck
-      class="stat-icon"
-      :class="{
-        'icon-alert': summaryStats.damaged_items > 0
-      }"
-      :size="34"
-      :color="summaryStats.damaged_items > 0 ? '#ff9500' : '#d6a04b'"
-    />
 
-    <div>
-      <h2
-        :class="{
-          'warning-count': summaryStats.damaged_items > 0
-        }"
-      >
-        {{ summaryStats.damaged_items || 0 }}
-      </h2>
-      <p>Damaged Items</p>
-    </div>
-  </div>
+        <!-- ===================================== -->
+
+        <div class="panel">
+
+            <div class="panel-header">
+
+                <h3>
+
+                    <Globe :size="17"/>
+
+                    Languages
+
+                </h3>
+
+            </div>
+
+            <div
+
+                class="bar-row"
+
+                v-for="lang in summaryStats.languages"
+
+                :key="lang.language"
+
+            >
+
+                <label>
+
+                    {{ lang.language }}
+
+                </label>
+
+                <div class="bar">
+
+                    <div
+
+                        class="fill"
+
+                        :style="{
+
+                           width:(lang.count/totalItems*100)+'%'
+
+                        }"
+
+                    ></div>
+
+                </div>
+
+                <strong>
+
+                    {{ lang.count }}
+
+                </strong>
+
+            </div>
+
+            <div class="genre-footer">
+
+                {{ totalGenres }} Genres Catalogued
+
+            </div>
+
+        </div>
+
+
+
+        <!-- ===================================== -->
+
+        <div class="panel">
+
+            <div class="panel-header">
+
+                <h3>
+
+                    <ArrowRight :size="17"/>
+
+                    Quick Actions
+
+                </h3>
+
+            </div>
+
+            <div class="actions">
+
+                <RouterLink to="/create-work">
+
+                    + New Work
+
+                </RouterLink>
+
+                <RouterLink to="/create-item">
+
+                    + New Item
+
+                </RouterLink>
+
+                <RouterLink to="/catalogue">
+
+                    Catalogue
+
+                </RouterLink>
+
+                <RouterLink to="/search">
+
+                    Search
+
+                </RouterLink>
+
+            </div>
+
+        </div>
+
+
+
+        <!-- ===================================== -->
+
+        <div class="panel">
+
+            <div class="panel-header">
+
+                <h3>
+
+                    <Database :size="17"/>
+
+                    Archive Status
+
+                </h3>
+
+            </div>
+
+            <div class="status">
+
+                <span>
+
+                    Database
+
+                </span>
+
+                <div class="dot"></div>
+
+            </div>
+
+            <div class="status">
+
+                <span>
+
+                    Archive Loaded
+
+                </span>
+
+                <strong>
+
+                    {{ totalItems }}
+
+                </strong>
+
+            </div>
+
+            <div class="status">
+
+                <span>
+
+                    Languages
+
+                </span>
+
+                <strong>
+
+                    {{ summaryStats.languages.length }}
+
+                </strong>
+
+            </div>
+            
+            <div class="status">
+
+                <span>
+
+                    Categories
+
+                </span>
+
+                <strong>
+
+                    {{ Object.keys(categoryStats).length }}
+
+                </strong>
+
+            </div>
+
+        </div>
+
+    </section>
+    </template>
 
 </div>
 
-<!-- -------------------------------------------------- END OF KPI STRIP------------------------------------------------------- -->
-
-
-    <!-- LOWER PANELS -->
-    <div class="dashboard-panels">
-
-  <div class="box activity-panel">
-    <div class="panel-header">
-      <h3 class="box-title"><Clock :size="14" /> Recent Activity</h3>
-      <span class="view-all-link" @click="$router.push('/status-audit')">View all →</span>
-    </div>
-
-    <div v-for="log in (summaryStats.recent_activity || []).slice(0, 3)" :key="log.id" class="activity-row">
-      <div class="activity-icon">
-        <BookOpen :size="16" />
-      </div>
-      <div class="activity-content">
-        <h4>{{ log.action }}</h4>
-        <p>{{ getBookTitle(log.serial_no) || 'System Update' }}</p>
-      </div>
-      <div class="activity-time">
-        {{ formatRelativeTime(log.changed_at) }}
-      </div>
-    </div>
-  </div>
-
-  <div class="box catalogue-panel">
-    <div class="panel-header">
-      <h3 class="box-title"><Book :size="14" /> Recently Catalogued</h3>
-      <span class="view-all-link" @click="$router.push('/catalogue')">View all →</span>
-    </div>
-
-    <div v-for="book in newestArrivals.slice(0, 3)" :key="book.accession_no" class="catalogue-row">
-      <div class="book-thumb"></div>
-      <div class="book-info">
-        <h4>{{ book.title }}</h4>
-        <p>{{ book.author || 'Unknown Author' }} • {{ book.year || 'N/A' }}</p>
-      </div>
-      <div class="book-right">
-        <h5>{{ book.accession_no }}</h5>
-        <p>{{ formatDate(book.created_at) }}</p>
-      </div>
-    </div>
-  </div>
-
-</div>
-
-    <!-- ANALYTICS -->
-    <div class="analytics-row">
-
-      <!-- Categories -->
-      <div class="box">
-        <h3 class="box-title">
-          <Layers :size="14" />
-          Categories
-        </h3>
-
-        <div
-          v-for="(count, category) in categoryStats"
-          :key="category"
-          class="tag-row"
-        >
-          {{ category }}
-          <span>{{ count }}</span>
-        </div>
-      </div>
-
-      <!-- Languages -->
-      <div class="box">
-        <h3 class="box-title">
-          <Globe :size="14" />
-          Languages
-        </h3>
-
-        <div
-          v-for="lang in summaryStats.languages"
-          :key="lang.language"
-          class="tag-row"
-        >
-          {{ lang.language }}
-          <span>{{ lang.count }}</span>
-        </div>
-
-        <div class="genre-note">
-          {{ totalGenres }} Unique Genres Cataloged
-        </div>
-      </div>
-
-    </div>
-
-  </div>
 </template>
 
-<style scoped>
-/* ==========================================================================
-   1. DASHBOARD WRAPPER & CORE
-   ========================================================================== */
-.dashboard-wrapper {
-  width: 100% !important;
-  margin: 0 !important;
-  padding: 0 0 60px 0 !important; /* Bottom padding for scroll room */
-  background-color: var(--content-bg) !important;
-  color: var(--text-primary);
-  display: flex;
-  flex-direction: column;
+<script setup>
+import { ref, computed, onMounted, onUnmounted } from "vue"
+import axios from "axios"
+
+import {
+  BookOpen,
+  Book,
+  FileText,
+  AlertTriangle,
+  ShieldCheck,
+  Clock,
+  Layers,
+  Globe,
+  Database,
+  Search,
+  Plus,
+  ArrowRight,
+  Activity,
+  RefreshCw
+} from "lucide-vue-next"
+
+/* =====================================================
+   DATA
+===================================================== */
+
+const rawCatalogue = ref([])
+
+const summaryStats = ref({
+  total_accessions: 0,
+  missing_items: 0,
+  damaged_items: 0,
+  languages: [],
+  recent_activity: []
+})
+
+const loading = ref(true)
+
+/* =====================================================
+   CLOCK
+===================================================== */
+
+const currentTime = ref("")
+const currentDate = ref("")
+const currentPlace = ref("")
+
+let timer = null
+
+function updateClock(){
+
+    const now=new Date()
+
+    currentTime.value=now.toLocaleTimeString([],{
+        hour:"2-digit",
+        minute:"2-digit",
+        second:"2-digit"
+    })
+
+    currentDate.value=now.toLocaleDateString([],{
+        weekday:"long",
+        year:"numeric",
+        month:"long",
+        day:"numeric"
+    })
+
+    try{
+
+        const tz=Intl.DateTimeFormat()
+            .resolvedOptions()
+            .timeZone
+
+        currentPlace.value=
+            tz.split("/")
+            .pop()
+            .replace("_"," ")
+
+    }catch{
+
+        currentPlace.value="Local"
+
+    }
+
 }
 
-/* ==========================================================================
-   2. LAYERED HERO SYSTEM (Atmosphere & Content)
-   ========================================================================== */
-.hero-container {
-  width: 100%;
-  min-height: 550px;
-  position: relative;
-  overflow: hidden;
+/* =====================================================
+   FETCH
+===================================================== */
+
+async function loadDashboard(){
+
+    loading.value=true
+
+    try{
+
+        const [summaryRes,catRes]=await Promise.all([
+
+            axios.get("/dashboard/summary"),
+
+            axios.get("/catalogue/",{
+                params:{
+                    limit:500
+                }
+            })
+
+        ])
+
+        summaryStats.value=summaryRes.data
+
+        rawCatalogue.value=
+            catRes.data.data || []
+
+    }catch(e){
+
+        console.error(e)
+
+    }finally{
+
+        loading.value=false
+
+    }
+
 }
 
-/* LAYER 1: The Mystic Wallpaper (Warm Tone Edition) */
-.hero-wallpaper {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1;
-  
-  background: 
-    /* The Core Shadow (Inverted) */
-    radial-gradient(circle at center, var(--content-bg) 0%, rgba(10, 9, 8, 0.6) 50%, transparent 100%),
-    /* Horizontal Flow (Sides) */
-    linear-gradient(to right, var(--content-bg) 0%, transparent 25%, transparent 75%, var(--content-bg) 100%),
-    /* Vertical Flow (Top/Bottom) */
-    linear-gradient(to bottom, var(--content-bg) 0%, transparent 30%, transparent 70%, var(--content-bg) 100%),
-    /* The Image */
-    url("@/assets/library-bg.png");
+/* =====================================================
+   COMPUTED
+===================================================== */
 
-  background-size: cover;
-  background-position: center;
-  background-blend-mode: multiply;
+const totalItems=computed(()=>rawCatalogue.value.length)
 
-  /* Adds that ancient library warmth */
-  filter: sepia(0.2) brightness(0.9) contrast(1.1);
+const newestArrivals=computed(()=>{
 
-  /* Seamless fade into the dashboard */
-  mask-image: linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);
-  -webkit-mask-image: linear-gradient(to bottom, transparent, black 20%, black 80%, transparent);
+    return [...rawCatalogue.value]
+
+        .sort((a,b)=>b.serial_no-a.serial_no)
+
+        .slice(0,8)
+
+})
+
+const categoryStats=computed(()=>{
+
+    const stats={}
+
+    rawCatalogue.value.forEach(book=>{
+
+        const cat=
+            book.category || "Unknown"
+
+        stats[cat]=(stats[cat]||0)+1
+
+    })
+
+    return stats
+
+})
+
+const inCirculation=computed(()=>{
+
+    return rawCatalogue.value.filter(
+
+        b=>b.availability_status==="IN_RESEARCH_USE"
+
+    ).length
+
+})
+
+const totalGenres=computed(()=>{
+
+    const genres=new Set()
+
+    rawCatalogue.value.forEach(book=>{
+
+        if(book.genre){
+
+            book.genre
+                .split(/[/,]+/)
+                .forEach(g=>genres.add(g.trim()))
+
+        }
+
+    })
+
+    return genres.size
+
+})
+
+const totalCategories = computed(() => {
+    return Object.keys(categoryStats.value).length
+})
+
+/* =====================================================
+   HELPERS
+===================================================== */
+
+function getBookTitle(id){
+
+    const book=
+        rawCatalogue.value.find(
+
+            b=>String(b.serial_no)===String(id)
+
+        )
+
+    return book
+        ? book.title
+        : "Unknown Record"
+
 }
 
-/* LAYER 2: Hero Text/Logo content */
-.hero-content {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding-top: 50px; /* Pulls content up */
+function formatRelativeTime(date){
+
+    if(!date) return ""
+
+    const diff=
+        Math.floor(
+            (Date.now()-new Date(date))/60000
+        )
+
+    if(diff<60)
+        return `${diff} min ago`
+
+    if(diff<1440)
+        return `${Math.floor(diff/60)} hr ago`
+
+    return `${Math.floor(diff/1440)} days ago`
+
 }
 
-.hero-logo {
-  width: 70px;
-  height: 70px;
-  object-fit: contain;
-  margin-bottom: 12px;
-  filter: drop-shadow(0 0 10px rgba(184, 146, 90, 0.3));
+function formatDate(date){
+
+    if(!date) return ""
+
+    return new Date(date)
+        .toLocaleDateString([],{
+            month:"short",
+            day:"numeric",
+            year:"numeric"
+        })
+
 }
 
-.hero-label {
-  color: var(--accent);
-  letter-spacing: 6px;
-  font-size: 11px;
-  text-transform: uppercase;
-  margin-bottom: 12px;
-}
+/* =====================================================
+   LIFE CYCLE
+===================================================== */
 
-.hero-title {
-  font-family: "Cormorant Garamond", serif;
-  font-size: 56px;
-  font-weight: 500;
-  line-height: 1.1;
-  color: #f5eee0;
-  margin-bottom: 20px;
-}
+onMounted(async()=>{
 
-/* Decorative Divider */
-.hero-divider {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 15px;
-  margin-bottom: 25px;
-  width: 100%;
-}
+    updateClock()
 
-.hero-divider .line {
-  height: 1px;
-  width: 100px;
-  background: linear-gradient(to var(--dir, right), rgba(184, 146, 90, 0.6), transparent);
-}
+    timer=setInterval(updateClock,1000)
 
-.hero-divider .line:first-child { --dir: left; }
+    await loadDashboard()
 
-.hero-divider .diamond {
-  width: 8px;
-  height: 8px;
-  border: 1px solid var(--accent);
-  transform: rotate(45deg);
-}
+})
 
-.hero-subtitle {
-  color: var(--text-muted);
-  font-size: 16px;
-  max-width: 600px;
-  line-height: 1.6;
-}
+onUnmounted(()=>{
 
-.hero-search-btn {
-  margin-top: 35px;
-  background: rgba(184, 146, 90, 0.05);
-  color: #f5eee0;
-  border: 1px solid rgba(184, 146, 90, 0.25);
-  padding: 14px 30px;
-  border-radius: 8px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  backdrop-filter: blur(10px);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-}
+    clearInterval(timer)
 
-.hero-search-btn:hover {
-  background: rgba(184, 146, 90, 0.15);
-  border-color: var(--accent);
-  color: var(--accent);
-  transform: translateY(-3px);
-  box-shadow: 0 8px 25px rgba(184, 146, 90, 0.2);
-}
-
-.hero-search-btn:active {
-  transform: scale(0.97);
-}
-
-/* ==========================================================================
-   3. KPI STRIP
-   ========================================================================== */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  width: 92%; 
-  margin: -60px auto 40px; 
-  background: rgba(20, 18, 16, 0.45) !important;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--border-main) !important;
-  border-radius: 12px;
-  overflow: hidden;
-  z-index: 10;
-  box-shadow: 0 10px 40px rgba(0,0,0,0.4);
-}
-
-.stat-card {
-  padding: 25px;
-  border-right: 1px solid rgba(184, 146, 90, 0.08);
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.stat-card:last-child { border-right: none; }
-
-.stat-card h2 {
-  font-size: 28px;
-  line-height: 1;
-  font-family: "Cormorant Garamond", serif;
-  color: #f5eee0;
-  margin: 0;
-}
-
-.stat-card p {
-  font-size: 11px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-top: 6px;
-}
-
-.stat-icon {
-  color: var(--accent);
-  opacity: 0.8;
-}
-
-/* ==========================================================================
-   4. BOXES & DATA ROWS
-   ========================================================================== */
-.dashboard-panels, .analytics-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 25px;
-  padding: 0 4%; 
-  margin-bottom: 25px;
-}
-.analytics-row {
-  margin-top: 0px; /* Removes the gap between top and bottom boxes */
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 25px;
-  padding: 0 4%;
-}
-.box {
-  background: rgba(20, 18, 16, 0.4) !important;
-  border: 1px solid var(--border-main) !important;
-  border-radius: 12px;
-  padding: 16px 22px; /* Reduced vertical padding */
-  min-height: 250px;   /* CRITICAL: Forces both boxes to align at the bottom */
-  display: flex;
-  flex-direction: column;
-}
-
-
-
-.box-title {
-  font-family: "Cormorant Garamond", serif;
-  font-size: 20px;
-  color: #f5eee0;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  
-  /* ADD THESE LINES */
-  margin-bottom: 16px; 
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(184, 146, 90, 0.15); /* Subtle golden underline */
-  width: 100%; /* Ensures line stretches across the box */
-}
-
-.panel-header span {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--accent);
-  cursor: pointer;
-}
-
-/* Rows (Activity & Catalogue) */
-
-.activity-row, .catalogue-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 0; /* Thin lines like a focused manuscript */
-  border-bottom: 1px solid rgba(184, 146, 90, 0.05);
-}
-
-.activity-row:last-child, .catalogue-row:last-child { border-bottom: none; }
-
-.activity-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: rgba(184, 146, 90, 0.05);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--accent);
-}
-.activity-content, .book-info {
-  flex: 1; 
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-.activity-time, .book-right {
-  text-align: right;
-  min-width: 100px; /* Ensures enough space for dates */
-  font-size: 11px;
-  color: var(--accent);
-  opacity: 0.8;
-  font-variant-numeric: tabular-nums; /* Keeps numbers aligned */
-}
-.activity-content h4, .book-info h4 {
-  font-size: 14px;
-  margin: 0 0 2px 0;
-  line-height: 1.2;
-}
-
-.activity-content p, .book-info p {
-  font-size: 12px;
-  margin: 0;
-  color: var(--text-muted);
-}
-
-.activity-time, .book-right p {
-  font-size: 12px;
-  color: var(--accent);
-  opacity: 0.8;
-}
-
-.book-thumb {
-  width: 42px;
-  height: 58px;
-  background: rgba(184, 146, 90, 0.1);
-  border: 1px solid rgba(184, 146, 90, 0.2);
-  border-radius: 4px;
-}
-
-/* Tag Rows (Categories & Languages) */
-.tag-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(184, 146, 90, 0.05);
-  font-size: 14px;
-  color: #f5eee0;
-}
-
-.tag-row span {
-  font-family: "Cormorant Garamond", serif;
-  color: var(--accent);
-  font-weight: 600;
-  font-size: 16px;
-}
-
-.view-all-link {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 2px;
-  color: var(--accent);
-  cursor: pointer;
-  opacity: 0.6;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  padding: 4px 8px;
-}
-
-.view-all-link:hover {
-  opacity: 1;
-  text-shadow: 0 0 10px rgba(184, 146, 90, 0.6);
-  transform: translateX(4px); /* Subtle slide to the right */
-}
-.activity-row:first-of-type, 
-.catalogue-row:first-of-type, 
-.tag-row:first-of-type {
-  margin-top: 8px;
-}
-/* ==========================================================================
-   5. UTILITIES & ANIMATIONS
-   ========================================================================== */
-.active-count { color: #00e676 !important; }
-.danger-count { color: #ff2d55 !important; }
-.warning-count { color: #ff9500 !important; }
-/* Golden Interactive Seal for View All */
-
-@keyframes statPulse {
-  0% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.05); opacity: 0.8; }
-  100% { transform: scale(1); opacity: 1; }
-}
-.icon-alert { animation: statPulse 1.5s ease-in-out infinite; }
-</style>
+})
+</script>

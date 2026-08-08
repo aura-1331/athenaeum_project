@@ -27,8 +27,19 @@ def dashboard_summary(current_user: dict = Depends(get_current_user)):
         results["total_books"] = int(cursor.fetchone()[0])
 
         # Missing & Damaged items metrics if your cards use them
-        results["missing_items"] = 0
-        results["damaged_items"] = 0
+        cursor.execute("""
+        SELECT COUNT(*)
+        FROM public.items
+        WHERE availability_status = 'MISSING'
+        """)
+        results["missing_items"] = int(cursor.fetchone()[0])
+
+        cursor.execute("""
+        SELECT COUNT(*)
+        FROM public.items
+        WHERE availability_status = 'DAMAGED'
+        """)
+        results["damaged_items"] = int(cursor.fetchone()[0])
         
         # Languages breakdown if your template maps summaryStats.languages
         cursor.execute("SELECT language, COUNT(*) as count FROM public.works GROUP BY language")

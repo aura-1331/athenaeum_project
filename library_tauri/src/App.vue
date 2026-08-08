@@ -178,6 +178,7 @@ onUnmounted(() => {
         <div class="nav-section-label">Inventory</div>
         <RouterLink to="/create-work"><FileText :size="18" :stroke-width="1.5" /><span>Works</span></RouterLink>
         <RouterLink to="/create-item"><BookOpen :size="18" :stroke-width="1.5" /><span>Items</span></RouterLink>
+        <RouterLink to="/incidents">  <AlertTriangle :size="18" :stroke-width="1.5" />  <span>Incidents</span></RouterLink>
         
         <div class="nav-section-label">Classification</div>
           <RouterLink to="/classification/authors">
@@ -291,7 +292,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   left: 0;
   top: 0;
   background: var(--sidebar-bg);
-  border-right: 1px solid rgba(184, 146, 90, 0.1);
+  border-right: 1px solid var(--border-main);
   display: flex;
   flex-direction: column;
   padding: 40px 0 0 0;
@@ -307,7 +308,11 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .ao-seal {
   width: 42px; height: 42px;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, rgba(184, 146, 90, 0.05), transparent);
+  background: linear-gradient(
+    135deg,
+    var(--hover-bg),
+    transparent
+);
   border: 1px solid var(--accent);
   color: var(--accent);
   font-family: "Cormorant Garamond", serif;
@@ -325,18 +330,21 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .nav-links { display: flex; flex-direction: column; gap: 4px; }
 .sidebar a {
   display: flex; align-items: center; gap: 16px; text-decoration: none;
-  color: #9ca3af; padding: 14px 24px; font-size: 14px; font-weight: 500;
+  color: var(--text-muted); padding: 14px 24px; font-size: 14px; font-weight: 500;
   transition: all 0.2s ease;
 }
-.sidebar a:hover { color: var(--accent); background: rgba(184, 146, 90, 0.08); }
+.sidebar a:hover {
+  color: var(--accent);
+  background: var(--hover-bg);
+}
 .sidebar a span { transition: transform 0.2s ease; }
 .sidebar a:hover span { transform: translateX(4px); }
 
-.sidebar a.router-link-active { 
-  background: rgba(184, 146, 90, 0.12); 
-  color: var(--accent); 
-  font-weight: 700; 
-  position: relative; 
+.sidebar a.router-link-active {
+  background: var(--active-bg);
+  color: var(--accent);
+  font-weight: 700;
+  position: relative;
 }
 
 .content-wrapper {
@@ -373,9 +381,10 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   color: var(--accent);
   opacity: 0.8;
 }
-.division-tag {
-  color: var(--accent); text-transform: uppercase; letter-spacing: 1px; font-size: 11px;
-  background: rgba(13, 148, 136, 0.1); padding: 4px 10px; border-radius: 4px;
+.division-tag{
+    color: var(--accent);
+    background: var(--hover-bg);
+    border: 1px solid var(--border-main);
 }
 
 .action-divider { width: 1px; height: 20px; background: var(--border-main); opacity: 0.3; margin: 0 8px; }
@@ -384,12 +393,20 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   background: transparent; border: none; color: var(--text-muted); cursor: pointer;
   padding: 8px; border-radius: 8px; display: flex; transition: all 0.2s ease;
 }
-.header-icon-btn:hover { color: var(--accent); background: rgba(184, 146, 90, 0.1); }
+.header-icon-btn:hover {
+    color: var(--accent);
+    background: var(--hover-bg);
+}
 .header-icon-btn.exit:hover { color: #f87171; background: rgba(239, 68, 68, 0.1); }
 
 .sidebar-user {
-  margin-top: auto; padding: 20px; border-top: 1px solid rgba(184, 146, 90, 0.1);
-  display: flex; align-items: center; gap: 12px; background: rgba(0, 0, 0, 0.2);
+  margin-top: auto;
+  padding: 20px;
+  border-top: 1px solid var(--border-main);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
 }
 .user-avatar img { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--accent); object-fit: cover; }
 .user-info { display: flex; flex-direction: column; justify-content: center; }
@@ -463,7 +480,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 1000;
     background: var(--sidebar-bg);
-    border-right: 1px solid rgba(184, 146, 90, 0.2);
+    border-right: 1px solid var(--border-main);
     /* Mobile-specific padding adjustments if needed */
     padding-bottom: 20px; 
   }

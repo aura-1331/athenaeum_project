@@ -1,12 +1,17 @@
 /* =====================================================
    THEME TOKENS
 ===================================================== */
+
 :root[data-theme="light"]{
 
   /* ===== App Structure ===== */
-  --app-bg: #d4cec2;        /* outer canvas */
-  --sidebar-bg: #c9c2b6;    /* darker than app */
-  --content-bg: #d4cec2;    /* slightly lighter than app */
+  --app-bg: #d4cec2;
+  --sidebar-bg: #c9c2b6;
+  --content-bg: #d4cec2;
+
+  /* ===== Surfaces ===== */
+  --surface: #f5efe5;
+  --surface-2: #ffffff;
 
   /* ===== Table ===== */
   --table-bg: #f0e9dd;
@@ -32,45 +37,76 @@
   --text-primary: #111827;
   --text-muted: #4b5563;
 
+  /* ===== Accent ===== */
+  --accent: #8b6b3f;
+
+  /* ===== States ===== */
+  --hover-bg: rgba(139,107,63,.08);
+  --active-bg: rgba(139,107,63,.15);
+
+  /* ===== Shadow ===== */
+  --shadow: 0 6px 18px rgba(0,0,0,.08);
+
   /* ===== Borders ===== */
   --border-main: #c9ced4;
+
+  /* +====  Hero filter ==== */
+  --hero-filter: brightness(1.2) contrast(.95);
 }
+
 
 :root[data-theme="dark"]{
 
-  /* ===== App Structure: From Blue-Black to Warm Charcoal ===== */
-  --app-bg: #0a0908; 
-  --sidebar-bg: #080706; /* Slightly deeper than main app */
+  /* ===== App Structure ===== */
+  --app-bg: #0a0908;
+  --sidebar-bg: #080706;
   --content-bg: #0a0908;
 
-  /* ===== Table: Warm Parchment-Black Layers ===== */
+  /* ===== Surfaces ===== */
+  --surface: #141210;
+  --surface-2: #1b1815;
+
+  /* ===== Table ===== */
   --table-bg: #12100e;
   --table-alt: #161412;
   --table-header: #1a1815;
   --table-hover: #221f1b;
-  --table-active: #2d2822; /* Faded bronze feel */
+  --table-active: #2d2822;
 
-  /* ===== Inspector & Panels: Dipped in Antique Brown ===== */
+  /* ===== Inspector ===== */
   --inspector-bg: #141210;
-  --inspector-border: rgba(184, 146, 90, 0.15); /* Tinted with gold */
+  --inspector-border: rgba(184,146,90,.15);
   --inspector-header: #1c1a17;
 
   /* ===== Pagination ===== */
   --pagination-bg: #161412;
   --pagination-active: #2d2822;
 
-  /* ===== Buttons: Deep Forest Green/Brown ===== */
+  /* ===== Buttons ===== */
   --button-bg: #1f221b;
   --button-text: #f5eee0;
 
-  /* ===== Text: Aged Parchment Colors ===== */
-  --text-primary: #f5eee0; /* Off-white / Cream */
-  --text-muted: #b8a88a;    /* Faded gold/tan */
-  --accent: #b8925a;        /* Signature Gold */
+  /* ===== Text ===== */
+  --text-primary: #f5eee0;
+  --text-muted: #b8a88a;
 
-  /* ===== Borders: Subtle Gold Glow ===== */
-  --border-main: rgba(184, 146, 90, 0.12);
+  /* ===== Accent ===== */
+  --accent: #b8925a;
+
+  /* ===== States ===== */
+  --hover-bg: rgba(184,146,90,.08);
+  --active-bg: rgba(184,146,90,.15);
+
+  /* ===== Shadow ===== */
+  --shadow: 0 8px 30px rgba(0,0,0,.45);
+
+  /* ===== Borders ===== */
+  --border-main: rgba(184,146,90,.12);
+
+  /* +====  Hero filter ==== */
+  --hero-filter: sepia(.2) brightness(.9) contrast(1.1);
 }
+
 
 /* =====================================================
    BASE
@@ -89,7 +125,9 @@ h1,h2,h3,h4{
 }
 
 /* INPUTS */
-input,select,textarea{
+input,
+select,
+textarea{
   background:var(--content-bg);
   color:var(--text-primary);
   border:1px solid var(--border-main);
@@ -122,9 +160,10 @@ td{
 .sidebar{
   background:var(--sidebar-bg);
 }
-@media print {
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
+
+@media print{
+  *{
+    -webkit-print-color-adjust:exact !important;
+    print-color-adjust:exact !important;
   }
 }
