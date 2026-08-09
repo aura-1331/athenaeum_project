@@ -89,6 +89,7 @@ logger = logging.getLogger(__name__)
 # -------------------------
 
 def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme)
 ):
     payload = decode_token(token)
@@ -99,9 +100,16 @@ def get_current_user(
             detail="Invalid access token"
         )
 
+    user_id = payload["sub"]
+    role = payload.get("role", "Guest")
+
+    # Make authenticated identity available to database/audit context.
+    request.state.actor_name = user_id
+    request.state.actor_role = role
+
     return {
-        "user_id": payload["sub"],
-        "role": payload.get("role", "Guest")
+        "user_id": user_id,
+        "role": role
     }
 
 # -------------------------

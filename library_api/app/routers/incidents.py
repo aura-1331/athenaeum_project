@@ -31,7 +31,7 @@ async def report_incident(
     if current_user["role"] not in ["The Keeper", "The Chief"]:
         raise HTTPException(status_code=403, detail="Forbidden.")
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("SELECT serial_no FROM items WHERE serial_no = %s", (payload.serial_no,))
@@ -66,7 +66,7 @@ def get_open_incidents(
     if current_user["role"] not in ["The Keeper", "The Chief"]:
         raise HTTPException(status_code=403, detail="Access denied.")
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("""
