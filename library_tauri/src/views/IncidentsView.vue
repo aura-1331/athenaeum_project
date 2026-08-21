@@ -1,141 +1,1025 @@
 <template>
   <div class="incidents-page">
+
     <main class="incidents-main">
+
+      <!-- ==============================
+           PAGE HEADER
+           ============================== -->
       <header class="incidents-header">
+
         <div>
           <div class="eyebrow">ARCHIVE MANAGEMENT</div>
           <h1>Archive Incidents</h1>
           <p>Review and resolve open archive incidents.</p>
         </div>
+
         <div class="header-actions">
-          <button class="btn secondary" :disabled="loading" @click="fetchIncidents">
-            {{ loading ? "Refreshing..." : "Refresh" }}
+
+          <button
+            class="btn secondary"
+            :disabled="loading || historyLoading"
+            @click="refreshIncidents"
+          >
+            {{ loading || historyLoading ? "Refreshing..." : "Refresh" }}
           </button>
-          <button class="btn primary" @click="openReportModal">Report Incident</button>
+
+          <button
+            class="btn primary"
+            @click="openReportModal"
+          >
+            Report Incident
+          </button>
+
         </div>
+
       </header>
 
-      <div v-if="errorMessage" class="alert error">{{ errorMessage }}</div>
 
+      <!-- ==============================
+           ERROR
+           ============================== -->
+      <div
+        v-if="errorMessage"
+        class="alert error"
+      >
+        {{ errorMessage }}
+      </div>
+
+
+      <!-- ==============================
+           OPEN INCIDENT SUMMARY
+           ============================== -->
       <section class="summary-card">
+
         <div class="summary-count">
-          <span>OPEN INCIDENTS</span><strong>{{ incidents.length }}</strong>
+          <span>OPEN INCIDENTS</span>
+          <strong>{{ incidents.length }}</strong>
         </div>
-        <div class="summary-meta">Live data from <code>/incidents/open</code></div>
+
+        <div class="summary-meta">
+          Live data from
+          <code>/incidents/open</code>
+        </div>
+
       </section>
 
-      <section class="panel">
-        <div v-if="loading" class="state">Loading archive incidents...</div>
 
-        <div v-else-if="incidents.length === 0" class="state empty">
-          <strong>No open incidents</strong>
-          <span>The archive currently has no unresolved incidents.</span>
+      <!-- ==============================
+           OPEN INCIDENTS
+           ============================== -->
+      <section class="panel">
+
+        <div
+          v-if="loading"
+          class="state"
+        >
+          Loading archive incidents...
         </div>
 
-        <div v-else class="table-wrap">
+
+        <div
+          v-else-if="incidents.length === 0"
+          class="state empty"
+        >
+          <strong>No open incidents</strong>
+
+          <span>
+            The archive currently has no unresolved incidents.
+          </span>
+        </div>
+
+
+        <div
+          v-else
+          class="table-wrap"
+        >
+
           <table>
+
             <thead>
               <tr>
-                <th>Incident</th><th>Serial</th><th>Type</th><th>Severity</th>
-                <th>Reported</th><th>Status</th><th>Action</th>
+                <th>Incident</th>
+                <th>Serial</th>
+                <th>Type</th>
+                <th>Severity</th>
+                <th>Reported</th>
+                <th>Status</th>
+                <th>Action</th>
               </tr>
             </thead>
+
             <tbody>
-              <tr v-for="incident in incidents" :key="incident.incident_id">
-                <td class="incident-id">#{{ incident.incident_id }}</td>
-                <td class="serial">{{ incident.serial_no }}</td>
-                <td><span :class="['type-badge', incident.incident_type.toLowerCase()]">{{ incident.incident_type }}</span></td>
-                <td><span :class="['severity-badge', incident.severity.toLowerCase()]">{{ incident.severity }}</span></td>
-                <td class="date-cell">{{ formatDate(incident.reported_at) }}</td>
-                <td><span class="status-badge">{{ incident.status }}</span></td>
-                <td class="action-col">
-                  <button class="btn resolve" @click="openResolveModal(incident)">Resolve</button>
+
+              <tr
+                v-for="incident in incidents"
+                :key="incident.incident_id"
+              >
+
+                <td class="incident-id">
+                  #{{ incident.incident_id }}
                 </td>
+
+                <td class="serial">
+                  {{ incident.serial_no }}
+                </td>
+
+                <td>
+                  <span
+                    :class="[
+                      'type-badge',
+                      incident.incident_type.toLowerCase()
+                    ]"
+                  >
+                    {{ incident.incident_type }}
+                  </span>
+                </td>
+
+                <td>
+                  <span
+                    :class="[
+                      'severity-badge',
+                      incident.severity.toLowerCase()
+                    ]"
+                  >
+                    {{ incident.severity }}
+                  </span>
+                </td>
+
+                <td class="date-cell">
+                  {{ formatDate(incident.reported_at) }}
+                </td>
+
+                <td>
+                  <span class="status-badge">
+                    {{ incident.status }}
+                  </span>
+                </td>
+
+                <td class="action-col">
+
+                  <button
+                    class="btn resolve"
+                    @click="openResolveModal(incident)"
+                  >
+                    Resolve
+                  </button>
+
+                </td>
+
               </tr>
+
             </tbody>
+
           </table>
+
         </div>
+
       </section>
+
+
+      <!-- ==================================================
+           INCIDENT HISTORY
+           ================================================== -->
+      <section class="panel history-panel">
+
+        <!-- HISTORY HEADER -->
+        <div class="history-header">
+
+          <div>
+
+            <div class="eyebrow">
+              ARCHIVE RECORD
+            </div>
+
+            <h2>
+              Incident History
+            </h2>
+
+            <p>
+              Complete record of reported and resolved archive incidents.
+            </p>
+
+          </div>
+
+
+          <div class="history-count">
+
+            {{ historyTotal }}
+
+            <span>
+              records
+            </span>
+
+          </div>
+
+        </div>
+
+
+        <!-- ==================================================
+             HISTORY FILTERS
+             IMPORTANT:
+             These are OUTSIDE the loading v-if.
+             ================================================== -->
+        <div class="history-filters">
+
+          <!-- SEARCH -->
+          <div class="history-search">
+
+            <label class="field">
+
+              <span>
+                Search
+              </span>
+
+              <input
+                v-model="historyFilters.search"
+                type="text"
+                placeholder="Incident, serial, accession, description..."
+                @keyup.enter="applyHistoryFilters"
+              />
+
+            </label>
+
+          </div>
+
+
+          <!-- INCIDENT TYPE -->
+          <label class="field">
+
+            <span>
+              Incident Type
+            </span>
+
+            <select
+              v-model="historyFilters.incident_type"
+            >
+
+              <option value="">
+                All Types
+              </option>
+
+              <option value="MISSING">
+                MISSING
+              </option>
+
+              <option value="DAMAGED">
+                DAMAGED
+              </option>
+
+            </select>
+
+          </label>
+
+
+          <!-- SEVERITY -->
+          <label class="field">
+
+            <span>
+              Severity
+            </span>
+
+            <select
+              v-model="historyFilters.severity"
+            >
+
+              <option value="">
+                All Severities
+              </option>
+
+              <option value="LOW">
+                LOW
+              </option>
+
+              <option value="MEDIUM">
+                MEDIUM
+              </option>
+
+              <option value="HIGH">
+                HIGH
+              </option>
+
+            </select>
+
+          </label>
+
+
+          <!-- DATE FROM -->
+          <label class="field">
+
+            <span>
+              Date From
+            </span>
+
+            <input
+              v-model="historyFilters.date_from"
+              type="date"
+            />
+
+          </label>
+
+
+          <!-- DATE TO -->
+          <label class="field">
+
+            <span>
+              Date To
+            </span>
+
+            <input
+              v-model="historyFilters.date_to"
+              type="date"
+            />
+
+          </label>
+
+
+          <!-- SORT -->
+          <label class="field">
+
+            <span>
+              Sort
+            </span>
+
+            <select
+              v-model="historyFilters.sort"
+            >
+
+              <option value="newest">
+                Newest First
+              </option>
+
+              <option value="oldest">
+                Oldest First
+              </option>
+
+            </select>
+
+          </label>
+
+
+          <!-- PER PAGE -->
+          <label class="field">
+
+            <span>
+              Per Page
+            </span>
+
+            <select
+              v-model.number="historyPageSize"
+            >
+
+              <option :value="10">
+                10
+              </option>
+
+              <option :value="25">
+                25
+              </option>
+
+              <option :value="50">
+                50
+              </option>
+
+              <option :value="100">
+                100
+              </option>
+
+            </select>
+
+          </label>
+
+
+          <!-- FILTER BUTTONS -->
+          <div class="history-filter-actions">
+
+            <button
+              class="btn primary"
+              :disabled="historyLoading"
+              @click="applyHistoryFilters"
+            >
+              {{
+                historyLoading
+                  ? "Loading..."
+                  : "Apply Filters"
+              }}
+            </button>
+
+
+            <button
+              class="btn secondary"
+              :disabled="historyLoading"
+              @click="clearHistoryFilters"
+            >
+              Clear
+            </button>
+
+          </div>
+
+        </div>
+
+
+        <!-- ==================================================
+             HISTORY LOADING
+             ================================================== -->
+        <div
+          v-if="historyLoading"
+          class="state"
+        >
+          Loading incident history...
+        </div>
+
+
+        <!-- ==================================================
+             HISTORY EMPTY
+             ================================================== -->
+        <div
+          v-else-if="incidentHistory.length === 0"
+          class="state empty"
+        >
+
+          <strong>
+            No incident history
+          </strong>
+
+          <span>
+            No incidents match the selected filters.
+          </span>
+
+        </div>
+
+
+        <!-- ==================================================
+             HISTORY RECORDS
+             ================================================== -->
+        <div
+          v-else
+          class="history-list"
+        >
+
+          <article
+            v-for="history in incidentHistory"
+            :key="history.incident_id"
+            class="history-card"
+          >
+
+            <!-- CARD HEADER -->
+            <div class="history-card-header">
+
+              <div>
+
+                <div class="eyebrow">
+                  INCIDENT #{{ history.incident_id }}
+                </div>
+
+
+                <div class="history-title">
+
+                  <span class="history-accession">
+                    {{ history.accession_no || "—" }}
+                  </span>
+
+                  <span class="history-serial">
+                    Serial {{ history.serial_no }}
+                  </span>
+
+                </div>
+
+              </div>
+
+
+              <!-- BADGES -->
+              <div class="history-badges">
+
+                <span
+                  :class="[
+                    'type-badge',
+                    history.incident_type.toLowerCase()
+                  ]"
+                >
+                  {{ history.incident_type }}
+                </span>
+
+
+                <span
+                  :class="[
+                    'severity-badge',
+                    history.severity.toLowerCase()
+                  ]"
+                >
+                  {{ history.severity }}
+                </span>
+
+
+                <span class="status-badge">
+                  {{ history.status }}
+                </span>
+
+              </div>
+
+            </div>
+
+
+            <!-- INCIDENT INFORMATION -->
+            <div class="history-grid">
+
+              <!-- REPORTED BY -->
+              <div class="history-field">
+
+                <span>
+                  Reported By
+                </span>
+
+                <strong>
+                  {{
+                    history.reported_by_name
+                      || `User #${history.reported_by}`
+                  }}
+                </strong>
+
+              </div>
+
+
+              <!-- REPORTED -->
+              <div class="history-field">
+
+                <span>
+                  Reported
+                </span>
+
+                <strong>
+                  {{ formatDate(history.reported_at) }}
+                </strong>
+
+              </div>
+
+
+              <!-- RESOLVED -->
+              <div class="history-field">
+
+                <span>
+                  Resolved
+                </span>
+
+                <strong>
+                  {{
+                    history.resolved_at
+                      ? formatDate(history.resolved_at)
+                      : "Still open"
+                  }}
+                </strong>
+
+              </div>
+
+
+              <!-- ASSIGNED TO -->
+              <div
+                v-if="
+                  history.assigned_to_name
+                  || history.assigned_to
+                "
+                class="history-field"
+              >
+
+                <span>
+                  Assigned To
+                </span>
+
+                <strong>
+                  {{
+                    history.assigned_to_name
+                      || `User #${history.assigned_to}`
+                  }}
+                </strong>
+
+              </div>
+
+            </div>
+
+
+            <!-- DESCRIPTION -->
+            <div
+              v-if="history.description"
+              class="history-section"
+            >
+
+              <span>
+                Description
+              </span>
+
+              <p>
+                {{ history.description }}
+              </p>
+
+            </div>
+
+
+            <!-- RESOLUTION -->
+            <div
+              v-if="history.resolution_notes"
+              class="history-section resolution"
+            >
+
+              <span>
+                Resolution
+              </span>
+
+              <p>
+                {{ history.resolution_notes }}
+              </p>
+
+            </div>
+
+          </article>
+
+        </div>
+
+
+        <!-- ==================================================
+             PAGINATION
+             ================================================== -->
+        <div
+          v-if="
+            !historyLoading
+            && historyTotal > 0
+          "
+          class="history-pagination"
+        >
+
+          <div class="pagination-info">
+
+            Showing
+
+            <strong>
+              {{ historyStartRecord }}
+            </strong>
+
+            –
+
+            <strong>
+              {{ historyEndRecord }}
+            </strong>
+
+            of
+
+            <strong>
+              {{ historyTotal }}
+            </strong>
+
+          </div>
+
+
+          <div class="pagination-controls">
+
+            <button
+              class="btn secondary"
+              :disabled="historyPage <= 1 || historyLoading"
+              @click="changeHistoryPage(historyPage - 1)"
+            >
+              Previous
+            </button>
+
+
+            <span class="page-indicator">
+
+              Page
+              <strong>
+                {{ historyPage }}
+              </strong>
+              of
+              <strong>
+                {{ historyTotalPages }}
+              </strong>
+
+            </span>
+
+
+            <button
+              class="btn secondary"
+              :disabled="
+                historyPage >= historyTotalPages
+                || historyLoading
+              "
+              @click="changeHistoryPage(historyPage + 1)"
+            >
+              Next
+            </button>
+
+          </div>
+
+        </div>
+
+      </section>
+
     </main>
 
-    <div v-if="resolveIncident" class="modal-backdrop" @click.self="closeResolveModal">
+
+    <!-- ==================================================
+         RESOLVE INCIDENT MODAL
+         ================================================== -->
+    <div
+      v-if="resolveIncident"
+      class="modal-backdrop"
+      @click.self="closeResolveModal"
+    >
+
       <section class="modal">
+
         <div class="modal-header">
+
           <div>
-            <div class="eyebrow">INCIDENT #{{ resolveIncident.incident_id }}</div>
-            <h2>Resolve Incident</h2>
+
+            <div class="eyebrow">
+              INCIDENT #{{ resolveIncident.incident_id }}
+            </div>
+
+            <h2>
+              Resolve Incident
+            </h2>
+
           </div>
-          <button class="close-btn" @click="closeResolveModal">×</button>
+
+
+          <button
+            class="close-btn"
+            @click="closeResolveModal"
+          >
+            ×
+          </button>
+
         </div>
+
 
         <div class="incident-detail">
-          <div><span>Serial</span><strong>{{ resolveIncident.serial_no }}</strong></div>
-          <div><span>Type</span><strong>{{ resolveIncident.incident_type }}</strong></div>
-          <div><span>Severity</span><strong>{{ resolveIncident.severity }}</strong></div>
+
+          <div>
+
+            <span>
+              Serial
+            </span>
+
+            <strong>
+              {{ resolveIncident.serial_no }}
+            </strong>
+
+          </div>
+
+
+          <div>
+
+            <span>
+              Type
+            </span>
+
+            <strong>
+              {{ resolveIncident.incident_type }}
+            </strong>
+
+          </div>
+
+
+          <div>
+
+            <span>
+              Severity
+            </span>
+
+            <strong>
+              {{ resolveIncident.severity }}
+            </strong>
+
+          </div>
+
         </div>
+
 
         <label class="field">
-          <span>Resolution notes</span>
-          <textarea v-model="resolutionNotes" rows="5" placeholder="Describe why this incident is being resolved..."></textarea>
+
+          <span>
+            Resolution notes
+          </span>
+
+          <textarea
+            v-model="resolutionNotes"
+            rows="5"
+            placeholder="Describe why this incident is being resolved..."
+          ></textarea>
+
         </label>
 
-        <div v-if="modalError" class="alert error">{{ modalError }}</div>
+
+        <div
+          v-if="modalError"
+          class="alert error"
+        >
+          {{ modalError }}
+        </div>
+
 
         <div class="modal-actions">
-          <button class="btn secondary" :disabled="submitting" @click="closeResolveModal">Cancel</button>
-          <button class="btn primary" :disabled="submitting || !resolutionNotes.trim()" @click="resolveSelectedIncident">
-            {{ submitting ? "Resolving..." : "Resolve Incident" }}
+
+          <button
+            class="btn secondary"
+            :disabled="submitting"
+            @click="closeResolveModal"
+          >
+            Cancel
           </button>
+
+
+          <button
+            class="btn primary"
+            :disabled="
+              submitting
+              || !resolutionNotes.trim()
+            "
+            @click="resolveSelectedIncident"
+          >
+            {{
+              submitting
+                ? "Resolving..."
+                : "Resolve Incident"
+            }}
+          </button>
+
         </div>
+
       </section>
+
     </div>
 
-    <div v-if="showReportModal" class="modal-backdrop" @click.self="closeReportModal">
+
+    <!-- ==================================================
+         REPORT INCIDENT MODAL
+         ================================================== -->
+    <div
+      v-if="showReportModal"
+      class="modal-backdrop"
+      @click.self="closeReportModal"
+    >
+
       <section class="modal">
+
         <div class="modal-header">
-          <div><div class="eyebrow">ARCHIVE INCIDENT</div><h2>Report Incident</h2></div>
-          <button class="close-btn" @click="closeReportModal">×</button>
+
+          <div>
+
+            <div class="eyebrow">
+              ARCHIVE INCIDENT
+            </div>
+
+            <h2>
+              Report Incident
+            </h2>
+
+          </div>
+
+
+          <button
+            class="close-btn"
+            @click="closeReportModal"
+          >
+            ×
+          </button>
+
         </div>
 
-        <div v-if="modalError" class="alert error">{{ modalError }}</div>
+
+        <div
+          v-if="modalError"
+          class="alert error"
+        >
+          {{ modalError }}
+        </div>
+
 
         <div class="form-grid">
+
+          <!-- SERIAL -->
           <label class="field">
-            <span>Serial number</span>
-            <input v-model.number="reportForm.serial_no" type="number" min="1" placeholder="Item serial number" />
+
+            <span>
+              Serial number
+            </span>
+
+            <input
+              v-model.number="reportForm.serial_no"
+              type="number"
+              min="1"
+              placeholder="Item serial number"
+            />
+
           </label>
+
+
+          <!-- INCIDENT TYPE -->
           <label class="field">
-            <span>Incident type</span>
-            <select v-model="reportForm.incident_type">
-              <option value="MISSING">MISSING</option>
-              <option value="DAMAGED">DAMAGED</option>
+
+            <span>
+              Incident type
+            </span>
+
+            <select
+              v-model="reportForm.incident_type"
+            >
+
+              <option value="MISSING">
+                MISSING
+              </option>
+
+              <option value="DAMAGED">
+                DAMAGED
+              </option>
+
             </select>
+
           </label>
+
+
+          <!-- SEVERITY -->
           <label class="field">
-            <span>Severity</span>
-            <select v-model="reportForm.severity">
-              <option value="LOW">LOW</option><option value="MEDIUM">MEDIUM</option><option value="HIGH">HIGH</option>
+
+            <span>
+              Severity
+            </span>
+
+            <select
+              v-model="reportForm.severity"
+            >
+
+              <option value="LOW">
+                LOW
+              </option>
+
+              <option value="MEDIUM">
+                MEDIUM
+              </option>
+
+              <option value="HIGH">
+                HIGH
+              </option>
+
             </select>
+
           </label>
+
+
+          <!-- DESCRIPTION -->
           <label class="field full">
-            <span>Description</span>
-            <textarea v-model="reportForm.description" rows="5" placeholder="Describe the incident..."></textarea>
+
+            <span>
+              Description
+            </span>
+
+            <textarea
+              v-model="reportForm.description"
+              rows="5"
+              placeholder="Describe the incident..."
+            ></textarea>
+
           </label>
+
         </div>
 
+
         <div class="modal-actions">
-          <button class="btn secondary" :disabled="submitting" @click="closeReportModal">Cancel</button>
-          <button class="btn primary" :disabled="submitting || !reportForm.serial_no || !reportForm.description.trim()" @click="reportIncident">
-            {{ submitting ? "Reporting..." : "Report Incident" }}
+
+          <button
+            class="btn secondary"
+            :disabled="submitting"
+            @click="closeReportModal"
+          >
+            Cancel
           </button>
+
+
+          <button
+            class="btn primary"
+            :disabled="
+              submitting
+              || !reportForm.serial_no
+              || !reportForm.description.trim()
+            "
+            @click="reportIncident"
+          >
+            {{
+              submitting
+                ? "Reporting..."
+                : "Report Incident"
+            }}
+          </button>
+
         </div>
+
       </section>
+
     </div>
+
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue"
+import { computed, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import axios from "axios"
 import { useAuthStore } from "@/stores/auth.ts"
@@ -149,13 +1033,67 @@ interface Incident {
   reported_at: string
 }
 
+interface IncidentHistory {
+  incident_id: number
+  serial_no: number
+  accession_no: string | null
+  incident_type: string
+  severity: string
+  status: string
+  reported_by: number
+  reported_by_name: string | null
+  assigned_to: number | null
+  assigned_to_name: string | null
+  description: string | null
+  resolution_notes: string | null
+  reported_at: string
+  resolved_at: string | null
+}
+
 const router = useRouter()
 const authStore = useAuthStore()
 const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
 
+
 const incidents = ref<Incident[]>([])
-const loading = ref(true)
+const incidentHistory = ref<IncidentHistory[]>([])
+const historyPage = ref(1)
+const historyPageSize = ref(25)
+const historyTotal = ref(0)
+
+const historyFilters = reactive({
+  search: "",
+  incident_type: "",
+  severity: "",
+  date_from: "",
+  date_to: "",
+  sort: "newest"
+})
+
+const historyTotalPages = computed(() => {
+  if (!historyTotal.value) return 1
+  return Math.ceil(historyTotal.value / historyPageSize.value)
+})
+
+const historyStartRecord = computed(() => {
+  if (!historyTotal.value) return 0
+
+  return (
+    (historyPage.value - 1) * historyPageSize.value + 1
+  )
+})
+
+const historyEndRecord = computed(() => {
+  return Math.min(
+    historyPage.value * historyPageSize.value,
+    historyTotal.value
+  )
+})
+
+const historyLoading = ref(true)
 const submitting = ref(false)
+const loading = ref(true)
+
 const errorMessage = ref("")
 const modalError = ref("")
 const resolveIncident = ref<Incident | null>(null)
@@ -233,7 +1171,7 @@ async function resolveSelectedIncident() {
       config
     )
     closeResolveModal()
-    await fetchIncidents()
+    await refreshIncidents()
   } catch (err: any) {
     if (err.response?.status === 401) {
       router.push("/login")
@@ -275,7 +1213,7 @@ async function reportIncident() {
       description: reportForm.description.trim()
     }, config)
     closeReportModal()
-    await fetchIncidents()
+await refreshIncidents()
   } catch (err: any) {
     if (err.response?.status === 401) {
       router.push("/login")
@@ -288,7 +1226,123 @@ async function reportIncident() {
   }
 }
 
-onMounted(fetchIncidents)
+async function fetchIncidentHistory() {
+  historyLoading.value = true
+
+  try {
+    const config = getAuthConfig()
+    if (!config) return
+
+    const params: Record<string, any> = {
+      page: historyPage.value,
+      page_size: historyPageSize.value,
+      sort: historyFilters.sort
+    }
+
+    if (historyFilters.search.trim()) {
+      params.search = historyFilters.search.trim()
+    }
+
+    if (historyFilters.incident_type) {
+      params.incident_type = historyFilters.incident_type
+    }
+
+    if (historyFilters.severity) {
+      params.severity = historyFilters.severity
+    }
+
+    if (historyFilters.date_from) {
+      params.date_from = historyFilters.date_from
+    }
+
+    if (historyFilters.date_to) {
+      params.date_to = historyFilters.date_to
+    }
+
+    const response = await axios.get(
+      `${baseUrl}/incidents/history`,
+      {
+        ...config,
+        params
+      }
+    )
+
+    const data = response.data
+
+    if (Array.isArray(data)) {
+      incidentHistory.value = data
+      historyTotal.value = data.length
+    } else {
+      incidentHistory.value =
+        data.items ||
+        data.records ||
+        data.results ||
+        []
+
+      historyTotal.value =
+        Number(data.total) ||
+        Number(data.total_count) ||
+        incidentHistory.value.length
+    }
+
+  } catch (err: any) {
+    if (err.response?.status === 401) {
+      router.push("/login")
+      return
+    }
+
+    console.error("Failed to load incident history:", err)
+
+    incidentHistory.value = []
+    historyTotal.value = 0
+
+    errorMessage.value =
+      err.response?.data?.detail ||
+      "Unable to load incident history."
+
+  } finally {
+    historyLoading.value = false
+  }
+}
+async function refreshIncidents() {
+  await Promise.all([
+    fetchIncidents(),
+    fetchIncidentHistory()
+  ])
+}
+
+function applyHistoryFilters() {
+  historyPage.value = 1
+  fetchIncidentHistory()
+}
+
+function clearHistoryFilters() {
+  historyFilters.search = ""
+  historyFilters.incident_type = ""
+  historyFilters.severity = ""
+  historyFilters.date_from = ""
+  historyFilters.date_to = ""
+  historyFilters.sort = "newest"
+
+  historyPage.value = 1
+
+  fetchIncidentHistory()
+}
+
+function changeHistoryPage(page: number) {
+  if (page < 1) return
+  if (page > historyTotalPages.value) return
+
+  historyPage.value = page
+  fetchIncidentHistory()
+}
+
+watch(historyPageSize, () => {
+  historyPage.value = 1
+  fetchIncidentHistory()
+})
+
+onMounted(refreshIncidents)
 </script>
 
 <style scoped>
@@ -298,6 +1352,141 @@ onMounted(fetchIncidents)
   padding: 32px;
   background: var(--content-bg, #0a0908);
   color: var(--text-primary, #f5eee0);
+}
+
+.history-panel {
+  margin-top: 18px;
+  overflow: hidden;
+}
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--border-main, rgba(184,146,90,.12));
+}
+
+.history-header h2 {
+  margin: 0;
+}
+
+.history-header p {
+  margin: 7px 0 0;
+  color: var(--text-muted, #b8a88a);
+  font-size: 13px;
+}
+
+.history-count {
+  color: var(--accent, #b8925a);
+  font: 500 26px Georgia, serif;
+  white-space: nowrap;
+}
+
+.history-count span {
+  color: var(--text-muted, #b8a88a);
+  font: 700 10px inherit;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.history-card {
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--border-main, rgba(184,146,90,.12));
+}
+
+.history-card:last-child {
+  border-bottom: 0;
+}
+
+.history-card:hover {
+  background: var(--hover-bg, rgba(184,146,90,.08));
+}
+
+.history-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.history-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.history-accession {
+  color: var(--text-primary, #f5eee0);
+  font: 500 20px Georgia, serif;
+}
+
+.history-serial {
+  color: var(--text-muted, #b8a88a);
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.history-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.history-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.history-field {
+  padding: 11px 12px;
+  border: 1px solid var(--border-main, rgba(184,146,90,.12));
+  border-radius: 8px;
+  background: var(--surface-2, #1b1815);
+}
+
+.history-field span,
+.history-section > span {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-muted, #b8a88a);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.history-field strong {
+  font-size: 12px;
+  color: var(--text-primary, #f5eee0);
+}
+
+.history-section {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-left: 2px solid var(--border-main, rgba(184,146,90,.18));
+  background: var(--surface-2, #1b1815);
+  border-radius: 0 7px 7px 0;
+}
+
+.history-section p {
+  margin: 0;
+  color: var(--text-primary, #f5eee0);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.history-section.resolution {
+  border-left-color: var(--accent, #b8925a);
 }
 .incidents-main { width: 100%; max-width: 1500px; margin: 0 auto; }
 .incidents-header { display:flex; justify-content:space-between; align-items:flex-end; gap:24px; margin-bottom:24px; }
@@ -365,5 +1554,21 @@ tbody tr:hover { background:var(--hover-bg,rgba(184,146,90,.08)); }
   .field.full { grid-column:auto; }
   .modal-backdrop { padding:12px; }
   .modal { padding:18px; }
+  .history-header {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.history-card-header {
+  flex-direction: column;
+}
+
+.history-badges {
+  justify-content: flex-start;
+}
+
+.history-grid {
+  grid-template-columns: 1fr;
+}
 }
 </style>
