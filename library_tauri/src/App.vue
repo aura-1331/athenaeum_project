@@ -192,11 +192,8 @@ onUnmounted(() => {
         
         <div class="nav-section-label">System</div>
           <RouterLink to="/audit-trail"><ShieldCheck :size="18" :stroke-width="1.5" /><span>Audit Trail</span></RouterLink>
-          <RouterLink to="/admin/settings"><LayoutDashboard :size="18" :stroke-width="1.5" /><span>Reports</span></RouterLink>
-          <RouterLink to="/about">
-            <Info :size="18" :stroke-width="1.5" />
-            <span>About</span>
-          </RouterLink>
+          <RouterLink to="/reports">  <LayoutDashboard :size="18" :stroke-width="1.5" />  <span>Reports</span></RouterLink>
+          <RouterLink to="/about">            <Info :size="18" :stroke-width="1.5" />            <span>About</span>          </RouterLink>
       </nav>
 
       <div class="sidebar-user">

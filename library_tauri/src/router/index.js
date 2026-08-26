@@ -16,6 +16,7 @@ import AuthorsView from "../views/AuthorsView.vue"
 import SubjectsView from "../views/SubjectsView.vue"
 import AboutView from "../views/AboutView.vue" 
 import IncidentsView from "../views/IncidentsView.vue"
+import ReportsView from "../views/ReportsView.vue"
 const routes = [
   { path: "/login", name: "login", component: Login },
   
@@ -37,6 +38,8 @@ const routes = [
   { path: "/classification/subjects", name: "Subjects", component: SubjectsView, meta: { requiresAuth: true } },
   {
   path: "/incidents",  name: "incidents",  component: IncidentsView,  meta: { requiresAuth: true }},
+  {
+  path: "/reports",  name: "reports",  component: ReportsView,  meta: { requiresAuth: true }},
   
   { path: "/about", name: "about", component: AboutView, meta: { requiresAuth: true } }
 ]
