@@ -60,17 +60,17 @@
       </div>
 
       <div class="filters">
-  <button
-    v-for="filter in filters"
-    :key="filter.value"
-    type="button"
-    class="filter-button"
-    :class="[statusClass(filter.value) || 'all', { active: statusFilter === filter.value }]"
-    @click="statusFilter = filter.value"
-  >
-    {{ filter.label }}
-  </button>
-</div>
+        <button
+          v-for="filter in filters"
+          :key="filter.value"
+          type="button"
+          class="filter-button"
+          :class="[statusClass(filter.value) || 'all', { active: statusFilter === filter.value }]"
+          @click="statusFilter = filter.value"
+        >
+          {{ filter.label }}
+        </button>
+      </div>
     </section>
 
     <!-- ERROR -->
@@ -163,58 +163,178 @@
           </button>
         </div>
 
+        <!-- NOTIFICATION / AUDIT MESSAGE -->
+        <div
+          v-if="actionMessage"
+          class="action-message"
+          :class="{ failure: actionFailed }"
+        >
+          {{ actionMessage }}
+        </div>
+
+        <!-- DETAILS FORM SECTION -->
         <section class="detail-section">
-          <div class="detail-grid">
-            <div class="detail-item">
-              <span>AUTHORITY ID</span>
-              <strong>{{ selectedAuthority.authority_id }}</strong>
+          <div class="section-header-flex">
+            <div class="section-title">CORE ATTRIBUTES</div>
+            <span
+              class="status-badge"
+              :class="statusClass(selectedAuthority.status)"
+            >
+              {{ selectedAuthority.status }}
+            </span>
+          </div>
+
+          <!-- PROVISIONAL: EDITABLE FORM -->
+          <form
+            v-if="selectedAuthority.status === 'PROVISIONAL'"
+            @submit.prevent="saveAuthorityDetails"
+            class="edit-form"
+          >
+            <div class="form-grid">
+              <div class="form-field">
+                <label>PREFERRED NAME</label>
+                <input
+                  v-model="editForm.preferred_name"
+                  type="text"
+                  required
+                />
+              </div>
+
+              <div class="form-field">
+                <label>AUTHORITY CODE</label>
+                <input
+                  v-model="editForm.authority_code"
+                  type="text"
+                  required
+                />
+              </div>
+
+              <div class="form-field">
+                <label>AUTHORITY TYPE</label>
+                <input
+                  v-model="editForm.authority_type"
+                  type="text"
+                  placeholder="e.g. PERSON, CORPORATE"
+                />
+              </div>
+
+              <div class="form-field">
+                <label>RECORD ID</label>
+                <input
+                  :value="selectedAuthority.authority_id"
+                  disabled
+                  class="disabled-input"
+                />
+              </div>
             </div>
-            <div class="detail-item">
-              <span>TYPE</span>
-              <strong>{{ selectedAuthority.authority_type }}</strong>
+
+            <div class="form-field full-width">
+              <label>INTERNAL NOTES</label>
+              <textarea
+                v-model="editForm.notes"
+                rows="3"
+                placeholder="Cataloging notes..."
+              ></textarea>
             </div>
-            <div class="detail-item">
-              <span>STATUS</span>
-              <strong>
-                <span
-                  class="status-badge"
-                  :class="statusClass(selectedAuthority.status)"
-                >
-                  {{ selectedAuthority.status }}
-                </span>
-              </strong>
+
+            <button
+              type="submit"
+              class="save-button"
+              :disabled="actionLoading"
+            >
+              <span v-if="actionLoading && actionType === 'UPDATE'">SAVING...</span>
+              <span v-else>SAVE CHANGES</span>
+            </button>
+          </form>
+
+          <!-- READ ONLY FOR VERIFIED / REJECTED -->
+          <div v-else>
+            <div class="detail-grid">
+              <div class="detail-item">
+                <span>AUTHORITY ID</span>
+                <strong>{{ selectedAuthority.authority_id }}</strong>
+              </div>
+              <div class="detail-item">
+                <span>TYPE</span>
+                <strong>{{ selectedAuthority.authority_type }}</strong>
+              </div>
+              <div class="detail-item">
+                <span>CREATED</span>
+                <strong>{{ formatDate(selectedAuthority.created_at) }}</strong>
+              </div>
+              <div class="detail-item">
+                <span>UPDATED</span>
+                <strong>{{ formatDate(selectedAuthority.updated_at) }}</strong>
+              </div>
             </div>
-            <div class="detail-item">
-              <span>CREATED</span>
-              <strong>{{ formatDate(selectedAuthority.created_at) }}</strong>
+
+            <div v-if="selectedAuthority.notes" class="notes-box">
+              <span>NOTES</span>
+              <div class="notes">{{ selectedAuthority.notes }}</div>
             </div>
           </div>
         </section>
 
-        <section v-if="selectedAuthority.notes" class="detail-section">
-          <div class="section-title">NOTES</div>
-          <div class="notes">{{ selectedAuthority.notes }}</div>
-        </section>
-
+        <!-- VARIANT NAMES (ALIASES) -->
         <section class="detail-section">
           <div class="section-title">VARIANT NAMES</div>
+          
           <div v-if="selectedAuthority.variants?.length" class="variant-list">
             <div
               v-for="variant in selectedAuthority.variants"
               :key="variant.variant_id"
               class="variant-row"
             >
-              <span>{{ variant.variant_name }}</span>
-              <small>{{ variant.variant_type }}</small>
+              <div>
+                <span>{{ variant.variant_name }}</span>
+                <small v-if="variant.variant_type">{{ variant.variant_type }}</small>
+              </div>
+              
+              <button
+                v-if="selectedAuthority.status === 'PROVISIONAL'"
+                type="button"
+                class="variant-delete-btn"
+                title="Delete Variant"
+                @click="deleteVariant(variant.variant_id, variant.variant_name)"
+              >
+                ×
+              </button>
             </div>
           </div>
           <div v-else class="muted">
             No variant names recorded.
           </div>
+
+          <!-- ADD VARIANT FORM (PROVISIONAL ONLY) -->
+          <form
+            v-if="selectedAuthority.status === 'PROVISIONAL'"
+            @submit.prevent="addVariant"
+            class="add-variant-box"
+          >
+            <input
+              v-model="newVariant.variant_name"
+              type="text"
+              placeholder="Alias / Variant name..."
+              required
+            />
+            <input
+              v-model="newVariant.variant_type"
+              type="text"
+              placeholder="Type (e.g. PSEUDONYM)"
+            />
+            <button
+              type="submit"
+              class="add-variant-btn"
+              :disabled="actionLoading"
+            >
+              + ADD
+            </button>
+          </form>
         </section>
 
+        <!-- CONNECTED WORKS -->
         <section class="detail-section">
-          <div class="section-title">CONNECTED WORKS</div>
+          <div class="section-title">CONNECTED WORKS ({{ selectedAuthority.works?.length || 0 }})</div>
           <div v-if="selectedAuthority.works?.length" class="works-list">
             <div
               v-for="work in selectedAuthority.works"
@@ -233,29 +353,24 @@
           </div>
         </section>
 
+        <!-- VERIFICATION AUDIT METADATA -->
         <section v-if="selectedAuthority.verified_at" class="detail-section">
-          <div class="section-title">VERIFICATION</div>
+          <div class="section-title">VERIFICATION AUDIT</div>
           <div class="verification-info">
             <div>
               <span>VERIFIED AT</span>
               <strong>{{ formatDate(selectedAuthority.verified_at) }}</strong>
             </div>
             <div>
-              <span>VERIFIED BY</span>
+              <span>VERIFIED BY (USER ID)</span>
               <strong>{{ selectedAuthority.verified_by }}</strong>
             </div>
           </div>
         </section>
 
+        <!-- DRAWER ACTIONS -->
         <section class="drawer-actions">
-          <div
-            v-if="actionMessage"
-            class="action-message"
-            :class="{ failure: actionFailed }"
-          >
-            {{ actionMessage }}
-          </div>
-
+          <!-- ACTIONS FOR PROVISIONAL -->
           <template v-if="selectedAuthority.status === 'PROVISIONAL'">
             <button
               type="button"
@@ -277,18 +392,21 @@
             </button>
           </template>
 
-          <div
-            v-else-if="selectedAuthority.status === 'VERIFIED'"
-            class="status-message"
-          >
-            This authority has been verified.
-          </div>
-          <div
-            v-else-if="selectedAuthority.status === 'REJECTED'"
-            class="status-message"
-          >
-            This authority has been rejected.
-          </div>
+          <!-- ACTIONS FOR VERIFIED / REJECTED (REOPEN) -->
+          <template v-else>
+            <div class="status-message">
+              This authority record is currently <strong>{{ selectedAuthority.status }}</strong>.
+            </div>
+            <button
+              type="button"
+              class="action-button reopen"
+              :disabled="actionLoading"
+              @click="reopenAuthority"
+            >
+              <span v-if="actionLoading && actionType === 'REOPEN'">REOPENING...</span>
+              <span v-else>↺ REOPEN FOR PROVISIONAL REVIEW</span>
+            </button>
+          </template>
         </section>
       </aside>
     </div>
@@ -297,7 +415,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 
 const API_BASE = 'http://127.0.0.1:8000'
 
@@ -312,6 +430,19 @@ const actionLoading = ref(false)
 const actionType = ref('')
 const actionMessage = ref('')
 const actionFailed = ref(false)
+
+const editForm = reactive({
+  preferred_name: '',
+  authority_code: '',
+  authority_type: '',
+  notes: ''
+})
+
+const newVariant = reactive({
+  variant_name: '',
+  variant_type: '',
+  notes: ''
+})
 
 const filters = [
   { label: 'ALL', value: '' },
@@ -365,7 +496,7 @@ async function apiRequest(path, options = {}) {
   const token = getAccessToken()
 
   if (!token) {
-    throw new Error('Please log in again.')
+    throw new Error('AUTH SESSION EXPIRED // Please log in again.')
   }
 
   const response = await fetch(`${API_BASE}${path}`, {
@@ -385,8 +516,35 @@ async function apiRequest(path, options = {}) {
   }
 
   if (!response.ok) {
-    const message = body?.detail || body?.message || `Request failed with status ${response.status}`
-    const error = new Error(message)
+    let cleanMessage = ''
+
+    // 1. Handle Pydantic 422 validation error arrays
+    if (Array.isArray(body?.detail)) {
+      cleanMessage = body.detail
+        .map(err => {
+          const field = err.loc ? err.loc[err.loc.length - 1] : ''
+
+          // Custom Terminal Error for Mandatory Reason
+          if (field === 'reason') {
+            return 'AUDIT JUSTIFICATION REQUIRED // Please enter a valid reason (min 3 characters) to proceed.'
+          }
+
+          return `VALIDATION ERROR // ${String(field).toUpperCase()}: ${err.msg}`
+        })
+        .join(' | ')
+    } 
+    // 2. Handle string error messages
+    else if (typeof body?.detail === 'string') {
+      cleanMessage = body.detail
+    } 
+    // 3. Fallback generic messages
+    else if (body?.message) {
+      cleanMessage = typeof body.message === 'string' ? body.message : JSON.stringify(body.message)
+    } else {
+      cleanMessage = `REQUEST FAILED // HTTP ${response.status}`
+    }
+
+    const error = new Error(cleanMessage)
     error.status = response.status
     throw error
   }
@@ -413,9 +571,18 @@ async function openAuthority(authority) {
   actionMessage.value = ''
   actionFailed.value = false
 
+  editForm.preferred_name = authority.preferred_name || ''
+  editForm.authority_code = authority.authority_code || ''
+  editForm.authority_type = authority.authority_type || ''
+  editForm.notes = authority.notes || ''
+
   try {
     const detail = await apiRequest(`/authority/${authority.authority_id}`)
     selectedAuthority.value = detail
+    editForm.preferred_name = detail.preferred_name || ''
+    editForm.authority_code = detail.authority_code || ''
+    editForm.authority_type = detail.authority_type || ''
+    editForm.notes = detail.notes || ''
   } catch (error) {
     actionFailed.value = true
     actionMessage.value = error.message || 'Unable to load authority details.'
@@ -429,9 +596,13 @@ function closeAuthority() {
   actionFailed.value = false
 }
 
+// ==========================================
+// STATUS TRANSITIONS
+// ==========================================
 async function verifyAuthority() {
   if (!selectedAuthority.value || selectedAuthority.value.status !== 'PROVISIONAL') return
-  if (!window.confirm(`Verify authority "${selectedAuthority.value.preferred_name}"?`)) return
+  const reason = window.prompt(`Optional verification note for "${selectedAuthority.value.preferred_name}":`)
+  if (reason === null) return
 
   actionLoading.value = true
   actionType.value = 'VERIFY'
@@ -440,10 +611,11 @@ async function verifyAuthority() {
 
   try {
     const data = await apiRequest(`/authority/${selectedAuthority.value.authority_id}/verify`, {
-      method: 'PATCH'
+      method: 'PATCH',
+      body: JSON.stringify({ reason: reason.trim() || null })
     })
     if (data?.authority) selectedAuthority.value = { ...selectedAuthority.value, ...data.authority }
-    actionMessage.value = data?.message || 'Authority verified.'
+    actionMessage.value = data?.message || 'Authority verified successfully.'
     await fetchAuthorities()
   } catch (error) {
     actionFailed.value = true
@@ -456,7 +628,8 @@ async function verifyAuthority() {
 
 async function rejectAuthority() {
   if (!selectedAuthority.value || selectedAuthority.value.status !== 'PROVISIONAL') return
-  if (!window.confirm(`Reject authority "${selectedAuthority.value.preferred_name}"?`)) return
+  const reason = window.prompt(`Enter rejection reason for "${selectedAuthority.value.preferred_name}":`)
+  if (reason === null) return
 
   actionLoading.value = true
   actionType.value = 'REJECT'
@@ -465,7 +638,8 @@ async function rejectAuthority() {
 
   try {
     const data = await apiRequest(`/authority/${selectedAuthority.value.authority_id}/reject`, {
-      method: 'PATCH'
+      method: 'PATCH',
+      body: JSON.stringify({ reason: reason.trim() || null })
     })
     if (data?.authority) selectedAuthority.value = { ...selectedAuthority.value, ...data.authority }
     actionMessage.value = data?.message || 'Authority rejected.'
@@ -473,6 +647,127 @@ async function rejectAuthority() {
   } catch (error) {
     actionFailed.value = true
     actionMessage.value = error.message || 'Rejection failed.'
+  } finally {
+    actionLoading.value = false
+    actionType.value = ''
+  }
+}
+
+async function reopenAuthority() {
+  if (!selectedAuthority.value || selectedAuthority.value.status === 'PROVISIONAL') return
+  const reason = window.prompt(`Reason for reopening "${selectedAuthority.value.preferred_name}" for review:`)
+  if (reason === null) return
+
+  actionLoading.value = true
+  actionType.value = 'REOPEN'
+  actionMessage.value = ''
+  actionFailed.value = false
+
+  try {
+    const data = await apiRequest(`/authority/${selectedAuthority.value.authority_id}/reopen`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reason: reason.trim() || null })
+    })
+    if (data?.authority) selectedAuthority.value = { ...selectedAuthority.value, ...data.authority }
+    actionMessage.value = data?.message || 'Authority reopened for provisional review.'
+    await fetchAuthorities()
+  } catch (error) {
+    actionFailed.value = true
+    actionMessage.value = error.message || 'Reopening failed.'
+  } finally {
+    actionLoading.value = false
+    actionType.value = ''
+  }
+}
+
+// ==========================================
+// EDIT DETAILS
+// ==========================================
+async function saveAuthorityDetails() {
+  if (!selectedAuthority.value || selectedAuthority.value.status !== 'PROVISIONAL') return
+
+  actionLoading.value = true
+  actionType.value = 'UPDATE'
+  actionMessage.value = ''
+  actionFailed.value = false
+
+  try {
+    const data = await apiRequest(`/authority/${selectedAuthority.value.authority_id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        preferred_name: editForm.preferred_name,
+        authority_code: editForm.authority_code,
+        authority_type: editForm.authority_type,
+        notes: editForm.notes
+      })
+    })
+    if (data?.authority) selectedAuthority.value = { ...selectedAuthority.value, ...data.authority }
+    actionMessage.value = 'Record details updated successfully.'
+    await fetchAuthorities()
+  } catch (error) {
+    actionFailed.value = true
+    actionMessage.value = error.message || 'Failed to update record.'
+  } finally {
+    actionLoading.value = false
+    actionType.value = ''
+  }
+}
+
+// ==========================================
+// VARIANT MANAGEMENT
+// ==========================================
+async function addVariant() {
+  if (!selectedAuthority.value || !newVariant.variant_name.trim()) return
+
+  actionLoading.value = true
+  actionType.value = 'ADD_VARIANT'
+  actionMessage.value = ''
+  actionFailed.value = false
+
+  try {
+    await apiRequest(`/authority/${selectedAuthority.value.authority_id}/variants`, {
+      method: 'POST',
+      body: JSON.stringify({
+        variant_name: newVariant.variant_name.trim(),
+        variant_type: newVariant.variant_type.trim() || null
+      })
+    })
+    newVariant.variant_name = ''
+    newVariant.variant_type = ''
+    
+    // Refresh drawer detail
+    const detail = await apiRequest(`/authority/${selectedAuthority.value.authority_id}`)
+    selectedAuthority.value = detail
+    actionMessage.value = 'Variant added successfully.'
+  } catch (error) {
+    actionFailed.value = true
+    actionMessage.value = error.message || 'Failed to add variant.'
+  } finally {
+    actionLoading.value = false
+    actionType.value = ''
+  }
+}
+
+async function deleteVariant(variantId, variantName) {
+  if (!selectedAuthority.value) return
+  if (!window.confirm(`Delete variant "${variantName}"?`)) return
+
+  actionLoading.value = true
+  actionType.value = 'DEL_VARIANT'
+  actionMessage.value = ''
+  actionFailed.value = false
+
+  try {
+    await apiRequest(`/authority/${selectedAuthority.value.authority_id}/variants/${variantId}`, {
+      method: 'DELETE'
+    })
+    // Refresh drawer detail
+    const detail = await apiRequest(`/authority/${selectedAuthority.value.authority_id}`)
+    selectedAuthority.value = detail
+    actionMessage.value = 'Variant deleted successfully.'
+  } catch (error) {
+    actionFailed.value = true
+    actionMessage.value = error.message || 'Failed to delete variant.'
   } finally {
     actionLoading.value = false
     actionType.value = ''
@@ -516,7 +811,6 @@ onMounted(() => {
 .authority-page * {
   box-sizing: border-box;
 }
-
 
 /* ============================================================
    HEADER
@@ -569,9 +863,8 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
-
 /* ============================================================
-   METRICS (COLOR-CODED)
+   METRICS
 ============================================================ */
 .metrics {
   display: grid;
@@ -602,18 +895,9 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
-.metric-card.provisional .metric-value {
-  color: #f59e0b;
-}
-
-.metric-card.verified .metric-value {
-  color: #22c55e;
-}
-
-.metric-card.rejected .metric-value {
-  color: #ef4444;
-}
-
+.metric-card.provisional .metric-value { color: #f59e0b; }
+.metric-card.verified .metric-value { color: #22c55e; }
+.metric-card.rejected .metric-value { color: #ef4444; }
 
 /* ============================================================
    TOOLBAR & FILTER BUTTONS
@@ -697,10 +981,7 @@ onMounted(() => {
   font-weight: 700;
 }
 
-.filter-button.provisional {
-  color: #f59e0b;
-}
-
+.filter-button.provisional { color: #f59e0b; }
 .filter-button.provisional:hover,
 .filter-button.provisional.active {
   background: rgba(245, 158, 11, 0.16);
@@ -709,10 +990,7 @@ onMounted(() => {
   font-weight: 700;
 }
 
-.filter-button.verified {
-  color: #22c55e;
-}
-
+.filter-button.verified { color: #22c55e; }
 .filter-button.verified:hover,
 .filter-button.verified.active {
   background: rgba(34, 197, 94, 0.16);
@@ -721,10 +999,7 @@ onMounted(() => {
   font-weight: 700;
 }
 
-.filter-button.rejected {
-  color: #ef4444;
-}
-
+.filter-button.rejected { color: #ef4444; }
 .filter-button.rejected:hover,
 .filter-button.rejected.active {
   background: rgba(239, 68, 68, 0.16);
@@ -732,7 +1007,6 @@ onMounted(() => {
   color: #ef4444;
   font-weight: 700;
 }
-
 
 /* ============================================================
    ERROR & STATES
@@ -748,18 +1022,9 @@ onMounted(() => {
   color: #ef4444;
 }
 
-.error-banner strong {
-  font-size: 12px;
-  letter-spacing: 0.12em;
-}
-
-.error-banner span {
-  font-size: 14px;
-  margin-top: 4px;
-}
-
-.error-banner button,
-.reset-button {
+.error-banner strong { font-size: 12px; letter-spacing: 0.12em; }
+.error-banner span { font-size: 14px; margin-top: 4px; }
+.error-banner button, .reset-button {
   border: 1px solid var(--border-main);
   background: var(--surface);
   color: var(--text-primary);
@@ -768,11 +1033,6 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-}
-
-.reset-button:hover {
-  background: var(--hover-bg);
-  color: var(--accent);
 }
 
 .state-panel {
@@ -797,7 +1057,6 @@ onMounted(() => {
   font-size: 14px;
   color: var(--text-muted);
 }
-
 
 /* ============================================================
    TABLE
@@ -833,30 +1092,12 @@ onMounted(() => {
   transition: background 0.15s ease;
 }
 
-.authority-row:last-child {
-  border-bottom: none;
-}
+.authority-row:last-child { border-bottom: none; }
+.authority-row:hover { background: var(--hover-bg); }
 
-.authority-row:hover {
-  background: var(--hover-bg);
-}
-
-.authority-code {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-}
-
-.authority-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.authority-type {
-  font-size: 13px;
-  color: var(--text-muted);
-}
+.authority-code { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+.authority-name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.authority-type { font-size: 13px; color: var(--text-muted); }
 
 .row-action {
   text-align: right;
@@ -866,10 +1107,7 @@ onMounted(() => {
   transition: color 0.15s ease;
 }
 
-.authority-row:hover .row-action {
-  color: var(--accent);
-}
-
+.authority-row:hover .row-action { color: var(--accent); }
 
 /* ============================================================
    STATUS BADGES
@@ -901,9 +1139,8 @@ onMounted(() => {
   border: 1px solid rgba(239, 68, 68, 0.45);
 }
 
-
 /* ============================================================
-   DETAIL DRAWER (USES APP THEME TOKENS)
+   DETAIL DRAWER & FORMS
 ============================================================ */
 .drawer-backdrop {
   position: fixed;
@@ -916,7 +1153,7 @@ onMounted(() => {
 }
 
 .detail-drawer {
-  width: min(640px, 94vw);
+  width: min(680px, 94vw);
   height: 100%;
   overflow-y: auto;
   padding: 34px;
@@ -970,6 +1207,21 @@ onMounted(() => {
   border-bottom: 1px solid var(--border-main);
 }
 
+.section-header-flex {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -977,8 +1229,7 @@ onMounted(() => {
 }
 
 .detail-item span,
-.verification-info span,
-.section-title {
+.verification-info span {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -987,16 +1238,34 @@ onMounted(() => {
 
 .detail-item strong,
 .verification-info strong {
+  display: block;
+  margin-top: 4px;
   font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
+.notes-box {
+  margin-top: 20px;
+}
+
+.notes-box span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+}
+
 .notes {
+  margin-top: 6px;
   font-size: 14px;
   line-height: 1.7;
   color: var(--text-primary);
   opacity: 0.9;
+  background: var(--surface);
+  padding: 12px 14px;
+  border: 1px solid var(--border-main);
+  white-space: pre-line;
 }
 
 .muted {
@@ -1004,6 +1273,76 @@ onMounted(() => {
   color: var(--text-muted);
 }
 
+/* Edit Form inside Drawer */
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-field.full-width {
+  grid-column: span 2;
+}
+
+.form-field label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.form-field input,
+.form-field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-main);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.form-field input:focus,
+.form-field textarea:focus {
+  border-color: var(--accent);
+}
+
+.disabled-input {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.save-button {
+  padding: 10px 16px;
+  border: 1px solid var(--border-main);
+  background: var(--surface);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.save-button:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+
+/* Variants */
 .variant-row,
 .work-row {
   display: flex;
@@ -1025,16 +1364,71 @@ onMounted(() => {
   color: var(--text-primary);
 }
 
-.variant-row small,
-.work-id,
-.work-info span {
-  font-size: 12px;
+.variant-row small {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 11px;
+  padding: 2px 6px;
+  background: var(--hover-bg);
+  border: 1px solid var(--border-main);
   color: var(--text-muted);
 }
 
-.work-row {
-  gap: 16px;
+.variant-delete-btn {
+  background: transparent;
+  border: none;
+  color: #ef4444;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
 }
+
+.variant-delete-btn:hover {
+  opacity: 0.7;
+}
+
+.add-variant-box {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.add-variant-box input {
+  padding: 8px 12px;
+  border: 1px solid var(--border-main);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.add-variant-box input:first-child {
+  flex: 2;
+}
+
+.add-variant-box input:nth-child(2) {
+  flex: 1;
+}
+
+.add-variant-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--border-main);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.add-variant-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--accent);
+}
+
+/* Works */
+.work-row { gap: 16px; }
+.work-id, .work-info span { font-size: 12px; color: var(--text-muted); }
 
 .verification-info {
   display: grid;
@@ -1042,17 +1436,18 @@ onMounted(() => {
   gap: 22px;
 }
 
+/* Action Section */
 .drawer-actions {
   padding: 26px 0 40px;
 }
 
 .action-message {
-  margin-bottom: 14px;
+  margin-top: 16px;
   padding: 12px 14px;
-  border: 1px solid var(--border-main);
-  background: var(--surface);
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  background: rgba(34, 197, 94, 0.12);
   font-size: 13px;
-  color: var(--text-primary);
+  color: #22c55e;
 }
 
 .action-message.failure {
@@ -1092,32 +1487,32 @@ onMounted(() => {
   background: rgba(239, 68, 68, 0.12);
 }
 
+.action-button.reopen {
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+
 .status-message {
-  padding: 16px;
+  padding: 14px;
   border: 1px solid var(--border-main);
   background: var(--surface);
   font-size: 13px;
   color: var(--text-muted);
+  margin-bottom: 12px;
 }
-
 
 /* ============================================================
    RESPONSIVE
 ============================================================ */
 @media (max-width: 900px) {
-  .authority-page {
-    padding: 25px 20px 50px;
-  }
-  .metrics {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .table-head,
-  .authority-row {
+  .authority-page { padding: 25px 20px 50px; }
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+  .toolbar { flex-direction: column; align-items: stretch; }
+  .table-head, .authority-row {
     grid-template-columns: 150px minmax(200px, 1fr) 110px 120px 65px;
   }
+  .form-grid { grid-template-columns: 1fr; }
+  .form-field.full-width { grid-column: span 1; }
 }
 </style>
