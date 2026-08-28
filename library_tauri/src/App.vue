@@ -36,7 +36,7 @@ const { isAuthenticated, userName: user_name, userRole: user_role } = storeToRef
 
 let unlistenNav = null
 const isEditing = computed(() => {
-  return route.path.includes('edit-item') || route.path.includes('/classification/')
+  return route.path.includes('edit-item')
 })
 
 const currentTime = ref('')
@@ -184,6 +184,10 @@ onUnmounted(() => {
           <RouterLink to="/classification/authors">
             <Users :size="18" :stroke-width="1.5" />
             <span>Authors</span>
+          </RouterLink>
+          <RouterLink to="/classification/authorities">
+            <ClipboardCheck :size="18" :stroke-width="1.5" />
+            <span>Authorities</span>
           </RouterLink>
           <RouterLink to="/classification/subjects">
             <Tag :size="18" :stroke-width="1.5" />

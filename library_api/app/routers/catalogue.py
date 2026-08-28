@@ -60,6 +60,73 @@ def get_category_code(category: str) -> str:
     if cat == "Religious": return "REL"
     if cat == "Poetry": return "POE"
     return "GEN"
+def resolve_authority(cur, author_name: str, user_id: int) -> int:
+    clean_author = " ".join((author_name or "").strip().split())
+
+    if not clean_author or clean_author.casefold() == "unknown":
+        cur.execute("""
+            SELECT authority_id
+            FROM public.authority_records
+            WHERE authority_code = 'AUT-U-0001'
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+
+        if not row:
+            raise RuntimeError("AUT-U-0001 (Unknown) authority record is missing.")
+
+        return row[0]
+
+    cur.execute("""
+        SELECT authority_id
+        FROM public.authority_records
+        WHERE preferred_name = %s
+        ORDER BY authority_id
+        LIMIT 1
+    """, (clean_author,))
+
+    row = cur.fetchone()
+
+    if row:
+        return row[0]
+
+    cur.execute("""
+        SELECT COALESCE(
+            MAX(CAST(SUBSTRING(authority_code FROM 7) AS INTEGER)),
+            0
+        ) + 1
+        FROM public.authority_records
+        WHERE authority_code ~ '^AUT-P-[0-9]+$'
+    """)
+
+    next_number = cur.fetchone()[0]
+    authority_code = f"AUT-P-{next_number:04d}"
+
+    cur.execute("""
+        INSERT INTO public.authority_records (
+            authority_code,
+            preferred_name,
+            authority_type,
+            status,
+            notes,
+            created_by
+        )
+        VALUES (
+            %s,
+            %s,
+            'PERSON',
+            'PROVISIONAL',
+            'Automatically created from new work registration; authority identity not yet formally verified.',
+            %s
+        )
+        RETURNING authority_id
+    """, (
+        authority_code,
+        clean_author,
+        user_id
+    ))
+
+    return cur.fetchone()[0]
 
 @router.get("/next-numbers")
 def get_next_numbers(language: str, category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
@@ -305,7 +372,41 @@ def create_work(
                 final_call_no
             )
         )
+        
+
         work_id = cur.fetchone()[0]
+
+        # Resolve the controlled author authority for this work.
+        author_name = (
+            payload.author.strip()
+            if payload.author and payload.author.strip()
+            else "Unknown"
+        )
+
+        authority_id = resolve_authority(
+            cur,
+            author_name,
+            token_user_id
+        )
+
+        cur.execute("""
+            INSERT INTO public.work_authorities (
+                work_id,
+                authority_id,
+                relationship_type,
+                sequence_no,
+                notes,
+                created_by
+            )
+            VALUES (%s, %s, 'AUTHOR', 1, %s, %s)
+            ON CONFLICT (work_id, authority_id, relationship_type)
+            DO NOTHING
+        """, (
+            work_id,
+            authority_id,
+            "Automatically linked during work registration.",
+            token_user_id
+        ))
 
         item_query = """
             INSERT INTO public.items (
@@ -314,6 +415,7 @@ def create_work(
         """
         cur.execute(item_query, (work_id, final_accession_no, final_call_no))
 
+        
         conn.commit()
         return {
             "work_id": work_id,
@@ -393,6 +495,7 @@ def get_catalogue(
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
+        
         user_role = current_user.get('role', 'GUEST')
         offset = (page - 1) * limit
         safe_order = "ASC" if order.lower() == "asc" else "DESC"

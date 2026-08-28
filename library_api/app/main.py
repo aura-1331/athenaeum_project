@@ -42,6 +42,7 @@ from app.routers import (
     print as print_router,
     circulation,
     admin_config,
+    authority,	
     profile
 )
 
@@ -1076,6 +1077,7 @@ async def verify_2fa(
 app.include_router(print_router.router)
 app.include_router(health.router)
 app.include_router(catalogue.router)
+app.include_router(    authority.router,    dependencies=[Depends(get_current_user)])
 app.include_router(auth_router)
 app.include_router(items.router, dependencies=[Depends(get_current_user)])
 app.include_router(search.router, dependencies=[Depends(get_current_user)])

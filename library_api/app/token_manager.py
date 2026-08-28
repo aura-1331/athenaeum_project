@@ -100,10 +100,10 @@ def decode_token(token: str):
         return payload
 
     except JWTError:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token"
-        )
+       raise HTTPException(
+        status_code=401,
+        detail="Invalid token"
+    )
 
 # -------------------------
 # REFRESH TOKEN VALIDATION

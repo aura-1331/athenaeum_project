@@ -13,6 +13,7 @@ import DetailsView from "../views/DetailsView.vue"
 import SystemSettings from "../views/admin/SystemSettings.vue"
 import Login from "../views/Login.vue"
 import AuthorsView from "../views/AuthorsView.vue"
+import AuthoritiesView from "../views/AuthoritiesView.vue"
 import SubjectsView from "../views/SubjectsView.vue"
 import AboutView from "../views/AboutView.vue" 
 import IncidentsView from "../views/IncidentsView.vue"
@@ -35,11 +36,10 @@ const routes = [
 
   { path: "/admin/settings", name: "admin-settings", component: SystemSettings, meta: { requiresAuth: true } },
   { path: "/classification/authors", name: "Authors", component: AuthorsView, meta: { requiresAuth: true } },
+  { path: "/classification/authorities", name: "Authorities", component: AuthoritiesView, meta: { requiresAuth: true } },
   { path: "/classification/subjects", name: "Subjects", component: SubjectsView, meta: { requiresAuth: true } },
-  {
-  path: "/incidents",  name: "incidents",  component: IncidentsView,  meta: { requiresAuth: true }},
-  {
-  path: "/reports",  name: "reports",  component: ReportsView,  meta: { requiresAuth: true }},
+  {  path: "/incidents",  name: "incidents",  component: IncidentsView,  meta: { requiresAuth: true }},
+  {  path: "/reports",  name: "reports",  component: ReportsView,  meta: { requiresAuth: true }},
   
   { path: "/about", name: "about", component: AboutView, meta: { requiresAuth: true } }
 ]
