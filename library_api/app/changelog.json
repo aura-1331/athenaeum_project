@@ -1,0 +1,173 @@
+[
+  {
+    "version": "v2.0.0",
+    "date": "2026-08-29",
+    "sections": [
+      {
+        "category": "Major Redesign",
+        "notes": [
+          "Redesigned the About & System specs dashboard with modern glassmorphism UI",
+          "Added standalone Release History & Changelog viewer",
+          "Improved OTA update feedback and download indicators"
+        ]
+      },
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added mandatory audit justification comments",
+          "Implemented side-drawer alias and variant manager"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.2.0",
+    "date": "2026-08-29",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Enforced mandatory justification comments for all record modifications",
+          "Added side-drawer alias and variant manager",
+          "Fixed pagination and query limit constraints"
+        ]
+      },
+      {
+        "category": "System & Stability",
+        "notes": [
+          "Standardized Pydantic validation error payloads for terminal UI",
+          "Improved database session pooling"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.1.8",
+    "date": "2026-08-15",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Introduced provisional vs verified status filtering",
+          "Added quick search lookup across works and creators"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.1.7",
+    "date": "2026-08-01",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added provisional vs verified status filtering",
+          "Added quick search lookup across works and creators"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.1.6",
+    "date": "2026-07-15",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added provisional vs verified status filtering",
+          "Added quick search lookup across works and creators"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.1.5",
+    "date": "2026-07-01",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added provisional vs verified status filtering",
+          "Added quick search lookup across works and creators"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.1.4",
+    "date": "2026-06-15",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added provisional vs verified status filtering",
+          "Added quick search lookup across works and creators"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.1.3",
+    "date": "2026-06-01",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added provisional vs verified status filtering",
+          "Added quick search lookup across works and creators"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.1.2",
+    "date": "2026-05-15",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added provisional vs verified status filtering",
+          "Added quick search lookup across works and creators"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.1.1",
+    "date": "2026-05-01",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added provisional vs verified status filtering",
+          "Added quick search lookup across works and creators"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.1.0",
+    "date": "2026-04-15",
+    "sections": [
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added provisional vs verified status filtering",
+          "Added quick search lookup across works and creators"
+        ]
+      }
+    ]
+  },
+  {
+    "version": "v1.0.0",
+    "date": "2026-04-01",
+    "sections": [
+      {
+        "category": "Initial Release",
+        "notes": [
+          "Initial release of the Athenaeum application"
+        ]
+      }
+    ]
+  }
+]

@@ -1,7 +1,7 @@
 {
   "name": "the-athenaeum",
   "private": true,
-  "version": "1.1.8",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host",
@@ -15,6 +15,7 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-fs": "^2.5.1",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "@tresjs/cientos": "^5.7.1",
@@ -30,7 +31,7 @@
     "pdfmake": "^0.3.5",
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
-    "puppeteer": "^24.41.0",
+    "puppeteer": "^25.9.0",
     "qrcode": "^1.5.4",
     "three": "^0.184.0",
     "vue": "^3.5.13",

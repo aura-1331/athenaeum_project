@@ -7,6 +7,8 @@ import io
 import base64
 import secrets
 import string
+import json
+from pathlib import Path
 
 from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, HTTPException, Request, Form
@@ -42,7 +44,7 @@ from app.routers import (
     print as print_router,
     circulation,
     admin_config,
-    authority,	
+    authority,  
     profile
 )
 
@@ -96,7 +98,7 @@ app.add_middleware(
         "http://localhost:1420",     # For Tauri Dev
         "http://tauri.localhost",    # For Tauri Windows Production
         "https://tauri.localhost",
-        "https://athenaeum-project.vercel.app"  # <-- ADD YOUR VERCEL URL HERE
+        "https://athenaeum-project.vercel.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -104,19 +106,33 @@ app.add_middleware(
 )
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
+# Path to changelog.json in the same directory as main.py (app/changelog.json)
+CHANGELOG_PATH = Path(__file__).resolve().parent / "changelog.json"
+
+# ----------------------------
+# SYSTEM CHANGELOG ROUTE
+# ----------------------------
+@app.get("/system/changelog", tags=["System"])
+def get_system_changelog():
+    if not CHANGELOG_PATH.exists():
+        return []
+    try:
+        with open(CHANGELOG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read changelog: {str(e)}")
+
 # ----------------------------
 # Chief Review / Final Decision
 # ----------------------------
-
-@audit_action("CHIEF_DECISION") # Add this decorator
+@audit_action("CHIEF_DECISION")
 @app.post("/chief/decide-request/{request_id}")
 async def chief_decide_request(
-    request: Request, # Ensure Request is added if missing
+    request: Request,
     request_id: int,
     req: ChiefDecisionModel,
     current_user: dict = Depends(get_current_user)
 ):
-    # ... logic ...
     if current_user["role"] != "The Chief":
         raise HTTPException(
             status_code=403,
@@ -135,14 +151,14 @@ async def chief_decide_request(
     try:
         cur.execute(
             """
-          SELECT full_name,
-            email,
-            requested_role,
-            temporary_access,
-            temporary_expiry,
-            status
-FROM access_requests
-WHERE request_id=%s
+            SELECT full_name,
+                   email,
+                   requested_role,
+                   temporary_access,
+                   temporary_expiry,
+                   status
+            FROM access_requests
+            WHERE request_id=%s
             """,
             (request_id,)
         )
@@ -164,7 +180,6 @@ WHERE request_id=%s
         temp_password = None
 
         if req.decision == "APPROVE":
-            # Generate secure temporary password
             alphabet = (
                 string.ascii_letters +
                 string.digits +
@@ -178,10 +193,8 @@ WHERE request_id=%s
             operator_id = generate_operator_id(request_data[2])
             hashed = hash_password(temp_password)
 
-            # Generate login_id from email
             login_id = request_data[1].split("@")[0]
 
-            # Prevent duplicate login IDs
             cur.execute(
                 """
                 SELECT COUNT(*)
@@ -196,41 +209,35 @@ WHERE request_id=%s
             if existing_login > 0:
                 login_id = f"{login_id}{request_id}"
 
-        cur.execute(
-            """
-            INSERT INTO users (
-                name,
-                email,
-                login_id,
-                operator_id,
-                role,
-                status,
-                hashed_password,
-                expires_at
+            cur.execute(
+                """
+                INSERT INTO users (
+                    name,
+                    email,
+                    login_id,
+                    operator_id,
+                    role,
+                    status,
+                    hashed_password,
+                    expires_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    'APPROVED',
+                    %s, %s
+                )
+                """,
+                (
+                    request_data[0],
+                    request_data[1],
+                    login_id,
+                    operator_id,
+                    request_data[2],
+                    hashed,
+                    request_data[4]
+                )
             )
-            VALUES (
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                'APPROVED',
-                %s,
-                %s
-            )
-            """,
-            (
-                request_data[0],   # full_name
-                request_data[1],   # email
-                login_id,
-                operator_id,
-                request_data[2],   # requested role
-                hashed,
-                request_data[4]    # temporary expiry
-            )
-        )
 
-        # Update request status
         cur.execute(
             """
             UPDATE access_requests
@@ -308,8 +315,6 @@ async def revoke_user(
 #-----------------------------
 # Keeper review recommendation 
 #-----------------------------
-
-
 @app.post("/keeper/recommend-request/{request_id}")
 async def keeper_recommend_request(
     request_id: int,
@@ -397,6 +402,7 @@ def normalize_role(role: str) -> str:
         return "Temporary Seeker"
 
     return "INVALID"
+
 # ----------------------------
 # OPERATOR ID GENERATION
 # ----------------------------
@@ -419,6 +425,7 @@ def generate_operator_id(role):
     )
 
     return f"ATH-ARC-{role_code}-{suffix}"
+
 # ----------------------------
 # LOGIN
 # ----------------------------
@@ -426,7 +433,7 @@ def generate_operator_id(role):
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    remember_me: bool = Form(False) # <-- Captures the checkbox from Vue
+    remember_me: bool = Form(False)
 ):
     conn = get_connection()
     cur = conn.cursor()
@@ -472,7 +479,6 @@ async def login(
                 detail="Temporary access expired"
             )
 
-        # Check 2FA
         cur.execute(
             """
             SELECT twofa_secret, twofa_enabled
@@ -500,7 +506,6 @@ async def login(
 
         normalized_role = normalize_role(user[2])
 
-        # Always create the short-lived access token
         access_token = create_token(
             {
                 "sub": str(user[0]),
@@ -508,17 +513,14 @@ async def login(
             },
             token_type="access"
         )
-
-        # Base response payload
         
         response_payload = {
             "access_token": access_token,
             "token_type": "bearer",
             "role": normalized_role,
-            "user_name": user[5]  # <-- This grabs the name from the database!
+            "user_name": user[5]
         }
 
-        # ONLY generate and save a refresh token if they checked the box
         if remember_me:
             refresh_token = create_token(
                 {
@@ -556,7 +558,6 @@ async def login(
                 )
             )
             
-            # Add the refresh token to the payload we send to Vue
             response_payload["refresh_token"] = refresh_token
 
         conn.commit()
@@ -566,7 +567,6 @@ async def login(
     finally:
         cur.close()
         conn.close()
-
 
 # ----------------------------
 # REFRESH
@@ -616,11 +616,10 @@ async def refresh_token(req: RefreshRequest):
     finally:
         cur.close()
         conn.close()
+
 #-------------------------------
 # PUBLIC ACCESS REQUEST 
 #-------------------------------
-    
- 
 @app.post("/request-access")
 async def request_access(req: AccessRequestModel):
     allowed_roles = [
@@ -638,7 +637,6 @@ async def request_access(req: AccessRequestModel):
     cur = conn.cursor()
 
     try:
-        # Prevent duplicate pending requests
         cur.execute(
             """
             SELECT request_id
@@ -657,7 +655,6 @@ async def request_access(req: AccessRequestModel):
                 detail="You already have a pending request."
             )
 
-        # Insert new request
         cur.execute(
             """
             INSERT INTO access_requests (
@@ -729,7 +726,6 @@ async def logout(req: RefreshRequest):
         cur.close()
         conn.close()
 
-
 # ----------------------------
 # CREATE USER
 # ----------------------------
@@ -743,7 +739,6 @@ async def admin_create_user(
 ):
     admin_role = current_user.get("role")
 
-    # Allowed roles validation
     allowed_roles = [
         "The Chief",
         "The Keeper",
@@ -765,10 +760,10 @@ async def admin_create_user(
     role = normalized_input_role
 
     if admin_role in ["The Seeker", "Temporary Seeker"]:
-     raise HTTPException(
-        status_code=403,
-        detail="Access Denied"
-    )
+        raise HTTPException(
+            status_code=403,
+            detail="Access Denied"
+        )
 
     if (
         admin_role == "The Keeper"
@@ -803,7 +798,6 @@ async def admin_create_user(
         if existing_identity:
             identity_id = existing_identity[0]
 
-            # Notify Chief about returning identity
             cur.execute(
                 """
                 INSERT INTO chief_notifications (
@@ -836,7 +830,6 @@ async def admin_create_user(
 
             identity_id = cur.fetchone()[0]
 
-        # Only one active Chief allowed
         if role == "The Chief":
             cur.execute(
                 """
@@ -900,7 +893,6 @@ async def admin_create_user(
         cur.close()
         conn.close()
 
-
 # ----------------------------
 # CHANGE PASSWORD
 # ----------------------------
@@ -963,7 +955,6 @@ async def change_password(
         cur.close()
         conn.close()
 
-
 # ----------------------------
 # SETUP 2FA
 # ----------------------------
@@ -1014,7 +1005,6 @@ async def setup_2fa(
     finally:
         cur.close()
         conn.close()
-
 
 # ----------------------------
 # VERIFY 2FA
@@ -1070,14 +1060,13 @@ async def verify_2fa(
         cur.close()
         conn.close()
 
-
 # ----------------------------
 # ROUTERS
 # ----------------------------
 app.include_router(print_router.router)
 app.include_router(health.router)
 app.include_router(catalogue.router)
-app.include_router(    authority.router,    dependencies=[Depends(get_current_user)])
+app.include_router(authority.router, dependencies=[Depends(get_current_user)])
 app.include_router(auth_router)
 app.include_router(items.router, dependencies=[Depends(get_current_user)])
 app.include_router(search.router, dependencies=[Depends(get_current_user)])
