@@ -2,7 +2,8 @@
 import { ref, onMounted, onUnmounted, watch, computed } from "vue"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import { storeToRefs } from 'pinia'
-import { useAuthStore } from '@/stores/auth' // <-- 1. IMPORT PINIA HERE
+import { useAuthStore } from '@/stores/auth'
+import BatchRegisterModal from '@/components/print/BatchRegisterModal.vue'
 import { 
   LayoutDashboard, 
   Library, 
@@ -20,7 +21,8 @@ import {
   Users,
   Tag,
   Info,
-  Menu
+  Menu,
+  Printer
 } from 'lucide-vue-next'
 import { listen } from '@tauri-apps/api/event'
 
@@ -29,9 +31,14 @@ const route = useRoute()
 const router = useRouter()
 const isMobileMenuOpen = ref(false)
 
-// --- 2. PINIA AUTHENTICATION INTEGRATION ---
+// --- PRINT MODAL REF & TRIGGER ---
+const batchModalRef = ref(null)
+const openPrintModal = () => {
+  batchModalRef.value?.openModal()
+}
+
+// --- PINIA AUTHENTICATION INTEGRATION ---
 const authStore = useAuthStore()
-// storeToRefs makes sure the template updates instantly when these change
 const { isAuthenticated, userName: user_name, userRole: user_role } = storeToRefs(authStore)
 
 let unlistenNav = null
@@ -49,10 +56,8 @@ const updateClock = () => {
   const now = new Date()
   currentTime.value = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   currentDate.value = now.toLocaleDateString([], { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-  
 }
 
-// NEW FUNCTION: Robust dynamic location fetching
 const fetchAccurateLocation = async () => {
   currentPlace.value = 'Locating...'
 
@@ -89,6 +94,7 @@ const fetchAccurateLocation = async () => {
     { timeout: 10000, maximumAge: 60000 }
   )
 }
+
 const updateSyncTime = () => {
   const now = new Date()
   lastUpdated.value = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -104,10 +110,17 @@ function toggleTheme() {
   applyTheme(theme.value)
 }
 
-// --- 3. UPDATED LOGOUT FUNCTION ---
 const handleLogout = () => {
-  authStore.logout() // Pinia does all the heavy lifting now!
+  authStore.logout()
   router.push("/login")
+}
+
+// Global Ctrl+P shortcut to trigger the print popup
+const handleGlobalKeydown = (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+    e.preventDefault()
+    openPrintModal()
+  }
 }
 
 watch(
@@ -115,7 +128,6 @@ watch(
   () => {
     updateSyncTime()
     isMobileMenuOpen.value = false
-    // Security check: If they aren't authenticated and try to navigate, boot them to login
     if (!isAuthenticated.value && route.path !== "/login") {
       router.push("/login")
     }
@@ -128,12 +140,12 @@ onMounted(async () => {
   updateSyncTime()
   fetchAccurateLocation()
   timeInterval = setInterval(updateClock, 1000)
+  window.addEventListener('keydown', handleGlobalKeydown)
 
   const saved = localStorage.getItem("ui-theme") || "dark"
   theme.value = saved
   applyTheme(saved)
 
-  // Initial security check on load
   if (!isAuthenticated.value && route.path !== "/login") {
     router.push("/login")
   }
@@ -152,6 +164,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (timeInterval) clearInterval(timeInterval)
   if (unlistenNav) unlistenNav()
+  window.removeEventListener('keydown', handleGlobalKeydown)
 })
 </script>
 
@@ -178,26 +191,33 @@ onUnmounted(() => {
         <div class="nav-section-label">Inventory</div>
         <RouterLink to="/create-work"><FileText :size="18" :stroke-width="1.5" /><span>Works</span></RouterLink>
         <RouterLink to="/create-item"><BookOpen :size="18" :stroke-width="1.5" /><span>Items</span></RouterLink>
-        <RouterLink to="/incidents">  <AlertTriangle :size="18" :stroke-width="1.5" />  <span>Incidents</span></RouterLink>
+        <RouterLink to="/incidents"><AlertTriangle :size="18" :stroke-width="1.5" /><span>Incidents</span></RouterLink>
         
         <div class="nav-section-label">Classification</div>
-          <RouterLink to="/classification/authors">
-            <Users :size="18" :stroke-width="1.5" />
-            <span>Authors</span>
-          </RouterLink>
-          <RouterLink to="/classification/authorities">
-            <ClipboardCheck :size="18" :stroke-width="1.5" />
-            <span>Authorities</span>
-          </RouterLink>
-          <RouterLink to="/classification/subjects">
-            <Tag :size="18" :stroke-width="1.5" />
-            <span>Subjects</span>
-          </RouterLink>
+        <RouterLink to="/classification/authors">
+          <Users :size="18" :stroke-width="1.5" />
+          <span>Authors</span>
+        </RouterLink>
+        <RouterLink to="/classification/authorities">
+          <ClipboardCheck :size="18" :stroke-width="1.5" />
+          <span>Authorities</span>
+        </RouterLink>
+        <RouterLink to="/classification/subjects">
+          <Tag :size="18" :stroke-width="1.5" />
+          <span>Subjects</span>
+        </RouterLink>
         
         <div class="nav-section-label">System</div>
-          <RouterLink to="/audit-trail"><ShieldCheck :size="18" :stroke-width="1.5" /><span>Audit Trail</span></RouterLink>
-          <RouterLink to="/reports">  <LayoutDashboard :size="18" :stroke-width="1.5" />  <span>Reports</span></RouterLink>
-          <RouterLink to="/about">            <Info :size="18" :stroke-width="1.5" />            <span>About</span>          </RouterLink>
+        <RouterLink to="/audit-trail"><ShieldCheck :size="18" :stroke-width="1.5" /><span>Audit Trail</span></RouterLink>
+        
+        <!-- BATCH PRINT TRIGGER BUTTON -->
+        <button class="sidebar-action-btn" @click="openPrintModal" title="Print Filtered Catalogue Register">
+          <Printer :size="18" :stroke-width="1.5" />
+          <span>Print Register</span>
+        </button>
+
+        <RouterLink to="/reports"><LayoutDashboard :size="18" :stroke-width="1.5" /><span>Reports</span></RouterLink>
+        <RouterLink to="/about"><Info :size="18" :stroke-width="1.5" /><span>About</span></RouterLink>
       </nav>
 
       <div class="sidebar-user">
@@ -210,16 +230,18 @@ onUnmounted(() => {
         </div>
       </div>
     </aside>
+
     <div 
       v-if="isMobileMenuOpen" 
       class="mobile-overlay" 
       @click="isMobileMenuOpen = false"
     ></div>
+
     <main 
       class="content-wrapper" 
       :class="{ 
         'no-padding': route.path.includes('/details/'), 
-        'authenticated-layout': isAuthenticated && !isEditing 
+        'authenticated-layout': isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print') 
       }"
     >
       <header 
@@ -236,8 +258,7 @@ onUnmounted(() => {
         <div class="header-actions">
           <div class="live-meta">
             <span class="division-tag">Archive Division</span>
-  
-            <!-- NEW LOCATION ELEMENT -->
+
             <span class="location">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="location-icon">
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
@@ -266,6 +287,9 @@ onUnmounted(() => {
         <RouterView />
       </section>
     </main>
+
+    <!-- BATCH REGISTER MODAL (GLOBAL POPUP) -->
+    <BatchRegisterModal ref="batchModalRef" />
   </div>
 </template>
 
@@ -309,11 +333,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .ao-seal {
   width: 42px; height: 42px;
   display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(
-    135deg,
-    var(--hover-bg),
-    transparent
-);
+  background: linear-gradient(135deg, var(--hover-bg), transparent);
   border: 1px solid var(--accent);
   color: var(--accent);
   font-family: "Cormorant Garamond", serif;
@@ -329,17 +349,31 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 }
 
 .nav-links { display: flex; flex-direction: column; gap: 4px; }
-.sidebar a {
+
+.sidebar a,
+.sidebar-action-btn {
   display: flex; align-items: center; gap: 16px; text-decoration: none;
   color: var(--text-muted); padding: 14px 24px; font-size: 14px; font-weight: 500;
   transition: all 0.2s ease;
+  background: none;
+  border: none;
+  width: 100%;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
 }
-.sidebar a:hover {
+
+.sidebar a:hover,
+.sidebar-action-btn:hover {
   color: var(--accent);
   background: var(--hover-bg);
 }
-.sidebar a span { transition: transform 0.2s ease; }
-.sidebar a:hover span { transform: translateX(4px); }
+
+.sidebar a span,
+.sidebar-action-btn span { transition: transform 0.2s ease; }
+
+.sidebar a:hover span,
+.sidebar-action-btn:hover span { transform: translateX(4px); }
 
 .sidebar a.router-link-active {
   background: var(--active-bg);
@@ -359,6 +393,13 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 
 .content-wrapper.authenticated-layout {
   margin-left: 260px;
+}
+
+.content-wrapper.no-padding {
+  width: 100% !important;
+  margin-left: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
 .global-header {
@@ -382,10 +423,11 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   color: var(--accent);
   opacity: 0.8;
 }
-.division-tag{
-    color: var(--accent);
-    background: var(--hover-bg);
-    border: 1px solid var(--border-main);
+
+.division-tag {
+  color: var(--accent);
+  background: var(--hover-bg);
+  border: 1px solid var(--border-main);
 }
 
 .action-divider { width: 1px; height: 20px; background: var(--border-main); opacity: 0.3; margin: 0 8px; }
@@ -394,10 +436,12 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   background: transparent; border: none; color: var(--text-muted); cursor: pointer;
   padding: 8px; border-radius: 8px; display: flex; transition: all 0.2s ease;
 }
+
 .header-icon-btn:hover {
-    color: var(--accent);
-    background: var(--hover-bg);
+  color: var(--accent);
+  background: var(--hover-bg);
 }
+
 .header-icon-btn.exit:hover { color: #f87171; background: rgba(239, 68, 68, 0.1); }
 
 .sidebar-user {
@@ -409,6 +453,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   gap: 12px;
   background: var(--surface);
 }
+
 .user-avatar img { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--accent); object-fit: cover; }
 .user-info { display: flex; flex-direction: column; justify-content: center; }
 .user-name { font-size: 13px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
@@ -417,81 +462,53 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .page-content { flex: 1; padding: 0 !important; overflow-y: auto; background: var(--content-bg); }
 .page-content::-webkit-scrollbar { display: none; }
 
-.sync-info { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; }
-.sync-info:active { color: var(--accent); }
-
-.status-dot {
-  width: 6px; height: 6px; background: #2dd4bf; border-radius: 50%;
-  box-shadow: 0 0 8px rgba(45, 212, 191, 0.4); animation: sync-pulse 2s infinite;
-}
-
-@keyframes sync-pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
-
-.content-area.full-screen-editor { margin-left: 0 !important; width: 100vw; height: 100vh; z-index: 100; }
-.content-wrapper.no-padding { width: 100vw; margin: 0; padding: 0; }
-
-.details-window-theme .page-content:has(> .details-page) { padding: 0 !important; margin: 0 !important; height: 100vh; overflow: auto !important; }
-.details-window-theme .section { background-color: #065f46 !important; border: 1px solid #0f766e !important; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
-
-.library-branding { margin-right: auto; display: flex; flex-direction: column; border-left: 3px solid #fbbf24; padding-left: 15px; }
-.institution-name { font-family: 'Serif', 'Georgia', serif; font-size: 18px; font-weight: 800; color: #fbbf24; letter-spacing: 1px; text-transform: uppercase; }
-.record-type { font-size: 10px; color: #2dd4bf; text-transform: uppercase; letter-spacing: 2px; margin-top: -2px; }
-
-.details-window-theme .title { color: #fbbf24 !important; border-bottom: 2px solid #d97706 !important; padding-bottom: 12px; margin-bottom: 30px; text-transform: uppercase; letter-spacing: 2px; font-weight: 800; display: inline-block; }
 .mobile-menu-toggle { display: none; }
 .mobile-overlay { display: none; }
 .header-left { display: flex; align-items: center; gap: 12px; }
 
-
 @media print {
-  html, body, .app, .content-wrapper, .page-content, .details-page { background: white !important; color: black !important; margin: 0 !important; padding: 0 !important; height: auto !important; width: 100% !important; }
-  .library-branding { border-left: 3px solid black !important; }
-  .institution-name { color: black !important; }
-  .record-type { color: #666 !important; }
-  .sidebar, .global-header, .action-bar, .theme-btn, .header-icon-btn { display: none !important; }
-  .content-wrapper { margin: 0 !important; }
-  .title { color: black !important; border-bottom: 2px solid black !important; font-size: 22pt !important; text-align: center; margin-bottom: 30px !important; }
-  .section { background: white !important; border: 1px solid #ccc !important; break-inside: avoid; margin-bottom: 15px !important; padding: 15px !important; box-shadow: none !important; }
-  .details-page::after { content: "Official Library Record - Athenaeum Orbis"; display: block; text-align: center; font-size: 8pt; color: #999; margin-top: 50px; border-top: 1px solid #eee; padding-top: 10px; }
-  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  html, body, #app, .app {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    width: 100% !important;
+    box-shadow: none !important;
+  }
+
+  body.batch-print-active .sidebar,
+  body.batch-print-active .global-header,
+  body.batch-print-active .content-wrapper,
+  body.batch-print-active .page-content,
+  body.batch-print-active .mobile-overlay {
+    display: none !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: economy !important;
+    print-color-adjust: economy !important;
+  }
 }
 
-/* =====================================================
-   📱 MOBILE RESPONSIVENESS FIXES
-===================================================== */
 @media (max-width: 768px) {
-  /* 1. Stack the app layout vertically */
-
-  .mobile-menu-toggle { 
-    display: block; 
-  }
-  .app {
-    flex-direction: column;
-  }
-
-  /* 2. Un-fix the Sidebar so it doesn't overlap content */
-  /* 2. Convert Sidebar to an off-screen drawer */
+  .mobile-menu-toggle { display: block; }
+  .app { flex-direction: column; }
   .sidebar {
     position: fixed;
     top: 0;
     left: 0;
     width: 260px;
     height: 100vh;
-    transform: translateX(-100%); /* Hides it off the left edge */
+    transform: translateX(-100%);
     transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 1000;
     background: var(--sidebar-bg);
     border-right: 1px solid var(--border-main);
-    /* Mobile-specific padding adjustments if needed */
     padding-bottom: 20px; 
   }
-
-  /* 3. Slide it in when active */
-  .sidebar.mobile-open {
-    transform: translateX(0);
-  }
-
-  /* 4. Display the dark backdrop overlay */
+  .sidebar.mobile-open { transform: translateX(0); }
   .mobile-overlay {
     display: block;
     position: fixed;
@@ -501,28 +518,16 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
     height: 100vh;
     background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(2px);
-    z-index: 999; /* Sits just underneath the sidebar (1000) */
+    z-index: 999;
   }
-
-  /* 3. Remove the 260px left margin that is squishing the tables */
-  .content-wrapper.authenticated-layout {
-    margin-left: 0; 
-    /* height: auto;
-    overflow: visible; */
-  }
-
-  /* 4. Adjust the Global Header for smaller screens */
+  .content-wrapper.authenticated-layout { margin-left: 0; }
   .global-header {
     padding: 0 15px; 
     height: auto;
     min-height: 60px;
     gap: 10px;
-    flex-wrap: wrap; /* Allows header items to wrap if they run out of space */
+    flex-wrap: wrap;
   }
-
-  /* 5. Make the logo area compact */
-  .logo-area {
-    margin-bottom: 20px;
-  }
+  .logo-area { margin-bottom: 20px; }
 }
 </style>
