@@ -9,15 +9,15 @@ import secrets
 import string
 import json
 from pathlib import Path
-
 from datetime import datetime, timezone
+
 from fastapi import FastAPI, Depends, HTTPException, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
 from jose import jwt, JWTError
-from app.audit_utils import audit_action
 
+from app.audit_utils import audit_action
 from pdf.pdf_generator import generate_pdf
 from app.database import get_connection, record_audit
 from app.token_manager import PUBLIC_KEY, ALGORITHM, create_token
@@ -49,12 +49,38 @@ from app.routers import (
 )
 
 # ----------------------------
-# Windows Fix
+# Windows Event Loop Fix
 # ----------------------------
 if platform.system() == "Windows":
     asyncio.set_event_loop_policy(
         asyncio.WindowsSelectorEventLoopPolicy()
     )
+
+# ----------------------------
+# App Initialization & CORS
+# ----------------------------
+app = FastAPI(
+    title="Athenaeum Library API",
+    swagger_ui_parameters={"deepLinking": True},
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:1420",     # Tauri Dev
+        "http://tauri.localhost",    # Tauri Windows Production
+        "https://tauri.localhost",
+        "https://athenaeum-project.vercel.app"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+
+# Path to changelog.json in the same directory as main.py (app/changelog.json)
+CHANGELOG_PATH = Path(__file__).resolve().parent / "changelog.json"
 
 
 # ----------------------------
@@ -62,7 +88,6 @@ if platform.system() == "Windows":
 # ----------------------------
 class RefreshRequest(BaseModel):
     refresh_token: str
-
 
 class Verify2FARequest(BaseModel):
     token: str
@@ -84,30 +109,6 @@ class ChiefDecisionModel(BaseModel):
     decision: str
     notes: str | None = None    
 
-# ----------------------------
-# App Init
-# ----------------------------
-app = FastAPI(
-    title="Athenaeum Library API",
-    swagger_ui_parameters={"deepLinking": True},
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:1420",     # For Tauri Dev
-        "http://tauri.localhost",    # For Tauri Windows Production
-        "https://tauri.localhost",
-        "https://athenaeum-project.vercel.app"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
-
-# Path to changelog.json in the same directory as main.py (app/changelog.json)
-CHANGELOG_PATH = Path(__file__).resolve().parent / "changelog.json"
 
 # ----------------------------
 # SYSTEM CHANGELOG ROUTE
@@ -121,6 +122,7 @@ def get_system_changelog():
             return json.load(f)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read changelog: {str(e)}")
+
 
 # ----------------------------
 # Chief Review / Final Decision
@@ -269,6 +271,7 @@ async def chief_decide_request(
         cur.close()
         conn.close()
 
+
 # -------------------------
 # REVOKE USER
 # -------------------------
@@ -312,9 +315,10 @@ async def revoke_user(
         cur.close()
         conn.close()     
 
-#-----------------------------
-# Keeper review recommendation 
-#-----------------------------
+
+# -----------------------------
+# Keeper Review Recommendation 
+# -----------------------------
 @app.post("/keeper/recommend-request/{request_id}")
 async def keeper_recommend_request(
     request_id: int,
@@ -362,15 +366,14 @@ async def keeper_recommend_request(
         cur.close()
         conn.close()
 
+
 # ----------------------------
-# Request Logger
+# Request Logger Middleware
 # ----------------------------
 @app.middleware("http")
 async def request_logger(request: Request, call_next):
     start_time = time.time()
-
     response = await call_next(request)
-
     process_time = (time.time() - start_time) * 1000
 
     print(
@@ -384,28 +387,22 @@ async def request_logger(request: Request, call_next):
 
 
 # ----------------------------
-# Role Normalization
+# Role Normalization & Helpers
 # ----------------------------
 def normalize_role(role: str) -> str:
     role = role.lower().strip()
 
-    if role == "the chief" or role == "chief":
+    if role in ["the chief", "chief"]:
         return "The Chief"
-
-    if role == "the keeper" or role == "keeper":
+    if role in ["the keeper", "keeper"]:
         return "The Keeper"
-
-    if role == "the seeker" or role == "seeker":
+    if role in ["the seeker", "seeker"]:
         return "The Seeker"
-
     if role == "temporary seeker":
         return "Temporary Seeker"
 
     return "INVALID"
 
-# ----------------------------
-# OPERATOR ID GENERATION
-# ----------------------------
 def generate_operator_id(role):
     normalized_role = normalize_role(role)
 
@@ -426,8 +423,9 @@ def generate_operator_id(role):
 
     return f"ATH-ARC-{role_code}-{suffix}"
 
+
 # ----------------------------
-# LOGIN
+# LOGIN & TOKEN ISSUANCE
 # ----------------------------
 @app.post("/token", tags=["Security"])
 async def login(
@@ -450,16 +448,7 @@ async def login(
 
         user = cur.fetchone()
 
-        if not user:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid credentials"
-            )
-
-        if not verify_password(
-            form_data.password,
-            user[1]
-        ):
+        if not user or not verify_password(form_data.password, user[1]):
             raise HTTPException(
                 status_code=401,
                 detail="Invalid credentials"
@@ -471,9 +460,7 @@ async def login(
                 detail=f"Account is {user[3]}"
             )
         
-        if user[4] and user[4].replace(
-            tzinfo=timezone.utc
-        ) < datetime.now(timezone.utc):
+        if user[4] and user[4].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
             raise HTTPException(
                 status_code=403,
                 detail="Temporary access expired"
@@ -539,37 +526,28 @@ async def login(
             )
 
             jti = payload["jti"]
-
-            expires = datetime.fromtimestamp(
-                payload["exp"],
-                tz=timezone.utc
-            )
+            expires = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
 
             cur.execute(
                 """
-                INSERT INTO refresh_tokens
-                (token_id, user_id, expires_at)
+                INSERT INTO refresh_tokens (token_id, user_id, expires_at)
                 VALUES (%s, %s, %s)
                 """,
-                (
-                    jti,
-                    payload["sub"],
-                    expires
-                )
+                (jti, payload["sub"], expires)
             )
             
             response_payload["refresh_token"] = refresh_token
 
         conn.commit()
-
         return response_payload
 
     finally:
         cur.close()
         conn.close()
 
+
 # ----------------------------
-# REFRESH
+# REFRESH TOKEN
 # ----------------------------
 @app.post("/refresh", tags=["Security"])
 async def refresh_token(req: RefreshRequest):
@@ -604,9 +582,7 @@ async def refresh_token(req: RefreshRequest):
         new_access = create_token(
             {
                 "sub": payload["sub"],
-                "role": normalize_role(
-                    payload.get("role", "The Seeker")
-                )
+                "role": normalize_role(payload.get("role", "The Seeker"))
             },
             token_type="access"
         )
@@ -617,9 +593,10 @@ async def refresh_token(req: RefreshRequest):
         cur.close()
         conn.close()
 
-#-------------------------------
+
+# -------------------------------
 # PUBLIC ACCESS REQUEST 
-#-------------------------------
+# -------------------------------
 @app.post("/request-access")
 async def request_access(req: AccessRequestModel):
     allowed_roles = [
@@ -689,6 +666,7 @@ async def request_access(req: AccessRequestModel):
         cur.close()
         conn.close()
 
+
 # ----------------------------
 # LOGOUT
 # ----------------------------
@@ -725,6 +703,7 @@ async def logout(req: RefreshRequest):
     finally:
         cur.close()
         conn.close()
+
 
 # ----------------------------
 # CREATE USER
@@ -893,6 +872,7 @@ async def admin_create_user(
         cur.close()
         conn.close()
 
+
 # ----------------------------
 # CHANGE PASSWORD
 # ----------------------------
@@ -919,10 +899,7 @@ async def change_password(
 
         user = cur.fetchone()
 
-        if not verify_password(
-            current_password,
-            user[0]
-        ):
+        if not verify_password(current_password, user[0]):
             raise HTTPException(
                 401,
                 "Current password incorrect"
@@ -955,6 +932,7 @@ async def change_password(
         cur.close()
         conn.close()
 
+
 # ----------------------------
 # SETUP 2FA
 # ----------------------------
@@ -967,7 +945,6 @@ async def setup_2fa(
 
     try:
         user_id = current_user["user_id"]
-
         secret = pyotp.random_base32()
 
         cur.execute(
@@ -1006,6 +983,7 @@ async def setup_2fa(
         cur.close()
         conn.close()
 
+
 # ----------------------------
 # VERIFY 2FA
 # ----------------------------
@@ -1030,7 +1008,6 @@ async def verify_2fa(
         )
 
         user = cur.fetchone()
-
         secret = user[0]
 
         totp = pyotp.TOTP(secret)
@@ -1060,8 +1037,9 @@ async def verify_2fa(
         cur.close()
         conn.close()
 
+
 # ----------------------------
-# ROUTERS
+# ROUTER REGISTRATION
 # ----------------------------
 app.include_router(print_router.router)
 app.include_router(health.router)

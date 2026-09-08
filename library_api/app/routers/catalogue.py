@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Header, status
 from app.auth import get_current_user, require_role
 from app.database import get_connection, record_audit
-from app.audit_utils import audit_action  # 1. Added automated audit import
+from app.audit_utils import audit_action
 from pydantic import BaseModel
 from psycopg2.extras import RealDictCursor
 from typing import Optional, List
@@ -60,6 +60,7 @@ def get_category_code(category: str) -> str:
     if cat == "Religious": return "REL"
     if cat == "Poetry": return "POE"
     return "GEN"
+
 def resolve_authority(cur, author_name: str, user_id: int) -> int:
     clean_author = " ".join((author_name or "").strip().split())
 
@@ -292,8 +293,9 @@ def search_publishers(q: str, current_user: dict = Depends(get_current_user)):
         cur.close()
         conn.close()
 
-@audit_action("CREATE_WORK")
+
 @router.post("/create-work")
+@audit_action("CREATE_WORK", target_entity="Work")
 def create_work(
     payload: WorkCreate, 
     request: Request, 
@@ -372,7 +374,6 @@ def create_work(
                 final_call_no
             )
         )
-        
 
         work_id = cur.fetchone()[0]
 
@@ -415,7 +416,6 @@ def create_work(
         """
         cur.execute(item_query, (work_id, final_accession_no, final_call_no))
 
-        
         conn.commit()
         return {
             "work_id": work_id,
@@ -441,18 +441,18 @@ def get_book(serial_no: int, current_user: dict = Depends(get_current_user)):
                 i.accession_no, 
                 i.shelf,
                 i.work_id, 
-                w.language as language,
+                w.language as language, 
                 w.title, 
                 w.author, 
                 w.publisher, 
                 w.year, 
                 w.isbn, 
                 w.ddc, 
-                w.call_no,
+                w.call_no, 
                 w.original_language, 
-                w.notes,
-                w.category,
-                w.genre,
+                w.notes, 
+                w.category, 
+                w.genre, 
                 w.translation_compilation
             FROM public.items i
             INNER JOIN public.works w ON i.work_id = w.work_id
@@ -495,7 +495,6 @@ def get_catalogue(
     conn = get_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        
         user_role = current_user.get('role', 'GUEST')
         offset = (page - 1) * limit
         safe_order = "ASC" if order.lower() == "asc" else "DESC"
@@ -566,8 +565,8 @@ def get_catalogue(
         cur.close()
         conn.close()
 
-@audit_action("UPDATE_LEDGER")
-@router.patch("/{serial_no}", dependencies=[Depends(require_role(["The Chief"]))]) # <--- ADD THIS
+@router.patch("/{serial_no}", dependencies=[Depends(require_role(["The Chief"]))])
+@audit_action("UPDATE_LEDGER", target_entity="Item")
 async def update_ledger_record(
     serial_no: int, 
     payload: dict, 
@@ -684,8 +683,9 @@ async def update_ledger_record(
         cur.close()
         conn.close()
 
-@audit_action("WORK_APPROVAL")
-@router.post("/approve/{work_id}", tags=["Admin Operations"], dependencies=[Depends(require_role(["The Chief"]))]) # <--- ADD THIS
+
+@router.post("/approve/{work_id}", tags=["Admin Operations"], dependencies=[Depends(require_role(["The Chief"]))])
+@audit_action("WORK_APPROVAL", target_entity="Work")
 async def approve_work(
     work_id: int, action: str, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)
@@ -713,8 +713,9 @@ async def approve_work(
         cur.close()
         conn.close()
 
-@audit_action("SOFT_DELETE")
-@router.delete("/{book_id}", tags=["Catalogue Operations"], dependencies=[Depends(require_role(["The Chief"]))]) # <--- ADD THIS
+
+@router.delete("/{book_id}", tags=["Catalogue Operations"], dependencies=[Depends(require_role(["The Chief"]))])
+@audit_action("SOFT_DELETE", target_entity="Item")
 async def soft_delete_book(
     book_id: int, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)

@@ -1,101 +1,355 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
-from typing import Optional, Dict, Any, List
+import base64
+import json
+import re
+import traceback
+import uuid
+from typing import Optional
+from fastapi import APIRouter, Query, Request, HTTPException
+from pydantic import BaseModel
+import psycopg2.extras
+
 from app.database import get_connection
-from app.auth import get_current_user, require_role
-from app.audit_utils import audit_action
+from app.services.audit_service import log_audit_activity
 
-router = APIRouter(prefix="/status_audit", tags=["status_audit"])
+router = APIRouter(prefix="/status_audit", tags=["Status & Auditing"])
 
-def generate_field_diffs(action_type: str, old_val: Optional[dict], new_val: Optional[dict]) -> List[str]:
-    diffs = []
-    old_val, new_val = old_val or {}, new_val or {}
-    ignored = {'updated_at', 'changed_at', 'timestamp', 'id', 'created_at', 'work_id', 'serial_no', 'status'}
-    
-    if action_type == 'INSERT':
-        details = [f"{k.replace('_', ' ')}: \"{v}\"" for k, v in new_val.items() if k not in ignored and v]
-        return [f"Created record entry -> {', '.join(details)}"] if details else ["Registered new entry."]
-    if action_type == 'DELETE': return ["Removed entry."]
+# ------------------------------------------------------------
+# Helper Utilities
+# ------------------------------------------------------------
+def format_duration(seconds: int) -> str:
+    if not seconds or seconds <= 0:
+        return "< 1s"
+    mins, secs = divmod(seconds, 60)
+    hours, mins = divmod(mins, 60)
+    parts = []
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if mins > 0:
+        parts.append(f"{mins}m")
+    if secs > 0 or not parts:
+        parts.append(f"{secs}s")
+    return " ".join(parts)
 
-    all_keys = set(old_val.keys()).union(set(new_val.keys()))
-    for key in sorted(all_keys):
-        if key in ignored: continue
-        if old_val.get(key) != new_val.get(key):
-            diffs.append(f"Changed {key.replace('_', ' ')}: [{old_val.get(key)}] to [{new_val.get(key)}]")
-    return diffs
 
-@audit_action("VIEW_SYSTEM_LOGS")
-@router.get("/system-logs", dependencies=[Depends(require_role(["The Chief"]))]) # 🛡️ SECURED
-def list_system_audit_logs(
-    request: Request,
-    limit: int = 100, 
-    offset: int = 0, 
-    action_filter: Optional[str] = None,
-    actor_filter: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
-):
-    
-    conn = get_connection()
-    cursor = conn.cursor()
+def parse_token_claims(auth_header: Optional[str]):
+    """Safely decodes JWT claims from Bearer Authorization header."""
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return None, None, None
     try:
-        query = """
-            SELECT id, actor_username, actor_role, user_id, action_type, 
-                   target_module, target_id, old_value, new_value, 
-                   device_id, ip_address, change_reason, 
-                   to_char(timestamp, 'DD-MM-YYYY HH24:MI:SS') as timestamp
-            FROM public.system_audit_log
-        """
-        where, params = [], []
-        if action_filter:
-            where.append("action_type = %s"); params.append(action_filter.upper())
+        token = auth_header.split(" ")[1]
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+        data = json.loads(
+            base64.urlsafe_b64decode(
+                payload_b64.decode() if isinstance(payload_b64, bytes) else payload_b64
+            ).decode("utf-8")
+        )
+        return str(data.get("sub") or ""), data.get("user_name") or data.get("username"), data.get("role")
+    except Exception:
+        return None, None, None
+
+
+# ------------------------------------------------------------
+# Request Models
+# ------------------------------------------------------------
+class LoginSessionPayload(BaseModel):
+    user_id: Optional[str] = "3"
+    username: Optional[str] = "Helix Aura Ravenfall"
+    role: Optional[str] = "The Chief"
+    designation: Optional[str] = "Staff"
+    machine_name: Optional[str] = "TERMINAL-01"
+
+
+class LogoutSessionPayload(BaseModel):
+    session_id: Optional[str] = None
+    user_id: Optional[str] = None
+    username: Optional[str] = None
+    role: Optional[str] = None
+    reason: Optional[str] = "Operator initiated sign-out"
+
+
+# ------------------------------------------------------------
+# 1. FETCH AUDIT ACTIVITIES (Ledger View)
+# ------------------------------------------------------------
+@router.get("/system-logs")
+def get_system_logs(
+    actor_filter: Optional[str] = None,
+    action_filter: Optional[str] = None,
+    limit: int = Query(50, le=200),
+    offset: int = 0
+):
+    conn = get_connection()
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    try:
+        where_clauses = []
+        params = []
+
         if actor_filter:
-            where.append("actor_username ILIKE %s"); params.append(f"%{actor_filter}%")
-        
-        if where: query += " WHERE " + " AND ".join(where)
-        query += " ORDER BY id DESC"
-        
-        cursor.execute(query, tuple(params))
-        raw_rows = cursor.fetchall()
-        normalized_rows = [dict(zip([d[0] for d in cursor.description], row)) for row in raw_rows]
+            where_clauses.append(
+                '("username" ILIKE %s OR "user_id" ILIKE %s OR "target_id" ILIKE %s OR "justification" ILIKE %s)'
+            )
+            term = f"%{actor_filter}%"
+            params.extend([term, term, term, term])
 
-        grouped_logs = []
-        skip_indices = set()
+        if action_filter:
+            where_clauses.append('("action_type" ILIKE %s OR "category" ILIKE %s)')
+            act_term = f"%{action_filter}%"
+            params.extend([act_term, act_term])
 
-        for i, current in enumerate(normalized_rows):
-            if i in skip_indices: continue
+        where_sql = ""
+        if where_clauses:
+            where_sql = " WHERE " + " AND ".join(where_clauses)
 
-            initial_diffs = generate_field_diffs(current["action_type"], current["old_value"], current["new_value"])
-            seen_diffs = set(initial_diffs)
-            combined_diffs = list(initial_diffs)
-            
-            target_id_display = current["target_id"]
-            resolved_reason = current["change_reason"]
-            
-            for j in range(i + 1, min(i + 8, len(normalized_rows))):
-                candidate = normalized_rows[j]
-                if current["timestamp"] == candidate["timestamp"] and current["actor_username"] == candidate["actor_username"]:
-                    skip_indices.add(j)
-                    if candidate["change_reason"] and candidate["change_reason"] not in ("Routine operational adjustment", "New registration initialization sequencing"):
-                        resolved_reason = candidate["change_reason"]
-                    
-                    more_diffs = generate_field_diffs(candidate["action_type"], candidate["old_value"], candidate["new_value"])
-                    for diff_line in more_diffs:
-                        if diff_line not in seen_diffs:
-                            seen_diffs.add(diff_line)
-                            combined_diffs.append(diff_line)
-                    if candidate["target_module"] == "items": target_id_display = candidate["target_id"]
+        cur.execute(f"SELECT COUNT(*) as count FROM audit_activities{where_sql}", tuple(params))
+        total_count = cur.fetchone()["count"]
 
-            title_context = (current["new_value"] or {}).get("title") or (current["old_value"] or {}).get("title")
-            summary_desc = f"Modified record metrics for asset: \"{title_context}\"" if title_context else (f"Registered entity #{target_id_display}" if current["action_type"] == "INSERT" else f"Update inside {current['target_module']}")
+        query = f"""
+            SELECT * FROM audit_activities
+            {where_sql}
+            ORDER BY "timestamp" DESC
+            LIMIT %s OFFSET %s
+        """
+        fetch_params = list(params) + [limit, offset]
+        cur.execute(query, tuple(fetch_params))
+        rows = cur.fetchall()
 
-            grouped_logs.append({
-                "id": current["id"], "timestamp": current["timestamp"],
-                "actor_username": current["actor_username"], "actor_role": current["actor_role"],
-                "user_id": current["user_id"] or 3, "action_type": "CREATE" if current["action_type"] == "INSERT" else current["action_type"],
-                "target_id": target_id_display, "summary": summary_desc,
-                "detailed_diffs": combined_diffs, "change_reason": resolved_reason or "New registration initialization sequencing",
-                "device_id": current["device_id"] or "Desktop Browser Workstation", "ip_address": current["ip_address"] or "127.0.0.1"
+        items = []
+        for r in rows:
+            ts_val = r.get("timestamp")
+            items.append({
+                "id": str(r.get("id") or ""),
+                "timestamp": str(ts_val) if ts_val else "",
+                "actor_username": r.get("username") or f"User #{r.get('user_id', 'SYS')}",
+                "user_id": str(r.get("user_id") or "SYS"),
+                "actor_role": r.get("role") or "OPERATOR",
+                "designation": r.get("designation") or "Staff",
+                "action_type": r.get("action_type") or "ACTION",
+                "target_id": str(r.get("target_id")) if r.get("target_id") is not None else None,
+                "target_entity": r.get("target_entity") or "GLOBAL",
+                "summary": r.get("justification") or f"Action {r.get('action_type')} recorded.",
+                "ip_address": r.get("ip_address") or "127.0.0.1",
+                "device_id": r.get("machine_name") or "TERMINAL-01",
+                "change_reason": r.get("justification") or "Standard operational workflow.",
+                "detailed_diffs": r.get("diff_payload"),
+                "category": r.get("category"),
+                "endpoint": r.get("endpoint"),
+                "http_method": r.get("http_method")
             })
-        
-        return grouped_logs[offset : offset + limit]
+
+        return {
+            "total": total_count,
+            "items": items
+        }
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(e)}")
     finally:
-        cursor.close(); conn.close()
+        cur.close()
+        conn.close()
+
+
+# ------------------------------------------------------------
+# 2. SESSION LIFECYCLE (LOGIN / LOGOUT / DURATION)
+# ------------------------------------------------------------
+@router.post("/session/login")
+def login_session(payload: LoginSessionPayload, request: Request):
+    conn = get_connection()
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    try:
+        ip_address = request.client.host if request.client else "127.0.0.1"
+        session_id = str(uuid.uuid4())
+
+        cur.execute("""
+            INSERT INTO user_sessions (
+                id, user_id, username, role, designation, machine_name, ip_address, login_at, is_active
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), TRUE)
+            RETURNING id, login_at
+        """, (
+            session_id,
+            str(payload.user_id or "3"),
+            payload.username or "Helix Aura Ravenfall",
+            payload.role or "The Chief",
+            payload.designation or "Staff",
+            payload.machine_name or "TERMINAL-01",
+            ip_address
+        ))
+
+        row = cur.fetchone()
+        conn.commit()
+
+        # Write immutable audit entry
+        log_audit_activity(
+            request=request,
+            session_id=session_id,
+            user_id=str(payload.user_id or "3"),
+            username=payload.username or "Helix Aura Ravenfall",
+            role=payload.role or "The Chief",
+            designation=payload.designation or "Staff",
+            category="AUTH",
+            action_type="LOGIN",
+            target_entity="GLOBAL",
+            justification="Secure login session opened."
+        )
+
+        return {
+            "status": "Session opened",
+            "session_id": str(row["id"]),
+            "user_id": payload.user_id,
+            "login_at": str(row["login_at"])
+        }
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+
+@router.post("/session/logout")
+def logout_session(payload: LogoutSessionPayload, request: Request):
+    conn = get_connection()
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    try:
+        ip_address = request.client.host if request.client else "127.0.0.1"
+        auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+        token_sub, token_name, token_role = parse_token_claims(auth_header)
+
+        raw_id = token_sub or payload.user_id or "3"
+        digits = re.findall(r'\d+', str(raw_id))
+        user_id_str = digits[0] if digits else str(raw_id)
+
+        username = token_name or payload.username or "Helix Aura Ravenfall"
+        role = token_role or payload.role or "The Chief"
+        reason = payload.reason or "Operator initiated sign-out"
+
+        # Identify target session to close
+        target_session_id = payload.session_id
+        if not target_session_id:
+            cur.execute("""
+                SELECT id FROM user_sessions
+                WHERE user_id = %s AND is_active = TRUE
+                ORDER BY login_at DESC
+                LIMIT 1
+            """, (user_id_str,))
+            row = cur.fetchone()
+            if row:
+                target_session_id = row["id"]
+
+        duration = 0
+        if target_session_id:
+            cur.execute("""
+                UPDATE user_sessions
+                SET logout_at = NOW(),
+                    duration_seconds = GREATEST(1, EXTRACT(EPOCH FROM (NOW() - login_at))::INT),
+                    is_active = FALSE
+                WHERE id = %s
+                RETURNING duration_seconds
+            """, (target_session_id,))
+            updated_row = cur.fetchone()
+            if updated_row and updated_row.get("duration_seconds") is not None:
+                duration = updated_row["duration_seconds"]
+            conn.commit()
+
+        formatted_time = format_duration(duration)
+
+        # Write immutable audit entry
+        log_audit_activity(
+            request=request,
+            session_id=target_session_id,
+            user_id=user_id_str,
+            username=username,
+            role=role,
+            designation="Staff",
+            category="AUTH",
+            action_type="LOGOUT",
+            target_entity="GLOBAL",
+            justification=reason,
+            diff_payload={"duration_seconds": duration, "duration_formatted": formatted_time}
+        )
+
+        return {
+            "status": "Session closed",
+            "session_id": target_session_id,
+            "duration_seconds": duration,
+            "formatted_duration": formatted_time
+        }
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ------------------------------------------------------------
+# 3. GET SESSION HISTORIES
+# ------------------------------------------------------------
+@router.get("/sessions")
+def get_user_sessions(user_id: Optional[str] = None, limit: int = 50, offset: int = 0):
+    conn = get_connection()
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    try:
+        query = "SELECT * FROM user_sessions"
+        params = []
+
+        if user_id:
+            query += ' WHERE "user_id" = %s'
+            params.append(str(user_id))
+
+        query += ' ORDER BY "login_at" DESC LIMIT %s OFFSET %s'
+        params.extend([limit, offset])
+
+        cur.execute(query, tuple(params))
+        rows = cur.fetchall()
+
+        return [
+            {
+                "session_id": str(r["id"]),
+                "user_id": str(r["user_id"]),
+                "username": r["username"],
+                "role": r["role"],
+                "designation": r["designation"],
+                "machine_name": r["machine_name"],
+                "ip_address": r["ip_address"],
+                "login_at": str(r["login_at"]) if r["login_at"] else "",
+                "logout_at": str(r["logout_at"]) if r["logout_at"] else None,
+                "duration_seconds": r["duration_seconds"],
+                "status": "ACTIVE" if r["is_active"] else "COMPLETED"
+            }
+            for r in rows
+        ]
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
