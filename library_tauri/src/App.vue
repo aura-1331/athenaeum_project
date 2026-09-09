@@ -8,6 +8,7 @@ import {
   LayoutDashboard, 
   Library, 
   Search, 
+  Users,
   ClipboardCheck, 
   PlusCircle, 
   BookPlus,
@@ -18,7 +19,6 @@ import {
   FileText,
   AlertTriangle,
   ShieldCheck,
-  Users,
   Tag,
   Info,
   Menu,
@@ -187,6 +187,14 @@ onUnmounted(() => {
         <RouterLink to="/dashboard"><LayoutDashboard :size="18" :stroke-width="1.5" /><span>Dashboard</span></RouterLink>
         <RouterLink to="/search"><Search :size="18" :stroke-width="1.5" /><span>Search Archive</span></RouterLink>
         <RouterLink to="/catalogue"><Library :size="18" :stroke-width="1.5" /><span>Catalogue</span></RouterLink>
+
+        <RouterLink 
+          v-if="user_role === 'The Chief' || user_role === 'The Keeper'" 
+          to="/admin/users"
+        >
+          <Users :size="18" :stroke-width="1.5" />
+          <span>Personnel & Access</span>
+        </RouterLink>
         
         <div class="nav-section-label">Inventory</div>
         <RouterLink to="/create-work"><FileText :size="18" :stroke-width="1.5" /><span>Works</span></RouterLink>

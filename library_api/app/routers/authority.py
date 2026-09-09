@@ -216,9 +216,7 @@ def _verify_editable_authority(cur, authority_id: int):
 # ============================================================
 
 @router.get("/")
-@audit_action("VIEW_AUTHORITIES")
 def list_authorities(
-    request: Request,
     status_filter: Optional[AuthorityStatus] = Query(None, alias="status"),
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
@@ -256,10 +254,8 @@ def list_authorities(
 
 
 @router.get("/{authority_id}")
-@audit_action("VIEW_AUTHORITY")
 def get_authority(
     authority_id: int,
-    request: Request,
     db = Depends(get_db_connection),
     current_user: dict = Depends(get_current_user)
 ):
@@ -314,7 +310,13 @@ def get_authority(
 
 
 @router.put("/{authority_id}")
-@audit_action("AUTHORITY_UPDATE")
+@audit_action(
+    "AUTHORITY_UPDATE",
+    category="AUTHORITY_CONTROL",
+    target_entity="Authority",
+    target_id_param="authority_id",
+    reason_param="payload.reason"
+)
 def update_authority_details(
     authority_id: int,
     request: Request,
@@ -382,7 +384,13 @@ def update_authority_details(
 
 
 @router.patch("/{authority_id}/verify")
-@audit_action("AUTHORITY_VERIFY")
+@audit_action(
+    "AUTHORITY_VERIFY",
+    category="AUTHORITY_CONTROL",
+    target_entity="Authority",
+    target_id_param="authority_id",
+    reason_param="payload.reason"
+)
 def verify_authority(
     authority_id: int,
     request: Request,
@@ -406,7 +414,13 @@ def verify_authority(
 
 
 @router.patch("/{authority_id}/reject")
-@audit_action("AUTHORITY_REJECT")
+@audit_action(
+    "AUTHORITY_REJECT",
+    category="AUTHORITY_CONTROL",
+    target_entity="Authority",
+    target_id_param="authority_id",
+    reason_param="payload.reason"
+)
 def reject_authority(
     authority_id: int,
     request: Request,
@@ -430,7 +444,13 @@ def reject_authority(
 
 
 @router.patch("/{authority_id}/reopen")
-@audit_action("AUTHORITY_REOPEN")
+@audit_action(
+    "AUTHORITY_REOPEN",
+    category="AUTHORITY_CONTROL",
+    target_entity="Authority",
+    target_id_param="authority_id",
+    reason_param="payload.reason"
+)
 def reopen_authority(
     authority_id: int,
     request: Request,
@@ -458,7 +478,13 @@ def reopen_authority(
 # ============================================================
 
 @router.post("/{authority_id}/variants", status_code=status.HTTP_201_CREATED)
-@audit_action("AUTHORITY_VARIANT_CREATE")
+@audit_action(
+    "AUTHORITY_VARIANT_CREATE",
+    category="AUTHORITY_CONTROL",
+    target_entity="AuthorityVariant",
+    target_id_param="authority_id",
+    reason_param="payload.reason"
+)
 def create_variant(
     authority_id: int,
     request: Request,
@@ -514,7 +540,13 @@ def create_variant(
 
 
 @router.put("/{authority_id}/variants/{variant_id}")
-@audit_action("AUTHORITY_VARIANT_UPDATE")
+@audit_action(
+    "AUTHORITY_VARIANT_UPDATE",
+    category="AUTHORITY_CONTROL",
+    target_entity="AuthorityVariant",
+    target_id_param="variant_id",
+    reason_param="payload.reason"
+)
 def update_variant(
     authority_id: int,
     variant_id: int,
@@ -588,7 +620,13 @@ def update_variant(
 
 
 @router.delete("/{authority_id}/variants/{variant_id}")
-@audit_action("AUTHORITY_VARIANT_DELETE")
+@audit_action(
+    "AUTHORITY_VARIANT_DELETE",
+    category="AUTHORITY_CONTROL",
+    target_entity="AuthorityVariant",
+    target_id_param="variant_id",
+    reason_param="payload.reason"
+)
 def delete_variant(
     authority_id: int,
     variant_id: int,

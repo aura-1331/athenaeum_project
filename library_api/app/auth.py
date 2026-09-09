@@ -210,11 +210,12 @@ async def check_identity(
     request: Request,
     payload: dict
 ):
-    identity_code = payload.get("identity_code")
+    raw_code = payload.get("identity_code", "")
+    identity_code = raw_code.strip().upper() if isinstance(raw_code, str) else ""
 
     if (
         not identity_code
-        or not identity_code.isdigit()
+        or not identity_code.isalnum()
         or len(identity_code) != 5
     ):
         raise HTTPException(

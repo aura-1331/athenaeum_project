@@ -192,7 +192,7 @@ async def chief_decide_request(
                 secrets.choice(alphabet)
                 for _ in range(12)
             )
-            operator_id = generate_operator_id(request_data[2])
+            operator_id = generate_operator_id(request_data[2], cur)
             hashed = hash_password(temp_password)
 
             login_id = request_data[1].split("@")[0]
@@ -403,7 +403,7 @@ def normalize_role(role: str) -> str:
 
     return "INVALID"
 
-def generate_operator_id(role):
+def generate_operator_id(role: str, cur=None) -> str:
     normalized_role = normalize_role(role)
 
     role_codes = {
@@ -414,14 +414,28 @@ def generate_operator_id(role):
     }
 
     role_code = role_codes.get(normalized_role, "UNK")
+    prefix = f"ATH{role_code}"
 
-    suffix = ''.join(
-        secrets.choice(
-            string.ascii_uppercase + string.digits
-        ) for _ in range(4)
-    )
+    # Auto-increment using database cursor if available
+    if cur is not None:
+        try:
+            cur.execute(
+                "SELECT operator_id FROM users WHERE operator_id LIKE %s",
+                (f"{prefix}%",)
+            )
+            rows = cur.fetchall()
+            highest_seq = 0
+            for (op_id,) in rows:
+                if op_id and len(op_id) == 8 and op_id.startswith(prefix):
+                    seq_str = op_id[len(prefix):]
+                    if seq_str.isdigit():
+                        highest_seq = max(highest_seq, int(seq_str))
+            return f"{prefix}{highest_seq + 1:02d}"
+        except Exception:
+            pass
 
-    return f"ATH-ARC-{role_code}-{suffix}"
+    # Deterministic fallback
+    return f"{prefix}{secrets.randbelow(99) + 1:02d}"
 
 
 # ----------------------------
@@ -827,7 +841,7 @@ async def admin_create_user(
                     detail="Only one Chief allowed"
                 )
 
-        operator_id = generate_operator_id(role)
+        operator_id = generate_operator_id(role, cur)
         hashed = hash_password(password)
 
         cur.execute(
@@ -872,7 +886,76 @@ async def admin_create_user(
         cur.close()
         conn.close()
 
+# ----------------------------
+# ADMIN: LIST USERS
+# ----------------------------
+@app.get("/admin/users", tags=["Admin"])
+async def list_users(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") not in ["The Chief", "The Keeper"]:
+        raise HTTPException(status_code=403, detail="Access Denied")
 
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT user_id, name, email, operator_id, role, status
+            FROM users
+            ORDER BY user_id ASC
+            """
+        )
+        rows = cur.fetchall()
+        return [
+            {
+                "user_id": r[0],
+                "name": r[1],
+                "email": r[2],
+                "operator_id": r[3],
+                "role": r[4],
+                "status": r[5]
+            }
+            for r in rows
+        ]
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ----------------------------
+# ADMIN: LIST ACCESS REQUESTS
+# ----------------------------
+@app.get("/admin/access-requests", tags=["Admin"])
+async def list_access_requests(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") not in ["The Chief", "The Keeper"]:
+        raise HTTPException(status_code=403, detail="Access Denied")
+
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT request_id, full_name, email, organization, purpose, requested_role, status
+            FROM access_requests
+            WHERE status IN ('PENDING', 'KEEPER_REVIEWED')
+            ORDER BY request_id DESC
+            """
+        )
+        rows = cur.fetchall()
+        return [
+            {
+                "request_id": r[0],
+                "full_name": r[1],
+                "email": r[2],
+                "organization": r[3],
+                "purpose": r[4],
+                "requested_role": r[5],
+                "status": r[6]
+            }
+            for r in rows
+        ]
+    finally:
+        cur.close()
+        conn.close()
 # ----------------------------
 # CHANGE PASSWORD
 # ----------------------------

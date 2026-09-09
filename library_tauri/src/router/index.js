@@ -18,6 +18,7 @@ import SubjectsView from "../views/SubjectsView.vue"
 import AboutView from "../views/AboutView.vue" 
 import IncidentsView from "../views/IncidentsView.vue"
 import ReportsView from "../views/ReportsView.vue"
+import UserManagementView from "../views/admin/UserManagementView.vue"
 const routes = [
   { path: "/login", name: "login", component: Login },
   
@@ -35,6 +36,7 @@ const routes = [
   { path: "/edit-item/:id", name: "edit-item", component: EditItemView, meta: { requiresAuth: true } },
 
   { path: "/admin/settings", name: "admin-settings", component: SystemSettings, meta: { requiresAuth: true } },
+  { path: "/admin/users", name: "user-management", component: UserManagementView, meta: { requiresAuth: true } },
   { path: "/classification/authors", name: "Authors", component: AuthorsView, meta: { requiresAuth: true } },
   { path: "/classification/authorities", name: "Authorities", component: AuthoritiesView, meta: { requiresAuth: true } },
   { path: "/classification/subjects", name: "Subjects", component: SubjectsView, meta: { requiresAuth: true } },

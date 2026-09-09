@@ -294,8 +294,13 @@ def search_publishers(q: str, current_user: dict = Depends(get_current_user)):
         conn.close()
 
 
+# --- AFTER ---
 @router.post("/create-work")
-@audit_action("CREATE_WORK", target_entity="Work")
+@audit_action(
+    "ACCESSION_WORK",
+    target_entity="Work",
+    reason_param="x_change_reason"
+)
 def create_work(
     payload: WorkCreate, 
     request: Request, 
@@ -565,12 +570,18 @@ def get_catalogue(
         cur.close()
         conn.close()
 
+# --- AFTER ---
 @router.patch("/{serial_no}", dependencies=[Depends(require_role(["The Chief"]))])
-@audit_action("UPDATE_LEDGER", target_entity="Item")
+@audit_action(
+    "UPDATE_LEDGER",
+    target_entity="Item",
+    target_id_param="serial_no",
+    reason_param="x_change_reason"
+)
 async def update_ledger_record(
-    serial_no: int, 
-    payload: dict, 
-    request: Request, 
+    serial_no: int,
+    payload: dict,
+    request: Request,
     current_user: dict = Depends(get_current_user),
     x_change_reason: Optional[str] = Header(default="Routine operational adjustment"),
     x_device_id: Optional[str] = Header(default="Desktop Browser Workstation"),
@@ -684,8 +695,15 @@ async def update_ledger_record(
         conn.close()
 
 
+# --- AFTER ---
 @router.post("/approve/{work_id}", tags=["Admin Operations"], dependencies=[Depends(require_role(["The Chief"]))])
-@audit_action("WORK_APPROVAL", target_entity="Work")
+@audit_action(
+    "CURATOR_DECISION",
+    category="ARCHIVAL_GOVERNANCE",
+    target_entity="Work",
+    target_id_param="work_id",
+    reason_param="reason"
+)
 async def approve_work(
     work_id: int, action: str, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)
@@ -714,8 +732,14 @@ async def approve_work(
         conn.close()
 
 
+# --- AFTER ---
 @router.delete("/{book_id}", tags=["Catalogue Operations"], dependencies=[Depends(require_role(["The Chief"]))])
-@audit_action("SOFT_DELETE", target_entity="Item")
+@audit_action(
+    "DEACCESSION",
+    target_entity="Item",
+    target_id_param="book_id",
+    reason_param="reason"
+)
 async def soft_delete_book(
     book_id: int, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)

@@ -41,46 +41,48 @@ axios.interceptors.request.use(
 axios.interceptors.response.use(
   (res) => res,
   async (err) => {
+    const originalRequest = err.config;
+
     if (
       err.response?.status === 401 &&
-      err.config &&
-      !err.config._retry &&
-      !err.config.url.includes("/refresh")
+      originalRequest &&
+      !originalRequest._retry &&
+      !originalRequest.url?.includes("/refresh")
     ) {
-      err.config._retry = true;
-      
-      const auth = useAuthStore(pinia)
+      originalRequest._retry = true;
+
+      const auth = useAuthStore(pinia);
       const refresh = auth.refreshToken;
 
       if (!refresh) {
-        auth.logout(); // Pinia automatically clears localStorage for you!
-        window.location.href = "/login";
-        return;
+        auth.logout();
+        router.push("/login");
+        return Promise.reject(err);
       }
 
       try {
         const res = await refreshClient.post("/refresh", { refresh_token: refresh });
         const newToken = res.data.access_token;
 
-        // 5. Update Pinia, which instantly updates the UI and saves to localStorage!
         auth.accessToken = newToken;
-
-        err.config.headers["Authorization"] = `Bearer ${newToken}`;
-        return axios(err.config);
+        originalRequest.headers["Authorization"] = `Bearer ${newToken}`;
+        return axios(originalRequest);
       } catch (refreshError) {
         auth.logout();
-        window.location.href = "/login";
+        router.push("/login");
+        return Promise.reject(refreshError);
       }
     }
+
     return Promise.reject(err);
   }
 );
 
 window.addEventListener("storage", (event) => {
   if (event.key === "logout") {
-    const auth = useAuthStore(pinia)
+    const auth = useAuthStore(pinia);
     auth.logout();
-    window.location.href = "/login";
+    router.push("/login");
   }
 });
 

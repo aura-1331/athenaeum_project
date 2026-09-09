@@ -62,16 +62,16 @@
 
               <div class="input-shell">
                 <span class="input-prefix">ATH</span>
-
                 <input
                   v-model="identityDigits"
                   @input="handleIdentityInput"
                   type="text"
                   required
                   maxlength="5"
-                  placeholder="00000"
+                  placeholder="•••••"
+                  autocomplete="off"
+                  style="text-transform: uppercase;"
                 />
-
               </div>
             </div>  
             <button class="action-btn" type="submit" :disabled="loading">
@@ -190,7 +190,8 @@ const errorMessage = ref('')
 
 const handleIdentityInput = () => {
   identityDigits.value = identityDigits.value
-    .replace(/\D/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
     .slice(0, 5)
 }
 

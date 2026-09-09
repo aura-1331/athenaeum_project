@@ -67,7 +67,7 @@
         <thead>
           <tr>
             <th style="width: 44px;"></th>
-            <th class="text-left">TIMESTAMP (UTC)</th>
+            <th class="text-left">TIMESTAMP (IST)</th>
             <th class="text-left">OPERATOR</th>
             <th>ROLE</th>
             <th>ACTION</th>
@@ -349,7 +349,27 @@ function formatDate(raw) {
   if (!raw) return '—'
   try {
     const d = new Date(raw)
-    return d.toISOString().replace('T', ' ').substring(0, 19)
+    if (isNaN(d.getTime())) return raw
+
+    const parts = new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      weekday: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(d)
+
+    const m = {}
+    for (const { type, value } of parts) {
+      m[type] = value
+    }
+
+    // Output: 08-09-2026 TUESDAY 20:56:28
+    return `${m.day}-${m.month}-${m.year} ${m.weekday.toUpperCase()} ${m.hour}:${m.minute}:${m.second}`
   } catch {
     return raw
   }

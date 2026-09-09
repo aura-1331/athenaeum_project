@@ -116,9 +116,9 @@ async function fetchAllHoldings() {
   }
 }
 
-onMounted(() => {
-  fetchAllHoldings()
-})
+//onMounted(() => {
+// fetchAllHoldings()
+//})
 
 const authorsList = computed(() => 
   Array.from(new Set(rawBooks.value.map(b => b.author).filter(Boolean))).sort()
@@ -189,6 +189,7 @@ function openModal(prefills?: { author?: string; category?: string; genre?: stri
     if (prefills.language) selectedLanguage.value = prefills.language
   }
   isOpen.value = true
+  fetchAllHoldings()
 }
 
 function close() {
