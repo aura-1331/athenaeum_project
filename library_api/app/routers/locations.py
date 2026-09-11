@@ -1,3 +1,5 @@
+# app/routers/locations.py
+
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -5,6 +7,7 @@ from pydantic import BaseModel
 from app.database import get_connection
 from app.auth import get_current_user, require_role
 from app.audit_utils import audit_action
+from app.services.audit_service import log_audit_activity
 
 router = APIRouter(prefix="/locations", tags=["Vault Locations"])
 
@@ -34,10 +37,23 @@ async def move_item(
     conn = get_connection()
     cur = conn.cursor()
     try:
+        # 1. Verify item existence
         cur.execute("SELECT serial_no FROM public.items WHERE serial_no = %s", (payload.serial_no,))
         if not cur.fetchone():
             raise HTTPException(status_code=404, detail="Holding record not found.")
 
+        # 2. Retrieve previous physical location for ledger diff
+        cur.execute("""
+            SELECT location_name 
+            FROM public.item_locations
+            WHERE serial_no = %s
+            ORDER BY moved_at DESC
+            LIMIT 1
+        """, (payload.serial_no,))
+        prev_row = cur.fetchone()
+        previous_location = prev_row[0] if prev_row else "UNASSIGNED"
+
+        # 3. Record new physical placement
         cur.execute("""
             INSERT INTO public.item_locations (serial_no, location_name, moved_by, notes)
             VALUES (%s, %s, %s, %s) RETURNING location_id
@@ -45,6 +61,38 @@ async def move_item(
 
         location_id = cur.fetchone()[0]
         conn.commit()
+
+        # 4. Cryptographic ledger anchor
+        actor_id = str(current_user.get("user_id", "UNKNOWN"))
+        actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
+        actor_role = str(current_user.get("role", "The Keeper"))
+
+        log_audit_activity(
+            request=request,
+            user_id=actor_id,
+            username=actor_name,
+            role=actor_role,
+            designation=str(current_user.get("designation") or actor_role),
+            category="VAULT_OPS",
+            action_type="RELOCATE_HOLDING",
+            target_entity="ITEM",
+            target_id=str(payload.serial_no),
+            endpoint=request.url.path,
+            http_method="POST",
+            justification=payload.notes or f"Relocated holding {payload.serial_no} to {payload.location_name}",
+            diff_payload={
+                "serial_no": payload.serial_no,
+                "location_id": location_id,
+                "from_location": previous_location,
+                "to_location": payload.location_name,
+                "notes": payload.notes
+            },
+            extra_metadata={
+                "serial_no": payload.serial_no,
+                "location_id": location_id
+            }
+        )
+
         return {"message": "Holding relocated successfully", "location_id": location_id}
     except HTTPException:
         raise

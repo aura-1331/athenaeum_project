@@ -29,6 +29,8 @@ from app.utils.security import (
     is_password_strong
 )
 
+from app.services.audit_service import log_audit_activity
+
 from app.routers import (
     catalogue,
     items,
@@ -67,8 +69,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:1420",     # Tauri Dev
-        "http://tauri.localhost",    # Tauri Windows Production
+        "http://localhost:1420",      # Tauri Dev
+        "http://tauri.localhost",     # Tauri Windows Production
         "https://tauri.localhost",
         "https://athenaeum-project.vercel.app"
     ],
@@ -79,7 +81,6 @@ app.add_middleware(
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
-# Path to changelog.json in the same directory as main.py (app/changelog.json)
 CHANGELOG_PATH = Path(__file__).resolve().parent / "changelog.json"
 
 
@@ -91,6 +92,11 @@ class RefreshRequest(BaseModel):
 
 class Verify2FARequest(BaseModel):
     token: str
+
+class Login2FARequest(BaseModel):
+    temp_token: str
+    totp_code: str
+    remember_me: bool = False
 
 class AccessRequestModel(BaseModel):
     full_name: str
@@ -127,7 +133,6 @@ def get_system_changelog():
 # ----------------------------
 # Chief Review / Final Decision
 # ----------------------------
-@audit_action("CHIEF_DECISION")
 @app.post("/chief/decide-request/{request_id}")
 async def chief_decide_request(
     request: Request,
@@ -173,13 +178,16 @@ async def chief_decide_request(
                 detail="Request not found"
             )
 
-        if request_data[5] in ["APPROVE", "REJECT"]:
+        previous_status = request_data[5]
+
+        if previous_status in ["APPROVE", "REJECT"]:
             raise HTTPException(
                 status_code=400,
                 detail="Request already processed"
             )
 
         temp_password = None
+        operator_id = None
 
         if req.decision == "APPROVE":
             alphabet = (
@@ -258,11 +266,54 @@ async def chief_decide_request(
 
         conn.commit()
 
+        admin_id = str(current_user.get("user_id") or current_user.get("sub") or "SYSTEM")
+        admin_name = str(current_user.get("name") or current_user.get("username") or "The Chief")
+        admin_role_val = str(current_user.get("role") or "The Chief")
+
+        is_approved = req.decision == "APPROVE"
+        action_type = "ACCESS_REQUEST_APPROVE" if is_approved else "ACCESS_REQUEST_REJECT"
+        target_id = operator_id if is_approved else f"REQ-{request_id}"
+        
+        default_reason = (
+            f"Approved access request #{request_id} for {request_data[0]} ({request_data[2]})"
+            if is_approved
+            else f"Rejected access request #{request_id} for {request_data[0]}"
+        )
+
+        log_audit_activity(
+            request=request,
+            user_id=admin_id,
+            username=admin_name,
+            role=admin_role_val,
+            designation="Staff",
+            category="GOVERNANCE",
+            action_type=action_type,
+            target_entity="ACCESS_REQUEST",
+            target_id=target_id,
+            justification=req.notes or default_reason,
+            diff_payload={
+                "status": {
+                    "old": previous_status,
+                    "new": req.decision
+                }
+            },
+            extra_metadata={
+                "request_id": request_id,
+                "applicant_name": request_data[0],
+                "applicant_email": request_data[1],
+                "requested_role": request_data[2],
+                "temporary_access": request_data[3],
+                "temporary_expiry": str(request_data[4]) if request_data[4] else None,
+                "assigned_operator_id": operator_id,
+                "chief_notes": req.notes
+            }
+        )
+
         response = {
             "message": f"Request {req.decision.lower()}d successfully."
         }
 
-        if req.decision == "APPROVE":
+        if is_approved:
             response["temporary_password"] = temp_password
             response["operator_id"] = operator_id
         return response
@@ -277,6 +328,7 @@ async def chief_decide_request(
 # -------------------------
 @app.post("/chief/revoke-user/{user_id}")
 async def revoke_user(
+    request: Request,
     user_id: int,
     current_user: dict = Depends(get_current_user)
 ):
@@ -301,19 +353,56 @@ async def revoke_user(
             UPDATE users
             SET status='REVOKED'
             WHERE user_id=%s
+            RETURNING name, email, operator_id, role, status
             """,
             (user_id,)
         )
+        revoked_user = cur.fetchone()
+
+        if not revoked_user:
+            raise HTTPException(status_code=404, detail="User not found.")
 
         conn.commit()
 
+        target_name, target_email, target_op_id, target_role, _ = revoked_user
+
+        admin_id = str(current_user.get("user_id") or current_user.get("sub") or "SYSTEM")
+        admin_name = str(current_user.get("name") or current_user.get("username") or "The Chief")
+        admin_role_val = str(current_user.get("role") or "The Chief")
+
+        log_audit_activity(
+            request=request,
+            user_id=admin_id,
+            username=admin_name,
+            role=admin_role_val,
+            designation="Staff",
+            category="SECURITY",
+            action_type="USER_REVOKE",
+            target_entity="PERSONNEL",
+            target_id=target_op_id or str(user_id),
+            justification=f"Revoked credentials for {target_name} ({target_op_id or user_id})",
+            diff_payload={
+                "status": {
+                    "old": "APPROVED",
+                    "new": "REVOKED"
+                }
+            },
+            extra_metadata={
+                "revoked_user_id": user_id,
+                "revoked_name": target_name,
+                "revoked_email": target_email,
+                "revoked_operator_id": target_op_id,
+                "revoked_role": target_role
+            }
+        )
+
         return {
-            "message": "User access revoked."
+            "message": f"User access revoked for {target_name} ({target_op_id})."
         }
 
     finally:
         cur.close()
-        conn.close()     
+        conn.close()
 
 
 # -----------------------------
@@ -321,6 +410,7 @@ async def revoke_user(
 # -----------------------------
 @app.post("/keeper/recommend-request/{request_id}")
 async def keeper_recommend_request(
+    request: Request,
     request_id: int,
     req: KeeperRecommendationModel,
     current_user: dict = Depends(get_current_user)
@@ -343,6 +433,20 @@ async def keeper_recommend_request(
     try:
         cur.execute(
             """
+            SELECT full_name, email, requested_role, status
+            FROM access_requests
+            WHERE request_id=%s
+            """,
+            (request_id,)
+        )
+        req_row = cur.fetchone()
+        if not req_row:
+            raise HTTPException(status_code=404, detail="Request not found.")
+
+        previous_status = req_row[3]
+
+        cur.execute(
+            """
             UPDATE access_requests
             SET keeper_recommendation=%s,
                 keeper_notes=%s,
@@ -357,6 +461,34 @@ async def keeper_recommend_request(
         )
 
         conn.commit()
+
+        keeper_id = str(current_user.get("user_id") or current_user.get("sub") or "SYSTEM")
+        keeper_name = str(current_user.get("name") or current_user.get("username") or "The Keeper")
+
+        log_audit_activity(
+            request=request,
+            user_id=keeper_id,
+            username=keeper_name,
+            role="The Keeper",
+            designation="Staff",
+            category="GOVERNANCE",
+            action_type="ACCESS_REQUEST_RECOMMEND",
+            target_entity="ACCESS_REQUEST",
+            target_id=f"REQ-{request_id}",
+            justification=req.notes or f"Keeper recommended {req.recommendation} for {req_row[0]}",
+            diff_payload={
+                "status": {"old": previous_status, "new": "KEEPER_REVIEWED"},
+                "recommendation": {"old": None, "new": req.recommendation}
+            },
+            extra_metadata={
+                "request_id": request_id,
+                "applicant_name": req_row[0],
+                "applicant_email": req_row[1],
+                "requested_role": req_row[2],
+                "recommendation": req.recommendation,
+                "keeper_notes": req.notes
+            }
+        )
 
         return {
             "message": "Recommendation submitted."
@@ -416,7 +548,6 @@ def generate_operator_id(role: str, cur=None) -> str:
     role_code = role_codes.get(normalized_role, "UNK")
     prefix = f"ATH{role_code}"
 
-    # Auto-increment using database cursor if available
     if cur is not None:
         try:
             cur.execute(
@@ -434,7 +565,6 @@ def generate_operator_id(role: str, cur=None) -> str:
         except Exception:
             pass
 
-    # Deterministic fallback
     return f"{prefix}{secrets.randbelow(99) + 1:02d}"
 
 
@@ -445,7 +575,8 @@ def generate_operator_id(role: str, cur=None) -> str:
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    remember_me: bool = Form(False)
+    remember_me: bool = Form(False),
+    otp_code: str | None = Form(None)
 ):
     conn = get_connection()
     cur = conn.cursor()
@@ -453,7 +584,7 @@ async def login(
     try:
         cur.execute(
             """
-            SELECT user_id, hashed_password, role, status, expires_at, name
+            SELECT user_id, hashed_password, role, status, expires_at, name, operator_id
             FROM users
             WHERE UPPER(operator_id)=UPPER(%s)
             """,
@@ -463,6 +594,18 @@ async def login(
         user = cur.fetchone()
 
         if not user or not verify_password(form_data.password, user[1]):
+            log_audit_activity(
+                request=request,
+                user_id=str(user[0]) if user else "UNKNOWN",
+                username=user[5] if user else form_data.username,
+                role=user[2] if user else "UNKNOWN",
+                designation="Staff",
+                category="SECURITY",
+                action_type="LOGIN_FAILED",
+                target_entity="SESSION",
+                target_id=form_data.username,
+                justification="Failed authentication attempt: invalid credentials"
+            )
             raise HTTPException(
                 status_code=401,
                 detail="Invalid credentials"
@@ -491,21 +634,73 @@ async def login(
 
         twofa_data = cur.fetchone()
 
+        # 2FA Challenge Evaluation
         if twofa_data and twofa_data[1]:
-            raise HTTPException(
-                status_code=401,
-                detail="2FA verification required"
-            )
+            if otp_code:
+                totp = pyotp.TOTP(twofa_data[0])
+                if not totp.verify(otp_code.strip()):
+                    log_audit_activity(
+                        request=request,
+                        user_id=str(user[0]),
+                        username=user[5],
+                        role=user[2],
+                        designation="Staff",
+                        category="SECURITY",
+                        action_type="2FA_LOGIN_FAILED",
+                        target_entity="SESSION",
+                        target_id=user[6],
+                        justification="Primary login failed: invalid 2FA passcode submitted",
+                        extra_metadata={"operator_id": user[6]}
+                    )
+                    raise HTTPException(status_code=401, detail="Invalid 2FA passcode")
+            else:
+                preauth_token = create_token(
+                    {
+                        "sub": str(user[0]),
+                        "scope": "2fa_preauth",
+                        "role": normalize_role(user[2])
+                    },
+                    token_type="access"
+                )
 
-        await record_audit(
-            user_id=user[0],
-            action_type="LOGIN",
-            request=request,
-            details="Secure login success",
-            valid_reason="LOGIN_SUCCESS"
-        )
+                log_audit_activity(
+                    request=request,
+                    user_id=str(user[0]),
+                    username=user[5],
+                    role=user[2],
+                    designation="Staff",
+                    category="SECURITY",
+                    action_type="2FA_CHALLENGE_ISSUED",
+                    target_entity="SESSION",
+                    target_id=user[6],
+                    justification="Primary credentials accepted; 2FA verification challenge issued",
+                    extra_metadata={"operator_id": user[6]}
+                )
 
+                return {
+                    "twofa_required": True,
+                    "temp_token": preauth_token,
+                    "operator_id": user[6],
+                    "message": "Two-factor authentication required"
+                }
+
+        # Successful Login Audit (Chained)
         normalized_role = normalize_role(user[2])
+        is_2fa_login = bool(twofa_data and twofa_data[1] and otp_code)
+
+        log_audit_activity(
+            request=request,
+            user_id=str(user[0]),
+            username=user[5],
+            role=normalized_role,
+            designation="Staff",
+            category="SECURITY",
+            action_type="LOGIN_SUCCESS_2FA" if is_2fa_login else "LOGIN",
+            target_entity="SESSION",
+            target_id=user[6],
+            justification="Operator successfully authenticated" + (" via direct 2FA OTP" if is_2fa_login else ""),
+            extra_metadata={"operator_id": user[6]}
+        )
 
         access_token = create_token(
             {
@@ -519,7 +714,9 @@ async def login(
             "access_token": access_token,
             "token_type": "bearer",
             "role": normalized_role,
-            "user_name": user[5]
+            "user_name": user[5],
+            "user_id": str(user[0]),
+            "operator_id": user[6]
         }
 
         if remember_me:
@@ -550,6 +747,136 @@ async def login(
                 (jti, payload["sub"], expires)
             )
             
+            response_payload["refresh_token"] = refresh_token
+
+        conn.commit()
+        return response_payload
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ----------------------------
+# 2FA LOGIN VERIFICATION
+# ----------------------------
+@app.post("/login/verify-2fa", tags=["Security"])
+async def verify_login_2fa(
+    request: Request,
+    req: Login2FARequest
+):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        try:
+            payload = jwt.decode(
+                req.temp_token,
+                PUBLIC_KEY,
+                algorithms=[ALGORITHM],
+                audience="athenaeum-client",
+                issuer="athenaeum-api"
+            )
+        except JWTError:
+            raise HTTPException(status_code=401, detail="2FA session expired. Please log in again.")
+
+        if payload.get("scope") != "2fa_preauth":
+            raise HTTPException(status_code=401, detail="Invalid token scope for 2FA.")
+
+        user_id = int(payload["sub"])
+
+        cur.execute(
+            """
+            SELECT user_id, twofa_secret, twofa_enabled, role, name, operator_id, status
+            FROM users
+            WHERE user_id=%s
+            """,
+            (user_id,)
+        )
+        user = cur.fetchone()
+
+        if not user or not user[1] or user[6] != "APPROVED":
+            raise HTTPException(status_code=403, detail="Account is disabled or 2FA is misconfigured.")
+
+        totp = pyotp.TOTP(user[1])
+
+        if not totp.verify(req.totp_code.strip()):
+            log_audit_activity(
+                request=request,
+                user_id=str(user[0]),
+                username=user[4],
+                role=user[3],
+                designation="Staff",
+                category="SECURITY",
+                action_type="2FA_LOGIN_FAILED",
+                target_entity="SESSION",
+                target_id=user[5],
+                justification="Failed second-factor authentication: incorrect TOTP code entered",
+                extra_metadata={"operator_id": user[5]}
+            )
+            raise HTTPException(status_code=401, detail="Invalid 2FA code.")
+
+        log_audit_activity(
+            request=request,
+            user_id=str(user[0]),
+            username=user[4],
+            role=user[3],
+            designation="Staff",
+            category="SECURITY",
+            action_type="LOGIN_SUCCESS_2FA",
+            target_entity="SESSION",
+            target_id=user[5],
+            justification="Second-factor TOTP challenge verified successfully",
+            extra_metadata={"operator_id": user[5]}
+        )
+
+        normalized_role = normalize_role(user[3])
+
+        access_token = create_token(
+            {
+                "sub": str(user[0]),
+                "role": normalized_role
+            },
+            token_type="access"
+        )
+
+        response_payload = {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "role": normalized_role,
+            "user_name": user[4],
+            "user_id": str(user[0]),
+            "operator_id": user[5]
+        }
+
+        if req.remember_me:
+            refresh_token = create_token(
+                {
+                    "sub": str(user[0]),
+                    "role": normalized_role
+                },
+                token_type="refresh"
+            )
+
+            refresh_payload = jwt.decode(
+                refresh_token,
+                PUBLIC_KEY,
+                algorithms=[ALGORITHM],
+                audience="athenaeum-client",
+                issuer="athenaeum-api"
+            )
+
+            jti = refresh_payload["jti"]
+            expires = datetime.fromtimestamp(refresh_payload["exp"], tz=timezone.utc)
+
+            cur.execute(
+                """
+                INSERT INTO refresh_tokens (token_id, user_id, expires_at)
+                VALUES (%s, %s, %s)
+                """,
+                (jti, refresh_payload["sub"], expires)
+            )
+
             response_payload["refresh_token"] = refresh_token
 
         conn.commit()
@@ -612,7 +939,7 @@ async def refresh_token(req: RefreshRequest):
 # PUBLIC ACCESS REQUEST 
 # -------------------------------
 @app.post("/request-access")
-async def request_access(req: AccessRequestModel):
+async def request_access(request: Request, req: AccessRequestModel):
     allowed_roles = [
         "The Seeker",
         "Temporary Seeker"
@@ -658,6 +985,7 @@ async def request_access(req: AccessRequestModel):
                 temporary_expiry
             )
             VALUES (%s,%s,%s,%s,%s,%s,%s)
+            RETURNING request_id
             """,
             (
                 req.full_name,
@@ -670,7 +998,29 @@ async def request_access(req: AccessRequestModel):
             )
         )
 
+        new_request_id = cur.fetchone()[0]
         conn.commit()
+
+        log_audit_activity(
+            request=request,
+            user_id="PUBLIC_APPLICANT",
+            username=req.full_name,
+            role="Applicant",
+            designation="Public",
+            category="ACCESS_CONTROL",
+            action_type="ACCESS_REQUEST_SUBMIT",
+            target_entity="ACCESS_REQUEST",
+            target_id=f"REQ-{new_request_id}",
+            justification=f"Inbound registration by {req.full_name} for role {req.requested_role}",
+            extra_metadata={
+                "request_id": new_request_id,
+                "email": req.email,
+                "organization": req.organization,
+                "purpose": req.purpose,
+                "requested_role": req.requested_role,
+                "temporary_access": req.temporary_access
+            }
+        )
 
         return {
             "message": "Access request submitted"
@@ -685,7 +1035,7 @@ async def request_access(req: AccessRequestModel):
 # LOGOUT
 # ----------------------------
 @app.post("/logout", tags=["Security"])
-async def logout(req: RefreshRequest):
+async def logout(request: Request, req: RefreshRequest):
     conn = get_connection()
     cur = conn.cursor()
 
@@ -699,6 +1049,8 @@ async def logout(req: RefreshRequest):
         )
 
         jti = payload.get("jti")
+        sub_id = payload.get("sub")
+        role_val = payload.get("role", "Operator")
 
         cur.execute(
             """
@@ -708,7 +1060,35 @@ async def logout(req: RefreshRequest):
             (jti,)
         )
 
+        user_name = "Operator"
+        op_id = sub_id
+        if sub_id:
+            try:
+                cur.execute(
+                    "SELECT name, operator_id FROM users WHERE user_id=%s",
+                    (int(sub_id),)
+                )
+                user_row = cur.fetchone()
+                if user_row:
+                    user_name = user_row[0]
+                    op_id = user_row[1] or sub_id
+            except Exception:
+                pass
+
         conn.commit()
+
+        log_audit_activity(
+            request=request,
+            user_id=str(sub_id),
+            username=user_name,
+            role=role_val,
+            designation="Staff",
+            category="SECURITY",
+            action_type="LOGOUT",
+            target_entity="SESSION",
+            target_id=str(op_id),
+            justification="Operator initiated sign-out"
+        )
 
         return {
             "message": "Logged out successfully"
@@ -724,6 +1104,7 @@ async def logout(req: RefreshRequest):
 # ----------------------------
 @app.post("/admin/create-user")
 async def admin_create_user(
+    request: Request,
     name: str,
     email: EmailStr,
     role: str,
@@ -877,6 +1258,29 @@ async def admin_create_user(
 
         conn.commit()
 
+        admin_id = str(current_user.get("user_id") or current_user.get("sub") or "SYSTEM")
+        admin_name = str(current_user.get("name") or current_user.get("username") or "The Chief")
+        admin_role_val = str(current_user.get("role") or "The Chief")
+
+        log_audit_activity(
+            request=request,
+            user_id=admin_id,
+            username=admin_name,
+            role=admin_role_val,
+            designation="Staff",
+            category="GOVERNANCE",
+            action_type="USER_PROVISION",
+            target_entity="PERSONNEL",
+            target_id=operator_id,
+            justification=f"Provisioned operator {name} ({operator_id}) with role {role}",
+            extra_metadata={
+                "created_operator_id": operator_id,
+                "created_name": name,
+                "created_email": email,
+                "assigned_role": role
+            }
+        )
+
         return {
             "message": "User created successfully",
             "operator_id": operator_id
@@ -885,6 +1289,7 @@ async def admin_create_user(
     finally:
         cur.close()
         conn.close()
+
 
 # ----------------------------
 # ADMIN: LIST USERS
@@ -956,11 +1361,14 @@ async def list_access_requests(current_user: dict = Depends(get_current_user)):
     finally:
         cur.close()
         conn.close()
+
+
 # ----------------------------
 # CHANGE PASSWORD
 # ----------------------------
 @app.post("/change-password")
 async def change_password(
+    request: Request,
     current_password: str,
     new_password: str,
     current_user: dict = Depends(get_current_user)
@@ -973,7 +1381,7 @@ async def change_password(
 
         cur.execute(
             """
-            SELECT hashed_password
+            SELECT hashed_password, name, role, operator_id
             FROM users
             WHERE user_id=%s
             """,
@@ -981,17 +1389,19 @@ async def change_password(
         )
 
         user = cur.fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="User record not found")
 
         if not verify_password(current_password, user[0]):
             raise HTTPException(
-                401,
-                "Current password incorrect"
+                status_code=401,
+                detail="Current password incorrect"
             )
 
         if not is_password_strong(new_password):
             raise HTTPException(
-                400,
-                "Weak password"
+                status_code=400,
+                detail="Weak password"
             )
 
         new_hash = hash_password(new_password)
@@ -1007,6 +1417,21 @@ async def change_password(
 
         conn.commit()
 
+        log_audit_activity(
+            request=request,
+            user_id=str(user_id),
+            username=str(user[1]),
+            role=str(user[2]),
+            designation="Staff",
+            category="SECURITY",
+            action_type="PASSWORD_CHANGE",
+            target_entity="USER_CREDENTIALS",
+            target_id=user[3] or str(user_id),
+            justification="Operator-initiated credential rotation",
+            diff_payload={"password": {"old": "[PROTECTED]", "new": "[PROTECTED]"}},
+            extra_metadata={"operator_id": user[3]}
+        )
+
         return {
             "message": "Password updated"
         }
@@ -1021,6 +1446,7 @@ async def change_password(
 # ----------------------------
 @app.post("/setup-2fa")
 async def setup_2fa(
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     conn = get_connection()
@@ -1029,6 +1455,16 @@ async def setup_2fa(
     try:
         user_id = current_user["user_id"]
         secret = pyotp.random_base32()
+
+        cur.execute(
+            """
+            SELECT name, role, operator_id
+            FROM users
+            WHERE user_id=%s
+            """,
+            (user_id,)
+        )
+        user_info = cur.fetchone()
 
         cur.execute(
             """
@@ -1057,6 +1493,21 @@ async def setup_2fa(
             buffer.getvalue()
         ).decode()
 
+        if user_info:
+            log_audit_activity(
+                request=request,
+                user_id=str(user_id),
+                username=str(user_info[0]),
+                role=str(user_info[1]),
+                designation="Staff",
+                category="SECURITY",
+                action_type="2FA_SETUP_INIT",
+                target_entity="MFA_DEVICE",
+                target_id=user_info[2] or str(user_id),
+                justification="Operator initialized 2FA registration ceremony",
+                extra_metadata={"operator_id": user_info[2]}
+            )
+
         return {
             "secret": secret,
             "qr_code": qr_base64
@@ -1072,6 +1523,7 @@ async def setup_2fa(
 # ----------------------------
 @app.post("/verify-2fa")
 async def verify_2fa(
+    request: Request,
     req: Verify2FARequest,
     current_user: dict = Depends(get_current_user)
 ):
@@ -1083,7 +1535,7 @@ async def verify_2fa(
 
         cur.execute(
             """
-            SELECT twofa_secret
+            SELECT twofa_secret, name, role, operator_id
             FROM users
             WHERE user_id=%s
             """,
@@ -1091,14 +1543,29 @@ async def verify_2fa(
         )
 
         user = cur.fetchone()
-        secret = user[0]
+        if not user:
+            raise HTTPException(status_code=404, detail="User record not found")
 
+        secret = user[0]
         totp = pyotp.TOTP(secret)
 
         if not totp.verify(req.token):
+            log_audit_activity(
+                request=request,
+                user_id=str(user_id),
+                username=str(user[1]),
+                role=str(user[2]),
+                designation="Staff",
+                category="SECURITY",
+                action_type="2FA_VERIFY_FAILED",
+                target_entity="MFA_DEVICE",
+                target_id=user[3] or str(user_id),
+                justification="Failed 2FA verification attempt: invalid TOTP token submitted",
+                extra_metadata={"operator_id": user[3]}
+            )
             raise HTTPException(
-                401,
-                "Invalid 2FA token"
+                status_code=401,
+                detail="Invalid 2FA token"
             )
 
         cur.execute(
@@ -1111,6 +1578,21 @@ async def verify_2fa(
         )
 
         conn.commit()
+
+        log_audit_activity(
+            request=request,
+            user_id=str(user_id),
+            username=str(user[1]),
+            role=str(user[2]),
+            designation="Staff",
+            category="SECURITY",
+            action_type="2FA_ENABLE",
+            target_entity="MFA_DEVICE",
+            target_id=user[3] or str(user_id),
+            justification="Enrolled and verified TOTP multi-factor authenticator",
+            diff_payload={"twofa_enabled": {"old": False, "new": True}},
+            extra_metadata={"operator_id": user[3]}
+        )
 
         return {
             "message": "2FA enabled"

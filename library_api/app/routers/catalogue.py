@@ -1,6 +1,9 @@
+# app/routers/catalogue.py
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Header, status
 from app.auth import get_current_user, require_role
-from app.database import get_connection, record_audit
+from app.database import get_connection
+from app.services.audit_service import log_audit_activity
 from app.audit_utils import audit_action
 from pydantic import BaseModel
 from psycopg2.extras import RealDictCursor
@@ -293,8 +296,7 @@ def search_publishers(q: str, current_user: dict = Depends(get_current_user)):
         cur.close()
         conn.close()
 
-
-# --- AFTER ---
+# --- 1. ACCESSION WORK ---
 @router.post("/create-work")
 @audit_action(
     "ACCESSION_WORK",
@@ -315,8 +317,8 @@ def create_work(
         token_user_id = current_user.get("user_id")
         cur.execute("SELECT name FROM public.users WHERE user_id = %s", (token_user_id,))
         user_row = cur.fetchone()
-        real_name = user_row[0] if user_row else "SYSTEM_UNKNOWN"
-        real_role = current_user.get("role") or "SYSTEM_UNKNOWN"
+        real_name = user_row[0] if user_row else (current_user.get("username") or "Archive Operator")
+        real_role = current_user.get("role") or "The Keeper"
 
         cur.execute("SET LOCAL request.jwt.claim.username = %s;", (real_name,))
         cur.execute("SET LOCAL request.jwt.claim.role = %s;", (real_role,))
@@ -367,13 +369,13 @@ def create_work(
                 payload.title, 
                 payload.language, 
                 payload.category or None, 
-                payload.genre if (payload.genre and payload.genre.strip() != "") else None,
+                payload.genre if (payload.genre and payload.genre.strip() != "") else None, 
                 payload.author if (payload.author and payload.author.strip() != "") else "Unknown", 
                 payload.publisher or None, 
-                payload.original_language or None,
+                payload.original_language or None, 
                 payload.ddc or None, 
                 payload.notes or None, 
-                payload.translation_compilation or None,
+                payload.translation_compilation or None, 
                 safe_year, 
                 payload.isbn or None, 
                 final_call_no
@@ -382,7 +384,6 @@ def create_work(
 
         work_id = cur.fetchone()[0]
 
-        # Resolve the controlled author authority for this work.
         author_name = (
             payload.author.strip()
             if payload.author and payload.author.strip()
@@ -418,13 +419,46 @@ def create_work(
             INSERT INTO public.items (
                 work_id, accession_no, call_no, availability_status, is_deleted, created_at
             ) VALUES (%s, %s, %s, 'AVAILABLE', 'f', NOW())
+            RETURNING serial_no
         """
         cur.execute(item_query, (work_id, final_accession_no, final_call_no))
+        created_serial_no = cur.fetchone()[0]
 
         conn.commit()
+
+        log_audit_activity(
+            request=request,
+            user_id=str(token_user_id),
+            username=real_name,
+            role=real_role,
+            designation=real_role,
+            category="CATALOGUE",
+            action_type="ACCESSION_WORK",
+            target_entity="WORK",
+            target_id=str(work_id),
+            endpoint=request.url.path,
+            http_method="POST",
+            justification=x_change_reason,
+            diff_payload={
+                "work_id": work_id,
+                "serial_no": created_serial_no,
+                "accession_no": final_accession_no,
+                "title": payload.title,
+                "author": author_name,
+                "language": payload.language,
+                "call_no": final_call_no
+            },
+            extra_metadata={
+                "work_id": work_id,
+                "serial_no": created_serial_no,
+                "accession_no": final_accession_no
+            }
+        )
+
         return {
             "work_id": work_id,
-            "accession_no": final_accession_no
+            "accession_no": final_accession_no,
+            "serial_no": created_serial_no
         }
     except Exception as e:
         if conn:
@@ -444,7 +478,7 @@ def get_book(serial_no: int, current_user: dict = Depends(get_current_user)):
             SELECT  
                 i.serial_no, 
                 i.accession_no, 
-                i.shelf,
+                i.shelf, 
                 i.work_id, 
                 w.language as language, 
                 w.title, 
@@ -570,7 +604,7 @@ def get_catalogue(
         cur.close()
         conn.close()
 
-# --- AFTER ---
+# --- 2. UPDATE LEDGER RECORD ---
 @router.patch("/{serial_no}", dependencies=[Depends(require_role(["The Chief"]))])
 @audit_action(
     "UPDATE_LEDGER",
@@ -593,8 +627,8 @@ async def update_ledger_record(
         token_user_id = int(current_user.get("user_id"))
         lookup_cur.execute("SELECT name FROM public.users WHERE user_id = %s", (token_user_id,))
         user_row = lookup_cur.fetchone()
-        real_name = user_row[0] if user_row else "SYSTEM_UNKNOWN"
-        real_role = current_user.get("role") or "SYSTEM_UNKNOWN"
+        real_name = user_row[0] if user_row else (current_user.get("username") or "Archive Operator")
+        real_role = current_user.get("role") or "The Chief"
     finally:
         lookup_cur.close()
         lookup_conn.close()
@@ -685,6 +719,33 @@ async def update_ledger_record(
             cur.execute("UPDATE public.items SET call_no = %s WHERE work_id = %s", (final_call_no, work_id))
 
         conn.commit()
+
+        log_audit_activity(
+            request=request,
+            user_id=str(token_user_id),
+            username=real_name,
+            role=real_role,
+            designation=real_role,
+            category="CATALOGUE",
+            action_type="UPDATE_LEDGER",
+            target_entity="ITEM",
+            target_id=str(serial_no),
+            endpoint=request.url.path,
+            http_method="PATCH",
+            justification=x_change_reason,
+            diff_payload={
+                "serial_no": serial_no,
+                "work_id": work_id,
+                "updated_fields": {k: v for k, v in payload.items() if v is not None},
+                "final_call_no": final_call_no
+            },
+            extra_metadata={
+                "serial_no": serial_no,
+                "work_id": work_id,
+                "device_id": x_device_id
+            }
+        )
+
         return {"status": "success", "call_no": final_call_no}
     except Exception as e:
         if conn: conn.rollback()
@@ -694,8 +755,7 @@ async def update_ledger_record(
         cur.close()
         conn.close()
 
-
-# --- AFTER ---
+# --- 3. CURATOR DECISION ---
 @router.post("/approve/{work_id}", tags=["Admin Operations"], dependencies=[Depends(require_role(["The Chief"]))])
 @audit_action(
     "CURATOR_DECISION",
@@ -722,17 +782,43 @@ async def approve_work(
         if not row:
             raise HTTPException(status_code=404, detail="Work not found.")
 
+        work_title = row[0]
         conn.commit()
-        return {"message": f"Work '{row[0]}' {new_status}."}
+
+        log_audit_activity(
+            request=request,
+            user_id=str(current_user.get("user_id", "UNKNOWN")),
+            username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
+            role=str(current_user.get("role", "The Chief")),
+            designation=str(current_user.get("designation") or current_user.get("role", "The Chief")),
+            category="ARCHIVAL_GOVERNANCE",
+            action_type="CURATOR_DECISION",
+            target_entity="WORK",
+            target_id=str(work_id),
+            endpoint=request.url.path,
+            http_method="POST",
+            justification=reason,
+            diff_payload={
+                "work_id": work_id,
+                "title": work_title,
+                "decision": new_status,
+                "reason": reason
+            },
+            extra_metadata={
+                "work_id": work_id,
+                "decision": new_status
+            }
+        )
+
+        return {"message": f"Work '{work_title}' {new_status}."}
     except Exception as e:
         if conn: conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise e
     finally:
         cur.close()
         conn.close()
 
-
-# --- AFTER ---
+# --- 4. DEACCESSION ---
 @router.delete("/{book_id}", tags=["Catalogue Operations"], dependencies=[Depends(require_role(["The Chief"]))])
 @audit_action(
     "DEACCESSION",
@@ -751,13 +837,46 @@ async def soft_delete_book(
             UPDATE public.items 
             SET is_deleted = TRUE, deletion_reason = %s 
             WHERE serial_no = %s
+            RETURNING work_id, accession_no
         """, (reason, book_id))
         
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Item not found.")
+
+        work_id, accession_no = row
         conn.commit()
+
+        log_audit_activity(
+            request=request,
+            user_id=str(current_user.get("user_id", "UNKNOWN")),
+            username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
+            role=str(current_user.get("role", "The Chief")),
+            designation=str(current_user.get("designation") or current_user.get("role", "The Chief")),
+            category="CATALOGUE",
+            action_type="DEACCESSION",
+            target_entity="ITEM",
+            target_id=str(book_id),
+            endpoint=request.url.path,
+            http_method="DELETE",
+            justification=reason,
+            diff_payload={
+                "serial_no": book_id,
+                "work_id": work_id,
+                "accession_no": accession_no,
+                "is_deleted": True,
+                "deletion_reason": reason
+            },
+            extra_metadata={
+                "serial_no": book_id,
+                "accession_no": accession_no
+            }
+        )
+
         return {"status": "success"}
     except Exception as e:
         if conn: conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise e
     finally:
         cur.close()
         conn.close()

@@ -55,8 +55,8 @@
             </p>
           </div>
 
+          <!-- STEP 1: IDENTITY -->
           <form v-if="currentStep === 1" @submit.prevent="verifyIdentity">
-
             <div class="input-group">
               <label>Archive Identity</label>
 
@@ -79,8 +79,8 @@
             </button>
           </form>
 
+          <!-- STEP 2: PASSWORD -->
           <form v-if="currentStep === 2" @submit.prevent="verifyPassword">
-
             <div class="input-group">
               <label>Password</label>
 
@@ -139,23 +139,46 @@
             <button class="action-btn" type="submit" :disabled="loading">
               {{ loading ? 'Authenticating...' : 'Verify Password' }}
             </button>
+
+            <button
+              type="button"
+              class="back-btn"
+              @click="currentStep = 1; passkey = ''; errorMessage = ''"
+              :disabled="loading"
+            >
+              ← Change Operator ID
+            </button>
           </form>
 
+          <!-- STEP 3: 2FA TOKEN -->
           <form v-if="currentStep === 3" @submit.prevent="verifyTwoFA">
-
             <div class="input-group">
-              <label>2FA Token</label>
+              <label>2FA Token (Authenticator App)</label>
 
               <input
                 v-model="tokenPin"
                 type="text"
                 required
+                maxlength="6"
                 placeholder="000000"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                autocomplete="one-time-code"
+                autofocus
               />
             </div>
 
-            <button class="action-btn" type="submit" :disabled="loading">
+            <button class="action-btn" type="submit" :disabled="loading || tokenPin.length !== 6">
               {{ loading ? 'Verifying...' : 'Verify Code' }}
+            </button>
+
+            <button
+              type="button"
+              class="back-btn"
+              @click="currentStep = 2; tokenPin = ''; errorMessage = ''"
+              :disabled="loading"
+            >
+              ← Back to Password
             </button>
           </form>
 
@@ -173,10 +196,10 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth' // 1. IMPORT THE STORE
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
-const authStore = useAuthStore() // 2. INITIALIZE THE STORE
+const authStore = useAuthStore()
 
 const currentStep = ref(1)
 
@@ -184,9 +207,12 @@ const identityDigits = ref('')
 const fullOperatorId = ref('')
 const passkey = ref('')
 const tokenPin = ref('')
+const temp2faToken = ref('')
 
 const loading = ref(false)
 const errorMessage = ref('')
+const rememberMe = ref(false)
+const showPassword = ref(false)
 
 const handleIdentityInput = () => {
   identityDigits.value = identityDigits.value
@@ -194,9 +220,6 @@ const handleIdentityInput = () => {
     .replace(/[^A-Z0-9]/g, '')
     .slice(0, 5)
 }
-
-const rememberMe = ref(false)
-const showPassword = ref(false)
 
 // --- STEP 1: IDENTITY ---
 const verifyIdentity = async () => {
@@ -235,7 +258,6 @@ const verifyIdentity = async () => {
 }
 
 // --- STEP 2: PASSWORD ---
-// --- STEP 2: PASSWORD ---
 const verifyPassword = async () => {
   loading.value = true
   errorMessage.value = ''
@@ -244,7 +266,7 @@ const verifyPassword = async () => {
     const formData = new URLSearchParams()
     formData.append('username', fullOperatorId.value)
     formData.append('password', passkey.value)
-    formData.append('remember_me', rememberMe.value)
+    formData.append('remember_me', String(rememberMe.value))
 
     const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
     const response = await fetch(`${baseUrl}/token`, {
@@ -256,9 +278,6 @@ const verifyPassword = async () => {
     })
 
     const data = await response.json()
-    
-    // DIAGNOSTIC LOG: This will show us exactly what the backend sent!
-    console.log("BACKEND LOGIN RESPONSE:", data)
 
     if (!response.ok) {
       if (data.detail === '2FA verification required') {
@@ -268,30 +287,34 @@ const verifyPassword = async () => {
       throw new Error(data.detail || 'Authentication failed')
     }
 
-    // THE FIX: We must ensure access_token is actually present before logging in.
-    // Sometimes backends return 'token', 'access', or 'jwt' instead of 'access_token'.
+    // Intercept 2FA challenge response
+    if (data.twofa_required) {
+      temp2faToken.value = data.temp_token
+      currentStep.value = 3
+      return
+    }
+
     const token = data.access_token || data.access || data.token
     
     if (!token) {
       throw new Error("Backend did not return a valid token. Check the console log.")
     }
 
-    // 3. THE PINIA MAGIC
-    authStore.login(
-      { 
-        access_token: token, 
-        refresh_token: data.refresh_token // Safely undefined if not provided
+    await authStore.login(
+      {
+        access_token: token,
+        refresh_token: data.refresh_token
       },
-      { 
-        name: data.user_name || data.username || "Archive Operator", 
-        role: data.role || data.user_role || "The Seeker" 
+      {
+        id: data.user_id || data.operator_id,
+        user_id: data.user_id,
+        operator_id: data.operator_id,
+        name: data.user_name || data.username || "Archive Operator",
+        role: data.role || data.user_role || "The Seeker"
       }
     )
 
-    // Force a small delay so Pinia saves to localStorage before the router moves
-    setTimeout(() => {
-      router.push('/dashboard')
-    }, 50)
+    router.push('/dashboard')
 
   } catch (error) {
     errorMessage.value = error.message
@@ -300,29 +323,46 @@ const verifyPassword = async () => {
   }
 }
 
-// --- STEP 3: 2FA ---
+// --- STEP 3: 2FA VERIFICATION ---
 const verifyTwoFA = async () => {
   loading.value = true
   errorMessage.value = ''
 
   try {
-    const formData = new URLSearchParams()
-    formData.append('username', fullOperatorId.value)
-    formData.append('password', passkey.value)
-    formData.append('remember_me', rememberMe.value)
-    formData.append('totp_code', tokenPin.value)
-
     const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
-    const response = await fetch(`${baseUrl}/token`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: formData
-    })
+    let response
+    let data
 
-    const data = await response.json()
-    console.log("BACKEND 2FA RESPONSE:", data)
+    if (temp2faToken.value) {
+      response = await fetch(`${baseUrl}/login/verify-2fa`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          temp_token: temp2faToken.value,
+          totp_code: tokenPin.value.trim(),
+          remember_me: rememberMe.value
+        })
+      })
+      data = await response.json()
+    } else {
+      // Fallback for direct token authentication
+      const formData = new URLSearchParams()
+      formData.append('username', fullOperatorId.value)
+      formData.append('password', passkey.value)
+      formData.append('remember_me', String(rememberMe.value))
+      formData.append('otp_code', tokenPin.value.trim())
+
+      response = await fetch(`${baseUrl}/token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: formData
+      })
+      data = await response.json()
+    }
 
     if (!response.ok) {
       throw new Error(data.detail || '2FA verification failed')
@@ -334,17 +374,25 @@ const verifyTwoFA = async () => {
       throw new Error("Backend did not return a valid token after 2FA.")
     }
 
-    authStore.login(
-      { access_token: token, refresh_token: data.refresh_token },
-      { name: data.user_name || data.username || "Archive Operator", role: data.role || data.user_role || "The Seeker" }
+    await authStore.login(
+      { 
+        access_token: token, 
+        refresh_token: data.refresh_token 
+      },
+      { 
+        id: data.user_id || data.operator_id,
+        user_id: data.user_id,
+        operator_id: data.operator_id,
+        name: data.user_name || data.username || "Archive Operator", 
+        role: data.role || data.user_role || "The Seeker" 
+      }
     )
 
-    setTimeout(() => {
-      router.push('/dashboard')
-    }, 50)
+    router.push('/dashboard')
 
   } catch (error) {
     errorMessage.value = error.message
+    tokenPin.value = ''
   } finally {
     loading.value = false
   }
@@ -444,26 +492,6 @@ const verifyTwoFA = async () => {
   margin-bottom: 30px;
 }
 
-.security-metrics {
-  display: flex;
-  gap: 20px;
-}
-
-.metric-box {
-  display: flex;
-  flex-direction: column;
-}
-
-.metric-val {
-  color: white;
-  font-weight: bold;
-}
-
-.metric-lbl {
-  color: gray;
-  font-size: 12px;
-}
-
 /* RIGHT PANEL */
 .form-panel {
   flex: 1;
@@ -505,6 +533,11 @@ const verifyTwoFA = async () => {
   border: 1px solid #222;
   color: white;
   border-radius: 6px;
+  outline: none;
+}
+
+.input-group input:focus {
+  border-color: #6366f1;
 }
 
 .action-btn {
@@ -515,6 +548,7 @@ const verifyTwoFA = async () => {
   border: none;
   cursor: pointer;
   border-radius: 6px;
+  font-weight: bold;
 }
 
 .action-btn:disabled {
@@ -522,18 +556,31 @@ const verifyTwoFA = async () => {
   cursor: not-allowed;
 }
 
-.checkbox-label {
-  color: gray;
+.back-btn {
+  width: 100%;
+  padding: 10px;
+  background: transparent;
+  color: #666;
+  border: none;
+  margin-top: 12px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: color 0.2s;
+}
+
+.back-btn:hover:not(:disabled) {
+  color: #aaa;
+}
+
+.back-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .error-message {
-  color: red;
+  color: #ef4444;
   margin-top: 20px;
-}
-
-.panel-footer {
-  margin-top: 30px;
-  color: gray;
+  font-size: 14px;
 }
 
 .terminal-icon {
@@ -566,8 +613,12 @@ const verifyTwoFA = async () => {
   padding: 0 14px;
 }
 
+.input-shell:focus-within {
+  border-color: #6366f1;
+}
+
 .input-prefix {
-  color: rgba(16, 173, 194, 0.28);
+  color: rgba(16, 173, 194, 0.45);
   letter-spacing: 2px;
   font-weight: normal;
   margin-right: 2px;
@@ -614,6 +665,11 @@ const verifyTwoFA = async () => {
   border: 1px solid #222;
   color: white;
   border-radius: 6px;
+  outline: none;
+}
+
+.password-wrapper input:focus {
+  border-color: #6366f1;
 }
 
 .toggle-password {

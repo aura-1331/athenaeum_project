@@ -1,4 +1,5 @@
 # app/routers/authority.py
+
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -7,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.auth import get_current_user, require_role
 from app.database import get_db_connection
 from app.audit_utils import audit_action
+from app.services.audit_service import log_audit_activity
 
 
 # ============================================================
@@ -107,7 +109,7 @@ def _transition_authority_status(
     user_id: Any,
     reason: str
 ) -> Dict[str, Any]:
-    """Locks the record, validates state, appends mandatory audit reason to notes, and updates DB."""
+    """Locks the record, validates state, appends audit reason to notes, and updates DB."""
     if not reason or not reason.strip():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -139,7 +141,6 @@ def _transition_authority_status(
             detail=conflict_detail
         )
 
-    # Append timestamped audit note
     append_note = f"[{note_tag} by User {user_id}]: {reason.strip()}"
     updated_notes = f"{existing_notes}\n{append_note}".strip()
 
@@ -181,7 +182,9 @@ def _transition_authority_status(
     )
 
     columns = [desc[0] for desc in cur.description]
-    return dict(zip(columns, cur.fetchone()))
+    res_dict = dict(zip(columns, cur.fetchone()))
+    res_dict["_previous_status"] = current_status
+    return res_dict
 
 
 def _verify_editable_authority(cur, authority_id: int):
@@ -337,11 +340,17 @@ def update_authority_details(
     )
     row = cur.fetchone()
 
+    old_state = {
+        "preferred_name": row[0],
+        "authority_type": row[1],
+        "authority_code": row[2],
+        "notes": row[3]
+    }
+
     updated_preferred_name = payload.preferred_name if payload.preferred_name is not None else row[0]
     updated_authority_type = payload.authority_type if payload.authority_type is not None else row[1]
     updated_authority_code = payload.authority_code if payload.authority_code is not None else row[2]
     
-    # Append mandatory edit reason to existing notes
     existing_notes = row[3] or ""
     append_note = f"[UPDATED by User {current_user['user_id']}]: {payload.reason.strip()}"
     final_notes = f"{payload.notes or existing_notes}\n{append_note}".strip()
@@ -376,10 +385,45 @@ def update_authority_details(
     conn.commit()
 
     columns = [desc[0] for desc in cur.description]
+    authority_data = dict(zip(columns, result))
+
+    actor_id = str(current_user.get("user_id", "UNKNOWN"))
+    actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
+    actor_role = str(current_user.get("role", "The Chief"))
+
+    log_audit_activity(
+        request=request,
+        user_id=actor_id,
+        username=actor_name,
+        role=actor_role,
+        designation=str(current_user.get("designation") or actor_role),
+        category="AUTHORITY_CONTROL",
+        action_type="AUTHORITY_UPDATE",
+        target_entity="AUTHORITY",
+        target_id=str(authority_id),
+        endpoint=request.url.path,
+        http_method="PUT",
+        justification=payload.reason,
+        diff_payload={
+            "authority_id": authority_id,
+            "previous": old_state,
+            "updated": {
+                "preferred_name": updated_preferred_name,
+                "authority_type": updated_authority_type,
+                "authority_code": updated_authority_code,
+                "notes": final_notes
+            }
+        },
+        extra_metadata={
+            "authority_id": authority_id,
+            "authority_code": updated_authority_code
+        }
+    )
+
     return {
         "status": "success",
         "message": "Authority record updated successfully.",
-        "authority": dict(zip(columns, result))
+        "authority": authority_data
     }
 
 
@@ -409,7 +453,38 @@ def verify_authority(
         user_id=current_user["user_id"],
         reason=payload.reason
     )
+    prev_status = result.pop("_previous_status", "PROVISIONAL")
     conn.commit()
+
+    actor_id = str(current_user.get("user_id", "UNKNOWN"))
+    actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
+    actor_role = str(current_user.get("role", "The Chief"))
+
+    log_audit_activity(
+        request=request,
+        user_id=actor_id,
+        username=actor_name,
+        role=actor_role,
+        designation=str(current_user.get("designation") or actor_role),
+        category="AUTHORITY_CONTROL",
+        action_type="AUTHORITY_VERIFY",
+        target_entity="AUTHORITY",
+        target_id=str(authority_id),
+        endpoint=request.url.path,
+        http_method="PATCH",
+        justification=payload.reason,
+        diff_payload={
+            "authority_id": authority_id,
+            "authority_code": result.get("authority_code"),
+            "preferred_name": result.get("preferred_name"),
+            "status_transition": {"from": prev_status, "to": "VERIFIED"}
+        },
+        extra_metadata={
+            "authority_id": authority_id,
+            "authority_code": result.get("authority_code")
+        }
+    )
+
     return {"status": "success", "message": "Authority verified successfully.", "authority": result}
 
 
@@ -439,7 +514,38 @@ def reject_authority(
         user_id=current_user["user_id"],
         reason=payload.reason
     )
+    prev_status = result.pop("_previous_status", "PROVISIONAL")
     conn.commit()
+
+    actor_id = str(current_user.get("user_id", "UNKNOWN"))
+    actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
+    actor_role = str(current_user.get("role", "The Chief"))
+
+    log_audit_activity(
+        request=request,
+        user_id=actor_id,
+        username=actor_name,
+        role=actor_role,
+        designation=str(current_user.get("designation") or actor_role),
+        category="AUTHORITY_CONTROL",
+        action_type="AUTHORITY_REJECT",
+        target_entity="AUTHORITY",
+        target_id=str(authority_id),
+        endpoint=request.url.path,
+        http_method="PATCH",
+        justification=payload.reason,
+        diff_payload={
+            "authority_id": authority_id,
+            "authority_code": result.get("authority_code"),
+            "preferred_name": result.get("preferred_name"),
+            "status_transition": {"from": prev_status, "to": "REJECTED"}
+        },
+        extra_metadata={
+            "authority_id": authority_id,
+            "authority_code": result.get("authority_code")
+        }
+    )
+
     return {"status": "success", "message": "Authority rejected successfully.", "authority": result}
 
 
@@ -469,7 +575,38 @@ def reopen_authority(
         user_id=current_user["user_id"],
         reason=payload.reason
     )
+    prev_status = result.pop("_previous_status", "UNKNOWN")
     conn.commit()
+
+    actor_id = str(current_user.get("user_id", "UNKNOWN"))
+    actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
+    actor_role = str(current_user.get("role", "The Chief"))
+
+    log_audit_activity(
+        request=request,
+        user_id=actor_id,
+        username=actor_name,
+        role=actor_role,
+        designation=str(current_user.get("designation") or actor_role),
+        category="AUTHORITY_CONTROL",
+        action_type="AUTHORITY_REOPEN",
+        target_entity="AUTHORITY",
+        target_id=str(authority_id),
+        endpoint=request.url.path,
+        http_method="PATCH",
+        justification=payload.reason,
+        diff_payload={
+            "authority_id": authority_id,
+            "authority_code": result.get("authority_code"),
+            "preferred_name": result.get("preferred_name"),
+            "status_transition": {"from": prev_status, "to": "PROVISIONAL"}
+        },
+        extra_metadata={
+            "authority_id": authority_id,
+            "authority_code": result.get("authority_code")
+        }
+    )
+
     return {"status": "success", "message": "Authority re-opened for provisional review.", "authority": result}
 
 
@@ -532,10 +669,42 @@ def create_variant(
     conn.commit()
 
     columns = [desc[0] for desc in cur.description]
+    variant_data = dict(zip(columns, result))
+
+    actor_id = str(current_user.get("user_id", "UNKNOWN"))
+    actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
+    actor_role = str(current_user.get("role", "The Chief"))
+
+    log_audit_activity(
+        request=request,
+        user_id=actor_id,
+        username=actor_name,
+        role=actor_role,
+        designation=str(current_user.get("designation") or actor_role),
+        category="AUTHORITY_CONTROL",
+        action_type="AUTHORITY_VARIANT_CREATE",
+        target_entity="AUTHORITY_VARIANT",
+        target_id=str(variant_data["variant_id"]),
+        endpoint=request.url.path,
+        http_method="POST",
+        justification=payload.reason,
+        diff_payload={
+            "authority_id": authority_id,
+            "variant_id": variant_data["variant_id"],
+            "variant_name": payload.variant_name,
+            "variant_type": payload.variant_type,
+            "notes": formatted_notes
+        },
+        extra_metadata={
+            "authority_id": authority_id,
+            "variant_id": variant_data["variant_id"]
+        }
+    )
+
     return {
         "status": "success",
         "message": "Variant created successfully.",
-        "variant": dict(zip(columns, result))
+        "variant": variant_data
     }
 
 
@@ -575,6 +744,12 @@ def update_variant(
             detail="Variant record not found for this authority."
         )
 
+    old_variant_state = {
+        "variant_name": v_row[1],
+        "variant_type": v_row[2],
+        "notes": v_row[3]
+    }
+
     updated_name = payload.variant_name if payload.variant_name is not None else v_row[1]
     updated_type = payload.variant_type if payload.variant_type is not None else v_row[2]
     
@@ -612,10 +787,45 @@ def update_variant(
     conn.commit()
 
     columns = [desc[0] for desc in cur.description]
+    variant_data = dict(zip(columns, result))
+
+    actor_id = str(current_user.get("user_id", "UNKNOWN"))
+    actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
+    actor_role = str(current_user.get("role", "The Chief"))
+
+    log_audit_activity(
+        request=request,
+        user_id=actor_id,
+        username=actor_name,
+        role=actor_role,
+        designation=str(current_user.get("designation") or actor_role),
+        category="AUTHORITY_CONTROL",
+        action_type="AUTHORITY_VARIANT_UPDATE",
+        target_entity="AUTHORITY_VARIANT",
+        target_id=str(variant_id),
+        endpoint=request.url.path,
+        http_method="PUT",
+        justification=payload.reason,
+        diff_payload={
+            "authority_id": authority_id,
+            "variant_id": variant_id,
+            "previous": old_variant_state,
+            "updated": {
+                "variant_name": updated_name,
+                "variant_type": updated_type,
+                "notes": updated_notes
+            }
+        },
+        extra_metadata={
+            "authority_id": authority_id,
+            "variant_id": variant_id
+        }
+    )
+
     return {
         "status": "success",
         "message": "Variant updated successfully.",
-        "variant": dict(zip(columns, result))
+        "variant": variant_data
     }
 
 
@@ -640,21 +850,66 @@ def delete_variant(
 
     cur.execute(
         """
+        SELECT variant_id, variant_name, variant_type, notes
+        FROM public.authority_variants
+        WHERE variant_id = %s AND authority_id = %s
+        FOR UPDATE
+        """,
+        (variant_id, authority_id)
+    )
+    v_row = cur.fetchone()
+
+    if not v_row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Variant record not found for this authority."
+        )
+
+    deleted_variant_info = {
+        "variant_name": v_row[1],
+        "variant_type": v_row[2],
+        "notes": v_row[3]
+    }
+
+    cur.execute(
+        """
         DELETE FROM public.authority_variants
         WHERE variant_id = %s AND authority_id = %s
         RETURNING variant_id
         """,
         (variant_id, authority_id)
     )
-    deleted = cur.fetchone()
-
-    if not deleted:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Variant record not found for this authority."
-        )
-
+    cur.fetchone()
     conn.commit()
+
+    actor_id = str(current_user.get("user_id", "UNKNOWN"))
+    actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
+    actor_role = str(current_user.get("role", "The Chief"))
+
+    log_audit_activity(
+        request=request,
+        user_id=actor_id,
+        username=actor_name,
+        role=actor_role,
+        designation=str(current_user.get("designation") or actor_role),
+        category="AUTHORITY_CONTROL",
+        action_type="AUTHORITY_VARIANT_DELETE",
+        target_entity="AUTHORITY_VARIANT",
+        target_id=str(variant_id),
+        endpoint=request.url.path,
+        http_method="DELETE",
+        justification=payload.reason,
+        diff_payload={
+            "authority_id": authority_id,
+            "variant_id": variant_id,
+            "deleted": deleted_variant_info
+        },
+        extra_metadata={
+            "authority_id": authority_id,
+            "variant_id": variant_id
+        }
+    )
+
     return {
         "status": "success",
         "message": f"Variant ID {variant_id} deleted successfully."

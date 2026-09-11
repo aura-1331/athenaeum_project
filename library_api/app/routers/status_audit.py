@@ -4,12 +4,13 @@ import re
 import traceback
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Query, Request, HTTPException
+from fastapi import APIRouter, Query, Request, HTTPException, Depends
 from pydantic import BaseModel
 import psycopg2.extras
 
 from app.database import get_connection
-from app.services.audit_service import log_audit_activity
+from app.auth import get_current_user
+from app.services.audit_service import log_audit_activity, verify_audit_ledger
 
 router = APIRouter(prefix="/status_audit", tags=["Status & Auditing"])
 
@@ -124,6 +125,7 @@ def get_system_logs(
             ts_val = r.get("timestamp")
             items.append({
                 "id": str(r.get("id") or ""),
+                "sequence_id": r.get("sequence_id"),
                 "timestamp": str(ts_val) if ts_val else "",
                 "actor_username": r.get("username") or f"User #{r.get('user_id', 'SYS')}",
                 "user_id": str(r.get("user_id") or "SYS"),
@@ -139,7 +141,9 @@ def get_system_logs(
                 "detailed_diffs": r.get("diff_payload"),
                 "category": r.get("category"),
                 "endpoint": r.get("endpoint"),
-                "http_method": r.get("http_method")
+                "http_method": r.get("http_method"),
+                "prev_hash": r.get("prev_hash"),
+                "record_hash": r.get("record_hash")
             })
 
         return {
@@ -346,6 +350,120 @@ def get_user_sessions(user_id: Optional[str] = None, limit: int = 50, offset: in
             }
             for r in rows
         ]
+    except Exception as e:
+        conn.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ------------------------------------------------------------
+# 4. CRYPTOGRAPHIC LEDGER VERIFICATION
+# ------------------------------------------------------------
+@router.get("/ledger/verify")
+def get_ledger_verification(current_user: dict = Depends(get_current_user)):
+    if current_user.get("role") != "The Chief":
+        raise HTTPException(status_code=403, detail="Chief access required.")
+
+    result = verify_audit_ledger()
+    print("DEBUG LEDGER RESULT:", result)  # <--- ADD THIS LINE
+
+    # If the ledger was tampered with, log it to the security_incidents table
+    status_str = str(result.get("status") or "").upper()
+    if status_str in ("TAMPERED", "COMPROMISED", "INVALID"):
+        compromised_seq = result.get("sequence_id") or result.get("record_id")
+        reason_text = result.get("reason") or result.get("detail") or "Cryptographic mismatch"
+
+        conn = get_connection()
+        cur = conn.cursor()
+        try:
+            # Check if an unresolved incident already exists for this node
+            cur.execute("""
+                SELECT id FROM security_incidents 
+                WHERE compromised_sequence_id = %s AND resolved = FALSE
+                LIMIT 1
+            """, (compromised_seq,))
+            existing = cur.fetchone()
+
+            if not existing:
+                cur.execute("""
+                    INSERT INTO security_incidents (
+                        incident_type, 
+                        severity, 
+                        compromised_sequence_id, 
+                        details, 
+                        resolved
+                    )
+                    VALUES (
+                        'CHAIN_INTEGRITY_BREACH',
+                        'CRITICAL',
+                        %s,
+                        %s,
+                        FALSE
+                    )
+                """, (compromised_seq, f"Breach detected: {reason_text}"))
+                conn.commit()
+                print("[INCIDENT INSERT SUCCESS] New breach ticket created!")
+            else:
+                print(f"[INCIDENT SKIPPED] Unresolved ticket already exists for node #{compromised_seq}")
+        except Exception as e:
+            conn.rollback()
+            print(f"[SECURITY ALERT ERROR]: {type(e).__name__} - {e}")
+            traceback.print_exc()
+        finally:
+            cur.close()
+            conn.close()
+    return result
+
+# ------------------------------------------------------------
+# 5. RESTRICTED SECURITY INCIDENTS (CHIEF ONLY)
+# ------------------------------------------------------------
+@router.get("/security-incidents")
+def get_security_incidents(current_user: dict = Depends(get_current_user)):
+    # Restrict strictly to higher authority
+    if current_user.get("role") != "The Chief":
+        raise HTTPException(
+            status_code=403, 
+            detail="Access denied. Authorized executive clearance required."
+        )
+
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    try:
+        cur.execute("""
+            SELECT 
+                id, 
+                incident_type, 
+                severity, 
+                compromised_sequence_id, 
+                detected_at, 
+                details, 
+                resolved
+            FROM security_incidents
+            ORDER BY detected_at DESC
+        """)
+        rows = cur.fetchall()
+
+        # Format output
+        incidents = []
+        for r in rows:
+            incidents.append({
+                "id": r["id"],
+                "incident_type": r["incident_type"],
+                "severity": r["severity"],
+                "compromised_node": r["compromised_sequence_id"],
+                "detected_at": str(r["detected_at"]) if r["detected_at"] else "",
+                "details": r["details"],
+                "resolved": r["resolved"]
+            })
+
+        return {
+            "total": len(incidents),
+            "incidents": incidents
+        }
     except Exception as e:
         conn.rollback()
         traceback.print_exc()

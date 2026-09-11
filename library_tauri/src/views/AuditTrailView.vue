@@ -11,6 +11,11 @@
         <p class="page-subtitle">
           Tamper-evident operational event stream. Inspect field-level deltas, cryptographic identifiers, operator justifications, and terminal context.
         </p>
+
+        <!-- Ledger Cryptographic Verification Badge -->
+        <div style="margin-top: 14px;">
+          <LedgerIntegrityBadge />
+        </div>
       </div>
 
       <div class="kpi-strip">
@@ -67,6 +72,7 @@
         <thead>
           <tr>
             <th style="width: 44px;"></th>
+            <th style="width: 80px;" class="text-center">NODE</th>
             <th class="text-left">TIMESTAMP (IST)</th>
             <th class="text-left">OPERATOR</th>
             <th>ROLE</th>
@@ -77,7 +83,7 @@
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="7" class="table-notice">
+            <td colspan="8" class="table-notice">
               <div class="loading-state">
                 <span class="spinner-dot"></span>
                 <span>Retrieving encrypted audit sequence...</span>
@@ -86,7 +92,7 @@
           </tr>
 
           <tr v-else-if="logs.length === 0">
-            <td colspan="7" class="table-notice">
+            <td colspan="8" class="table-notice">
               <div class="empty-state">
                 <span class="empty-icon">🛡️</span>
                 <p>No audit events match the specified filter query.</p>
@@ -102,6 +108,9 @@
             >
               <td class="text-center">
                 <span class="chevron-icon" :class="{ 'chevron-rotated': expandedRows.has(log.id) }">▶</span>
+              </td>
+              <td class="text-center">
+                <span class="node-pill">#{{ log.sequence_id ?? '—' }}</span>
               </td>
               <td class="font-mono text-muted text-left">
                 {{ formatDate(log.timestamp) }}
@@ -132,7 +141,7 @@
             </tr>
 
             <tr v-if="expandedRows.has(log.id)" class="details-expansion-tray">
-              <td colspan="7">
+              <td colspan="8">
                 <div class="tray-inner-wrapper">
                   
                   <div class="meta-grid-specs">
@@ -228,6 +237,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import LedgerIntegrityBadge from '@/components/LedgerIntegrityBadge.vue'
 
 const authStore = useAuthStore()
 
@@ -245,11 +255,9 @@ let debounceTimer = null
 
 const maxPages = computed(() => Math.ceil(totalLogs.value / pageLimit.value) || 1)
 
-// KPI Computations
 const deleteCount = computed(() => logs.value.filter(l => (l.action_type || '').toUpperCase() === 'DELETE').length)
 const uniqueActorsCount = computed(() => new Set(logs.value.map(l => l.actor_username || l.user_id)).size)
 
-// Extract the active token from Pinia or localStorage fallbacks
 function getToken() {
   return (
     authStore.token ||
@@ -368,7 +376,6 @@ function formatDate(raw) {
       m[type] = value
     }
 
-    // Output: 08-09-2026 TUESDAY 20:56:28
     return `${m.day}-${m.month}-${m.year} ${m.weekday.toUpperCase()} ${m.hour}:${m.minute}:${m.second}`
   } catch {
     return raw
@@ -647,6 +654,20 @@ onMounted(() => fetchLogs())
 .chevron-rotated {
   transform: rotate(90deg);
   color: #3b82f6;
+}
+
+/* NODE PILL */
+.node-pill {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  padding: 2px 7px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  display: inline-block;
 }
 
 /* CELL COMPONENTS */

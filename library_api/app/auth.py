@@ -141,11 +141,13 @@ async def login(
             SELECT
                 user_id,
                 hashed_password,
-                role
+                role,
+                name,
+                operator_id
             FROM users
-            WHERE login_id = %s
+            WHERE UPPER(operator_id) = UPPER(%s) OR login_id = %s
             """,
-            (username,)
+            (username, username)
         )
 
         row = cur.fetchone()
@@ -160,6 +162,8 @@ async def login(
 
         user_id = row[0]
         role = row[2]
+        user_name = row[3]
+        operator_id = row[4]
 
         user_payload = {
             "sub": str(user_id),
@@ -192,7 +196,12 @@ async def login(
         )
 
         return {
-            "access_token": access_token
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user_id": str(user_id),
+            "user_name": user_name,
+            "role": role,
+            "operator_id": operator_id
         }
 
     finally:

@@ -2,16 +2,19 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from datetime import datetime, timedelta, timezone
-from app.auth import get_current_user, require_role
-from app.database import get_connection, record_audit, get_config_value
+from typing import Optional
 from pydantic import BaseModel
+
+from app.auth import get_current_user, require_role
+from app.database import get_connection, get_config_value
+from app.services.audit_service import log_audit_activity
 from app.audit_utils import audit_action
 
 router = APIRouter(prefix="/circulation", tags=["Circulation & Fines"])
 
 
 class ReturnRequest(BaseModel):
-    notes: str | None = None
+    notes: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------------------------------------------------#
@@ -27,8 +30,8 @@ class ReturnRequest(BaseModel):
 async def issue_book(
     serial_no: int,
     borrower_id: int,
+    request: Request,
     days: int = 14,
-    request: Request = None,
     current_user: dict = Depends(get_current_user)
 ):
     conn = get_connection()
@@ -109,7 +112,7 @@ async def issue_book(
             (serial_no,)
         )
 
-        # Record status transition
+        # Record physical status transition
         cur.execute(
             """
             INSERT INTO public.status_audit (
@@ -132,15 +135,36 @@ async def issue_book(
             )
         )
 
-        await record_audit(
-            current_user["user_id"],
-            "ISSUE_BOOK",
-            request,
-            str(loan_id),
-            f"Assigned item {serial_no} for research access"
-        )
-
         conn.commit()
+
+        # Cryptographic ledger anchor
+        log_audit_activity(
+            request=request,
+            user_id=str(current_user.get("user_id", "UNKNOWN")),
+            username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
+            role=str(current_user.get("role", "The Keeper")),
+            designation=str(current_user.get("designation") or current_user.get("role", "The Keeper")),
+            category="CIRCULATION",
+            action_type="ISSUE_BOOK",
+            target_entity="LOAN",
+            target_id=str(loan_id),
+            endpoint=request.url.path,
+            http_method="POST",
+            justification=f"Assigned item {serial_no} to borrower {borrower_id} for {days} days",
+            diff_payload={
+                "serial_no": serial_no,
+                "borrower_id": borrower_id,
+                "loan_id": loan_id,
+                "loan_days": days,
+                "due_date": due_date.isoformat(),
+                "status_transition": {"from": "AVAILABLE", "to": "IN_RESEARCH_USE"}
+            },
+            extra_metadata={
+                "serial_no": serial_no,
+                "borrower_id": borrower_id,
+                "due_date": due_date.isoformat()
+            }
+        )
 
         return {
             "loan_id": loan_id,
@@ -225,7 +249,7 @@ async def return_book(
             (serial_no,)
         )
 
-        # Record status transition
+        # Record physical status transition
         cur.execute(
             """
             INSERT INTO public.status_audit (
@@ -248,7 +272,7 @@ async def return_book(
             )
         )
 
-        fine_amount = 0
+        fine_amount = 0.0
         days_late = 0
 
         if return_date > due_date:
@@ -256,7 +280,7 @@ async def return_book(
 
             if days_late > 0:
                 rate = get_config_value("DAILY_FINE_RATE") or 10.0
-                fine_amount = days_late * float(rate)
+                fine_amount = float(days_late * float(rate))
 
                 cur.execute(
                     """
@@ -275,15 +299,37 @@ async def return_book(
                     )
                 )
 
-        await record_audit(
-            current_user["user_id"],
-            "RETURN_BOOK",
-            request,
-            str(loan_id),
-            f"Returned {serial_no}"
-        )
-
         conn.commit()
+
+        # Cryptographic ledger anchor
+        log_audit_activity(
+            request=request,
+            user_id=str(current_user.get("user_id", "UNKNOWN")),
+            username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
+            role=str(current_user.get("role", "The Keeper")),
+            designation=str(current_user.get("designation") or current_user.get("role", "The Keeper")),
+            category="CIRCULATION",
+            action_type="RETURN_BOOK",
+            target_entity="LOAN",
+            target_id=str(loan_id),
+            endpoint=request.url.path,
+            http_method="POST",
+            justification=f"Returned item {serial_no}. Notes: {return_data.notes or 'Standard return'}",
+            diff_payload={
+                "serial_no": serial_no,
+                "loan_id": loan_id,
+                "borrower_id": borrower_id,
+                "days_late": days_late,
+                "fine_assessed": fine_amount,
+                "notes": return_data.notes,
+                "status_transition": {"from": "IN_RESEARCH_USE", "to": "AVAILABLE"}
+            },
+            extra_metadata={
+                "serial_no": serial_no,
+                "borrower_id": borrower_id,
+                "fine_amount": fine_amount
+            }
+        )
 
         return {
             "status": "success",
@@ -408,19 +454,41 @@ async def pay_fine(
                 detail="Fine not found or already paid."
             )
 
-        await record_audit(
-            current_user["user_id"],
-            "PAY_FINE",
-            request,
-            str(fine_id),
-            f"Received {res[0]} from User {res[1]}"
-        )
+        amount_paid = float(res[0])
+        fine_user_id = res[1]
 
         conn.commit()
 
+        # Cryptographic ledger anchor
+        log_audit_activity(
+            request=request,
+            user_id=str(current_user.get("user_id", "UNKNOWN")),
+            username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
+            role=str(current_user.get("role", "The Keeper")),
+            designation=str(current_user.get("designation") or current_user.get("role", "The Keeper")),
+            category="FINANCE",
+            action_type="PAY_FINE",
+            target_entity="FINE",
+            target_id=str(fine_id),
+            endpoint=request.url.path,
+            http_method="POST",
+            justification=f"Received fine payment of {amount_paid} from user {fine_user_id}",
+            diff_payload={
+                "fine_id": fine_id,
+                "user_id": fine_user_id,
+                "amount_paid": amount_paid,
+                "status_transition": {"from": "UNPAID", "to": "PAID"}
+            },
+            extra_metadata={
+                "fine_id": fine_id,
+                "user_id": fine_user_id,
+                "amount": amount_paid
+            }
+        )
+
         return {
             "status": "paid",
-            "amount": res[0]
+            "amount": amount_paid
         }
 
     finally:

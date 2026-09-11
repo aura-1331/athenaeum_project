@@ -193,31 +193,57 @@
             </select>
           </div>
 
-<div class="form-group">
-  <label>INITIAL PASSPHRASE</label>
-  <div class="password-input-wrapper">
-    <input 
-      v-model="form.password" 
-      :type="showPassword ? 'text' : 'password'" 
-      placeholder="Min. 12 characters..." 
-      minlength="12"
-      required 
-    />
-    <button
-      type="button"
-      class="password-toggle-btn"
-      :title="showPassword ? 'Hide passphrase' : 'Show passphrase'"
-      tabindex="-1"
-      @click="showPassword = !showPassword"
-    >
-      <EyeOff v-if="showPassword" :size="16" :stroke-width="1.5" />
-      <Eye v-else :size="16" :stroke-width="1.5" />
-    </button>
-  </div>
-  <span class="field-hint">
-    Min. 12 chars with uppercase, lowercase, number & symbol
-  </span>
-</div>
+          <div class="form-group">
+            <div class="label-header">
+              <label>INITIAL PASSPHRASE</label>
+              <button 
+                type="button" 
+                class="generate-link-btn" 
+                @click="generateSecurePassphrase"
+              >
+                AUTO-GENERATE
+              </button>
+            </div>
+            <div class="password-input-wrapper">
+              <input 
+                v-model="form.password" 
+                :type="showPassword ? 'text' : 'password'" 
+                placeholder="Min. 12 characters..." 
+                minlength="12"
+                required 
+              />
+              <div class="input-actions">
+                <!-- One-click copy button -->
+                <button
+                  type="button"
+                  class="action-icon-btn"
+                  :class="{ copied: isCopied }"
+                  :title="isCopied ? 'Copied to clipboard!' : 'Copy passphrase'"
+                  :disabled="!form.password"
+                  tabindex="-1"
+                  @click="copyPassphrase"
+                >
+                  <Check v-if="isCopied" :size="15" :stroke-width="2.5" />
+                  <Copy v-else :size="15" :stroke-width="1.5" />
+                </button>
+
+                <!-- Visibility toggle -->
+                <button
+                  type="button"
+                  class="action-icon-btn"
+                  :title="showPassword ? 'Hide passphrase' : 'Show passphrase'"
+                  tabindex="-1"
+                  @click="showPassword = !showPassword"
+                >
+                  <EyeOff v-if="showPassword" :size="16" :stroke-width="1.5" />
+                  <Eye v-else :size="16" :stroke-width="1.5" />
+                </button>
+              </div>
+            </div>
+            <span class="field-hint">
+              Min. 12 chars with uppercase, lowercase, number & symbol
+            </span>
+          </div>
 
           <div class="modal-actions">
             <button type="button" class="action-btn cancel" @click="showModal = false">
@@ -237,7 +263,7 @@
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 import { useAuthStore } from '@/stores/auth'
-import { Eye, EyeOff } from 'lucide-vue-next'
+import { Eye, EyeOff, Copy, Check } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 
@@ -248,6 +274,7 @@ const loading = ref(false)
 const submitting = ref(false)
 const showModal = ref(false)
 const showPassword = ref(false)
+const isCopied = ref(false)
 
 const errorMessage = ref('')
 const successMessage = ref('')
@@ -283,6 +310,54 @@ function roleBadgeClass(role) {
   return 'badge-seeker'
 }
 
+function generateSecurePassphrase() {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'
+  const lower = 'abcdefghijkmnopqrstuvwxyz'
+  const digits = '23456789'
+  const symbols = '!@#$%&*?-_'
+  const allChars = upper + lower + digits + symbols
+
+  // Enforce password policy criteria
+  const chars = [
+    upper[crypto.getRandomValues(new Uint32Array(1))[0] % upper.length],
+    lower[crypto.getRandomValues(new Uint32Array(1))[0] % lower.length],
+    digits[crypto.getRandomValues(new Uint32Array(1))[0] % digits.length],
+    symbols[crypto.getRandomValues(new Uint32Array(1))[0] % symbols.length]
+  ]
+
+  // Expand to 16 characters total
+  const remaining = 16 - chars.length
+  const randomBytes = new Uint32Array(remaining)
+  crypto.getRandomValues(randomBytes)
+
+  for (let i = 0; i < remaining; i++) {
+    chars.push(allChars[randomBytes[i] % allChars.length])
+  }
+
+  // Fisher-Yates shuffle
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]]
+  }
+
+  form.value.password = chars.join('')
+  showPassword.value = true
+  isCopied.value = false
+}
+
+async function copyPassphrase() {
+  if (!form.value.password) return
+  try {
+    await navigator.clipboard.writeText(form.value.password)
+    isCopied.value = true
+    setTimeout(() => {
+      isCopied.value = false
+    }, 2000)
+  } catch (err) {
+    console.error('Clipboard copy failed:', err)
+  }
+}
+
 async function loadData() {
   loading.value = true
   errorMessage.value = ''
@@ -303,6 +378,7 @@ async function loadData() {
 function openProvisionModal() {
   modalError.value = ''
   showPassword.value = false
+  isCopied.value = false
   form.value = {
     name: '',
     email: '',
@@ -636,12 +712,46 @@ onMounted(() => {
   grid-column: span 2;
 }
 
+.form-group {
+  display: flex;
+  flex-direction: column;
+}
+
 .form-group label {
   display: block;
   font-size: 10px;
   font-weight: 700;
   color: #626a7a;
   margin-bottom: 6px;
+}
+
+.label-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.label-header label {
+  margin-bottom: 0;
+}
+
+.generate-link-btn {
+  background: none;
+  border: none;
+  color: #d4af37;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease;
+}
+
+.generate-link-btn:hover {
+  color: #facc15;
+  text-decoration: underline;
 }
 
 .form-group input,
@@ -665,26 +775,46 @@ onMounted(() => {
 }
 
 .password-input-wrapper input {
-  padding-right: 36px;
+  width: 100%;
+  box-sizing: border-box;
+  padding-right: 66px;
 }
 
-.password-toggle-btn {
+.input-actions {
   position: absolute;
-  right: 8px;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.action-icon-btn {
   background: none;
   border: none;
   color: #717887;
   cursor: pointer;
   padding: 4px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 3px;
+  line-height: 0;
   transition: color 0.15s ease;
 }
 
-.password-toggle-btn:hover {
+.action-icon-btn:hover {
   color: #e2e4e9;
+}
+
+.action-icon-btn.copied {
+  color: #10b981;
+}
+
+.action-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .field-hint {
@@ -701,51 +831,5 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 12px;
   margin-top: 14px;
-}
-.form-group {
-  display: flex;
-  flex-direction: column;
-}
-
-.password-input-wrapper {
-  position: relative;
-  width: 100%;
-  display: flex;
-  align-items: center;
-}
-
-.password-input-wrapper input {
-  width: 100%;
-  box-sizing: border-box;
-  padding-right: 40px; /* Reserves space so text does not slide under the icon */
-}
-
-.password-toggle-btn {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  padding: 4px;
-  color: #717887;
-  cursor: pointer;
-  line-height: 0;
-  transition: color 0.15s ease;
-}
-
-.password-toggle-btn:hover {
-  color: #e2e4e9;
-}
-
-.field-hint {
-  display: block;
-  font-size: 10px;
-  color: #8b949e;
-  margin-top: 6px;
-  line-height: 1.3;
 }
 </style>

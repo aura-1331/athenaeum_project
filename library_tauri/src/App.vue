@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 import BatchRegisterModal from '@/components/print/BatchRegisterModal.vue'
+import LedgerHealth from './components/LedgerHealth.vue'
 import { 
   LayoutDashboard, 
   Library, 
@@ -199,7 +200,13 @@ onUnmounted(() => {
         <div class="nav-section-label">Inventory</div>
         <RouterLink to="/create-work"><FileText :size="18" :stroke-width="1.5" /><span>Works</span></RouterLink>
         <RouterLink to="/create-item"><BookOpen :size="18" :stroke-width="1.5" /><span>Items</span></RouterLink>
-        <RouterLink to="/incidents"><AlertTriangle :size="18" :stroke-width="1.5" /><span>Incidents</span></RouterLink>
+        <RouterLink 
+          v-if="user_role === 'The Chief'" 
+          to="/incidents"
+        >
+          <AlertTriangle :size="18" :stroke-width="1.5" />
+          <span>Incidents</span>
+        </RouterLink>
         
         <div class="nav-section-label">Classification</div>
         <RouterLink to="/classification/authors">
@@ -264,6 +271,9 @@ onUnmounted(() => {
         </div>
         
         <div class="header-actions">
+          <!-- CRYPTOGRAPHIC LEDGER HEALTH STATUS PILL -->
+          <LedgerHealth />
+
           <div class="live-meta">
             <span class="division-tag">Archive Division</span>
 
@@ -470,7 +480,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .page-content { flex: 1; padding: 0 !important; overflow-y: auto; background: var(--content-bg); }
 .page-content::-webkit-scrollbar { display: none; }
 
-.mobile-menu-toggle { display: none; }
+.mobile-menu-toggle { display: block; }
 .mobile-overlay { display: none; }
 .header-left { display: flex; align-items: center; gap: 12px; }
 
