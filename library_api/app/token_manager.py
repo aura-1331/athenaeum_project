@@ -29,7 +29,7 @@ ISSUER = "athenaeum-api"
 AUDIENCE = "athenaeum-client"
 ALGORITHM = "RS256"
 
-ACCESS_EXPIRE_MINUTES = 15
+ACCESS_EXPIRE_MINUTES = 1
 REFRESH_EXPIRE_DAYS = 7
 
 # -------------------------
@@ -41,6 +41,17 @@ redis_client = redis.Redis(
     port=6379,
     decode_responses=True
 )
+
+def consume_once(key: str, ttl_seconds: int) -> bool:
+    """Atomically consume a one-time Redis key."""
+    return bool(
+        redis_client.set(
+            key,
+            "consumed",
+            nx=True,
+            ex=ttl_seconds
+        )
+    )
 
 # -------------------------
 # TOKEN CREATION
@@ -157,23 +168,34 @@ def revoke_refresh_token(token: str):
 # -------------------------
 
 def rotate_refresh_token(token: str):
-
     payload = verify_refresh_token(token)
+
+    old_jti = payload["jti"]
+    user_id = payload["sub"]
 
     revoke_refresh_token(token)
 
-    new_payload = {
-        "sub": payload["sub"],
-        "role": payload.get("role", "Guest")
-    }
+    new_refresh_token = create_token(
+        {
+            "sub": user_id,
+            "role": payload.get("role", "Guest"),
+        },
+        "refresh"
+    )
+
+    new_payload = decode_token(new_refresh_token)
+    new_jti = new_payload["jti"]
 
     return {
         "access_token": create_token(
-            new_payload,
+            {
+                "sub": user_id,
+                "role": payload.get("role", "Guest"),
+            },
             "access"
         ),
-        "refresh_token": create_token(
-            new_payload,
-            "refresh"
-        )
+        "refresh_token": new_refresh_token,
+        "token_type": "bearer",
+        "old_jti": old_jti,
+        "new_jti": new_jti,
     }

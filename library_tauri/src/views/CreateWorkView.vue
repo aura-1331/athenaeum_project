@@ -1,420 +1,114 @@
 <template>
-  <div class="page-container">
-    <h2 class="page-title">Create Work <span class="subtitle">(Authority Record)</span></h2>
-
-    <div class="parser-wrapper" :class="{ working: isParsing }">
-      <div class="parser-label">
-        <span>📋 Rapid Raw Metadata Intake Dropzone</span>
-        <span class="parser-hint">Paste citation lines, raw catalog details, or text summaries to auto-fill records</span>
+  <div class="work-page" :class="themeMode === 'light' ? 'theme-light' : 'theme-dark'">
+    <header class="work-header">
+      <div>
+        <div class="eyebrow">CATALOGUE // AUTHORITY RECORD</div>
+        <h1>Create Work</h1>
+        <p class="page-intro">Create a new bibliographic record for the Athenaeum catalogue.</p>
       </div>
-      <input 
-        id="parser-field-input"
-        v-model="pasteInput"
-        @input="handleMetadataPaste"
-        placeholder="Paste plain reference block text directly here..." 
-        class="parser-field"
-        :disabled="isParsing"
-      />
-    </div>
-
-    <div class="form-section">
-      <div class="form-grid">
-        <div class="floating-group">
-          <input 
-            id="title-input-field"
-            v-model="form.title" 
-            @blur="sanitizeField('title')" 
-            maxlength="255" 
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input mandatory-field" 
-            :class="{ 'has-value': form.title }"
-          />
-          <label class="floating-label">Title *</label>
-          <button v-if="form.title" @click="clearField('title')" class="clear-btn" type="button" tabindex="-1">&times;</button>
-          <span class="char-counter">{{ form.title.length }}/255</span>
-          <div v-show="duplicateLoading || isbnLoading" class="embedded-input-spinner"></div>
-        </div>
-
-        <div class="floating-group">
-          <select v-model="form.language_id" class="form-select mandatory-field" :class="{ 'has-value': form.language_id }">
-            <option disabled value="">Select Language *</option>
-            <option value="Malayalam">Malayalam</option>
-            <option value="English">English</option>
-            <option value="Multi -Lingual">Multilingual</option>
-            <option disabled class="dropdown-divider-line">──────────────</option>
-            <option v-for="lang in extraLanguages" :key="lang" :value="lang">{{ lang }}</option>
-          </select>
-          <label class="floating-label">Select Language *</label>
-        </div>
-
-        <div class="floating-group read-only-group">
-          <input 
-            :value="previewNumbers.serial_no" 
-            disabled 
-            placeholder=" " 
-            class="form-input structural-lock" 
-          />
-          <label class="floating-label">Serial No (SL No)</label>
-        </div>
-
-        <div class="floating-group read-only-group">
-          <input 
-            :value="previewNumbers.accession_no" 
-            disabled 
-            placeholder=" " 
-            class="form-input structural-lock" 
-          />
-          <label class="floating-label">Accession No</label>
-        </div>
-
-        <div class="floating-group">
-          <select v-model="form.category" class="form-select" :class="{ 'has-value': form.category }">
-            <option value="">-- Choose Category (Optional) --</option>
-            <option value="Fiction">Fiction</option>
-            <option value="Non-Fiction">Non-Fiction</option>
-            <option value="Reference">Reference</option>
-            <option value="Religious">Religious</option>
-            <option value="Poetry">Poetry</option>
-          </select>
-          <label class="floating-label">Select Category (Optional)</label>
-        </div>
-
-        <div class="floating-group">
-          <input 
-            v-model="form.call_no" 
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input" 
-            :class="{ 'has-value': form.call_no }"
-          />
-          <label class="floating-label">Call No</label>
-          <button v-if="form.call_no" @click="clearField('call_no')" class="clear-btn" type="button" tabindex="-1">&times;</button>
-        </div>
-
-        <div class="floating-group">
-          <input 
-            v-model="form.author" 
-            @focus="showAuthorSuggestions = true"
-            @blur="handleBlurAction('author')"
-            maxlength="150" 
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input" 
-            :class="{ 'has-value': form.author }"
-          />
-          <label class="floating-label">Author</label>
-          <button v-if="form.author" @click="clearField('author')" class="clear-btn" type="button" tabindex="-1">&times;</button>
-          <span class="char-counter">{{ form.author.length }}/150</span>
-          
-          <div v-if="showAuthorSuggestions && authorSuggestions.length > 0" class="suggestions-dropdown">
-            <div 
-              v-for="author in authorSuggestions" 
-              :key="author" 
-              @mousedown="selectAuthor(author)"
-              class="suggestion-item"
-            >
-              {{ author }}
-            </div>
-          </div>
-        </div>
-
-        <div class="floating-group">
-          <input 
-            v-model="form.publisher" 
-            @focus="showPublisherSuggestions = true"
-            @blur="handleBlurAction('publisher')"
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input" 
-            :class="{ 'has-value': form.publisher }"
-          />
-          <label class="floating-label">Publisher</label>
-          <button v-if="form.publisher" @click="clearField('publisher')" class="clear-btn" type="button" tabindex="-1">&times;</button>
-          
-          <div v-if="showPublisherSuggestions && publisherSuggestions.length > 0" class="suggestions-dropdown">
-            <div 
-              v-for="pub in publisherSuggestions" 
-              :key="pub" 
-              @mousedown="selectPublisher(pub)"
-              class="suggestion-item"
-            >
-              {{ pub }}
-            </div>
-          </div>
-        </div>
-
-        <div class="floating-group full-width">
-          <div class="chip-dock-wrapper">
-            <label class="dock-label">ACTIVE_COMPILED_GENRE_STRING_PREVIEW</label>
-            <div class="chip-assembly-dock">
-              <span v-for="chip in liveCompiledGenreChips" :key="chip" class="active-badge-chip">
-                {{ chip }}
-              </span>
-              <span v-if="liveCompiledGenreChips.length === 0" class="dock-empty-text">
-                NO GENRES SELECTED
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div class="floating-group full-width">
-          <div class="split-genre-selectors">
-            <div class="dropdown-wrapper">
-              <select v-model="selectedGroupAGenre" @change="syncGenreSelection" class="form-select select-compact">
-                <option value="">Genre Group A // Creative</option>
-                <option v-for="g in genreGroupA" :key="g" :value="g">{{ g }}</option>
-              </select>
-            </div>
-            <div class="dropdown-wrapper">
-              <select v-model="selectedGroupBGenre" @change="syncGenreSelection" class="form-select select-compact">
-                <option value="">Genre Group B // Factual</option>
-                <option v-for="g in genreGroupB" :key="g" :value="g">{{ g }}</option>
-              </select>
-            </div>
-            <div class="dropdown-wrapper">
-              <select v-model="selectedGroupCGenre" @change="syncGenreSelection" class="form-select select-compact">
-                <option value="">Genre Group C // User Added</option>
-                <option v-for="g in dynamicCommunityGenres" :key="g" :value="g">{{ g }}</option>
-                <option disabled class="dropdown-divider-line">────────────────────</option>
-                <option value="CUSTOM_MANUAL_OVERRIDE">[X] TYPE_MANUAL_INPUT</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        <div class="floating-group full-width manual-override-animation" v-if="showCustomManualGenreField">
-          <input 
-            type="text" 
-            v-model="customManualGenreText" 
-            @input="syncManualGenreInput"
-            placeholder="ENTER CUSTOM GENRES SEPARATED BY SLASH (E.G. ENGINEERING/PROPULSION)" 
-            class="form-input manual-text-input" 
-          />
-          <label class="floating-label active-amber-label">Manual Genre Override</label>
-        </div>
-
-        <div class="floating-group">
-          <select v-model="form.original_language" class="form-select" :class="{ 'has-value': form.original_language }">
-            <option value="" disabled selected hidden></option>
-            <option value="Malayalam">Malayalam</option>
-            <option value="English">English</option>
-            <option value="Multi -Lingual">Multilingual</option>
-            <option disabled class="dropdown-divider-line">──────────────</option>
-            <option v-for="lang in extraLanguages" :key="lang" :value="lang">{{ lang }}</option>
-          </select>
-          <label class="floating-label">Original Language</label>
-        </div>
-
-        <div class="floating-group">
-          <input 
-            id="isbn-input-field"
-            v-model="form.isbn" 
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input"
-            :class="{ 
-              'has-value': form.isbn,
-              'valid-field': isIsbnValid === true, 
-              'invalid-field': isIsbnValid === false 
-            }"
-          />
-          <label class="floating-label">ISBN</label>
-          <button v-if="form.isbn" @click="clearField('isbn')" class="clear-btn" type="button" tabindex="-1">&times;</button>
-        </div>
-
-        <div class="floating-group">
-          <input 
-            id="year-input-field"
-            v-model="form.year" 
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input"
-            :class="{ 
-              'has-value': form.year,
-              'valid-field': isYearValid === true, 
-              'invalid-field': isYearValid === false 
-            }"
-          />
-          <label class="floating-label">Year (YYYY)</label>
-          <button v-if="form.year" @click="clearField('year')" class="clear-btn" type="button" tabindex="-1">&times;</button>
-        </div>
-
-        <div class="floating-group">
-          <input 
-            id="ddc-input-field"
-            v-model="form.ddc" 
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input" 
-            :class="{ 
-              'has-value': form.ddc,
-              'valid-field': isDdcValid === true,
-              'invalid-field': isDdcValid === false
-            }"
-          />
-          <label class="floating-label">DDC</label>
-          <button v-if="form.ddc" @click="clearField('ddc')" class="clear-btn" type="button" tabindex="-1">&times;</button>
-        </div>
-
-        <div class="floating-group">
-          <input 
-            v-model="form.shelf" 
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input" 
-            :class="{ 'has-value': form.shelf }"
-          />
-          <label class="floating-label">Shelf</label>
-          <button v-if="form.shelf" @click="clearField('shelf')" class="clear-btn" type="button" tabindex="-1">&times;</button>
-        </div>
-
-        <div class="floating-group">
-          <input 
-            v-model="form.translation_compilation" 
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input" 
-            :class="{ 'has-value': form.translation_compilation }"
-          />
-          <label class="floating-label">Translation/Compilation</label>
-          <button v-if="form.translation_compilation" @click="clearField('translation_compilation')" class="clear-btn" type="button" tabindex="-1">&times;</button>
-        </div>
-
-        <div class="floating-group full-width">
-          <input 
-            v-model="form.notes" 
-            placeholder=" " 
-            autocomplete="off"
-            class="form-input" 
-            :class="{ 'has-value': form.notes }"
-          />
-          <label class="floating-label">Notes</label>
-          <button v-if="form.notes" @click="clearField('notes')" class="clear-btn" type="button" tabindex="-1">&times;</button>
+      <div class="authority-badge" :class="user_role === 'The Chief' ? 'chief' : 'keeper'">
+        <span class="badge-dot"></span>
+        <div>
+          <strong>{{ user_role === 'The Chief' ? 'THE CHIEF' : 'THE KEEPER' }}</strong>
+          <small>{{ user_role === 'The Chief' ? 'DIRECT CATALOGUE AUTHORITY' : 'VERIFICATION REQUIRED' }}</small>
         </div>
       </div>
+    </header>
 
-      <div class="system-feedback-panel">
-        <div class="skeleton-loader-banner" v-show="duplicateLoading || isbnLoading">
-          <div class="skeleton-line header-pulse"></div>
-          <div class="skeleton-line card-pulse"></div>
-        </div>
+    <section class="authority-note" :class="user_role === 'The Chief' ? 'chief-note' : 'keeper-note'">
+      <div class="note-title">{{ user_role === 'The Chief' ? 'Direct catalogue registration' : 'Submit for verification' }}</div>
+      <p v-if="user_role === 'The Chief'">This Work will be entered directly into the authoritative catalogue.</p>
+      <p v-else>This Work will remain pending until The Chief reviews and approves it.</p>
+    </section>
 
-        <div
-          v-if="duplicateResult.severity !== 'none' && !duplicateLoading"
-          class="banner-alert"
-          :class="duplicateResult.severity"
-        >
-          <div class="banner-header">
-            <span v-if="duplicateResult.severity === 'strong'">🔒 Authority Freeze Active — Exact work exists</span>
-            <span v-if="duplicateResult.severity === 'medium'">⚠️ Similar work exists</span>
-            <span v-if="duplicateResult.severity === 'weak'">ℹ️ Possible related works</span>
-          </div>
-
-          <div class="matches-list">
-            <div
-              v-for="m in duplicateResult.matches"
-              :key="m.work_id"
-              class="match-card"
-            >
-              <div class="match-details" @click="confirmPrefill(m)">
-                <span class="match-title">{{ m.title }}</span>
-                <span class="match-meta">{{ m.author }} • {{ m.language }}</span>
-              </div>
-
-              <button
-                v-if="duplicateResult.severity === 'strong'"
-                class="action-btn-secondary"
-                @click="useExistingAuthority(m)"
-              >
-                Use Existing Authority
-              </button>
-            </div>
-          </div>
-
-          <div class="override-container" v-if="duplicateResult.severity === 'strong'">
-            <label class="checkbox-label">
-              <input type="checkbox" v-model="adminOverride" class="custom-checkbox" />
-              <span>Admin Override — allow creation anyway</span>
-            </label>
-          </div>
+    <section class="intake-card">
+      <div class="section-heading">
+        <div>
+          <span class="section-number">01</span>
+          <div><h2>Rapid Metadata Intake</h2><p>Paste a citation or raw catalogue information to pre-fill the record.</p></div>
         </div>
       </div>
-    </div>
+      <div class="parser-row" :class="{ working: isParsing }">
+        <span class="parser-icon">PASTE</span>
+        <input id="parser-field-input" v-model="pasteInput" @paste="handleMetadataPaste" placeholder="Paste citation, ISBN, publication details, or catalogue text…" :disabled="isParsing" />
+        <span v-if="isParsing" class="parser-status">READING…</span>
+      </div>
+    </section>
 
-    <div class="form-actions-footer">
-      <button
-        @click="triggerCreationPrompt"
-        :disabled="loading || isFrozen"
-        class="submit-btn"
-        :class="{ 'btn-frozen': isFrozen }"
-      >
-        <span v-if="isFrozen">🔒 Authority Locked</span>
-        <span v-else>{{ loading ? "Saving Record..." : "Create Work" }}</span>
+    <section class="form-card">
+      <div class="section-heading">
+        <div>
+          <span class="section-number">02</span>
+          <div><h2>Work Identity</h2><p>The information that identifies this bibliographic record.</p></div>
+        </div>
+      </div>
+      <div class="field-grid">
+        <label class="field field-wide"><span>Title <b>*</b></span><div class="input-wrap"><input id="title-input-field" v-model="form.title" @blur="sanitizeField('title')" maxlength="255" autocomplete="off" placeholder="Work title" /><button v-if="form.title" @click="clearField('title')" type="button">×</button><em>{{ form.title.length }}/255</em><i v-show="duplicateLoading || isbnLoading" class="spinner"></i></div></label>
+        <label class="field"><span>Language <b>*</b></span><select v-model="form.language_id"><option disabled value="">Select language</option><option value="Malayalam">Malayalam</option><option value="English">English</option><option value="Multi -Lingual">Multilingual</option><option disabled>────────────</option><option v-for="lang in extraLanguages" :key="lang" :value="lang">{{ lang }}</option></select></label>
+        <label class="field"><span>Author</span><div class="input-wrap"><input v-model="form.author" @focus="showAuthorSuggestions = true" @blur="handleBlurAction('author')" maxlength="150" autocomplete="off" placeholder="Author name" /><button v-if="form.author" @click="clearField('author')" type="button">×</button><em>{{ form.author.length }}/150</em><div v-if="showAuthorSuggestions && authorSuggestions.length" class="suggestions-dropdown"><div v-for="author in authorSuggestions" :key="author" @mousedown="selectAuthor(author)">{{ author }}</div></div></div></label>
+        <label class="field"><span>Publisher</span><div class="input-wrap"><input v-model="form.publisher" @focus="showPublisherSuggestions = true" @blur="handleBlurAction('publisher')" autocomplete="off" placeholder="Publisher" /><button v-if="form.publisher" @click="clearField('publisher')" type="button">×</button><div v-if="showPublisherSuggestions && publisherSuggestions.length" class="suggestions-dropdown"><div v-for="pub in publisherSuggestions" :key="pub" @mousedown="selectPublisher(pub)">{{ pub }}</div></div></div></label>
+        <label class="field"><span>Category</span><select v-model="form.category"><option value="">No category</option><option value="Fiction">Fiction</option><option value="Non-Fiction">Non-Fiction</option><option value="Reference">Reference</option><option value="Religious">Religious</option><option value="Poetry">Poetry</option></select></label>
+        <label class="field"><span>Year</span><div class="input-wrap"><input id="year-input-field" v-model="form.year" placeholder="YYYY" inputmode="numeric" /></div></label>
+        <label class="field"><span>ISBN</span><div class="input-wrap"><input id="isbn-input-field" v-model="form.isbn" placeholder="ISBN" autocomplete="off" :class="{ valid: isIsbnValid === true, invalid: isIsbnValid === false }" /><button v-if="form.isbn" @click="clearField('isbn')" type="button">×</button></div></label>
+        <div class="field generated"><span>Serial No</span><strong>{{ previewNumbers.serial_no }}</strong></div>
+        <div class="field generated"><span>Accession No</span><strong>{{ previewNumbers.accession_no }}</strong></div>
+      </div>
+    </section>
+
+    <section class="form-card">
+      <div class="section-heading"><div><span class="section-number">03</span><div><h2>Classification & Discovery</h2><p>Place the Work where readers and staff can find it.</p></div></div></div>
+      <div class="field-grid">
+        <label class="field"><span>DDC</span><div class="input-wrap"><input id="ddc-input-field" v-model="form.ddc" placeholder="e.g. 823.9" :class="{ valid: isDdcValid === true, invalid: isDdcValid === false }" /></div></label>
+        <label class="field"><span>Call No</span><div class="input-wrap"><input v-model="form.call_no" placeholder="Call number" /><button v-if="form.call_no" @click="clearField('call_no')" type="button">×</button></div></label>
+        <label class="field"><span>Shelf</span><div class="input-wrap"><input v-model="form.shelf" placeholder="Shelf location" /><button v-if="form.shelf" @click="clearField('shelf')" type="button">×</button></div></label>
+        <div class="field full-field"><span>Genre</span><div class="genre-controls"><select v-model="selectedGroupAGenre" @change="syncGenreSelection"><option value="">Creative genres</option><option v-for="g in genreGroupA" :key="g" :value="g">{{ g }}</option></select><select v-model="selectedGroupBGenre" @change="syncGenreSelection"><option value="">Factual genres</option><option v-for="g in genreGroupB" :key="g" :value="g">{{ g }}</option></select><select v-model="selectedGroupCGenre" @change="syncGenreSelection"><option value="">Other genres</option><option v-for="g in dynamicCommunityGenres" :key="g" :value="g">{{ g }}</option><option disabled>────────────</option><option value="CUSTOM_MANUAL_OVERRIDE">Enter manually</option></select></div></div>
+        <div v-if="showCustomManualGenreField" class="field full-field"><span>Custom Genre</span><input v-model="customManualGenreText" @input="syncManualGenreInput" placeholder="Separate multiple genres with /" /></div>
+        <div class="genre-preview full-field"><span>Selected genres</span><div><span v-for="chip in liveCompiledGenreChips" :key="chip">{{ chip }}</span><small v-if="!liveCompiledGenreChips.length">No genres selected</small></div></div>
+      </div>
+    </section>
+
+    <section class="form-card">
+      <div class="section-heading"><div><span class="section-number">04</span><div><h2>Translation & Bibliographic Details</h2><p>Record language relationships and additional catalogue information.</p></div></div></div>
+      <div class="field-grid">
+        <label class="field"><span>Original Language</span><select v-model="form.original_language"><option value="" disabled>Select original language</option><option value="Malayalam">Malayalam</option><option value="English">English</option><option value="Multi -Lingual">Multilingual</option><option disabled>────────────</option><option v-for="lang in extraLanguages" :key="lang" :value="lang">{{ lang }}</option></select></label>
+        <label class="field"><span>Translation / Compilation</span><div class="input-wrap"><input v-model="form.translation_compilation" placeholder="e.g. Russian translation" /><button v-if="form.translation_compilation" @click="clearField('translation_compilation')" type="button">×</button></div></label>
+        <label class="field full-field"><span>Notes</span><div class="input-wrap"><textarea v-model="form.notes" rows="3" placeholder="Additional bibliographic notes"></textarea></div></label>
+      </div>
+    </section>
+
+    <section class="check-card">
+      <div class="check-heading"><div><span class="section-number">05</span><div><h2>Catalogue Check</h2><p>We check existing records before allowing a new Work to be created.</p></div></div><span v-if="duplicateLoading" class="checking">CHECKING…</span></div>
+      <div v-if="duplicateResult.severity === 'none' && !duplicateLoading" class="check-clear"><span>✓</span><div><strong>No matching Work detected</strong><small>The record can proceed to the authority action below.</small></div></div>
+      <div v-if="duplicateResult.severity !== 'none' && !duplicateLoading" class="duplicate-alert" :class="duplicateResult.severity">
+        <div class="duplicate-title">{{ duplicateResult.severity === 'strong' ? 'Exact Work already exists' : duplicateResult.severity === 'medium' ? 'Similar Work found' : 'Related Work found' }}</div>
+        <div v-for="m in duplicateResult.matches" :key="m.work_id" class="match-row"><div @click="confirmPrefill(m)"><strong>{{ m.title }}</strong><small>{{ m.author }} · {{ m.language }}</small></div><button v-if="duplicateResult.severity === 'strong'" @click="useExistingAuthority(m)" type="button">USE EXISTING WORK → ADD ITEM</button></div>
+        <label v-if="duplicateResult.severity === 'strong'" class="override"><input type="checkbox" v-model="adminOverride" /> Allow Chief override for this duplicate</label>
+      </div>
+    </section>
+
+    <footer class="authority-footer">
+      <div><span class="footer-label">{{ user_role === 'The Chief' ? 'CHIEF AUTHORITY' : 'KEEPER SUBMISSION' }}</span><strong>{{ user_role === 'The Chief' ? 'Create directly in catalogue' : 'Submit for Chief verification' }}</strong><p>{{ user_role === 'The Chief' ? 'The Work becomes an approved catalogue record immediately.' : 'The Work enters the verification queue and is not live until approved.' }}</p></div>
+      <button class="submit-btn" @click="triggerCreationPrompt" :disabled="loading || isFrozen">
+        <span v-if="isFrozen">Authority locked by duplicate</span>
+        <span v-else-if="loading">{{ user_role === 'The Chief' ? 'Creating Work…' : 'Submitting…' }}</span>
+        <span v-else>{{ user_role === 'The Chief' ? 'CREATE WORK' : 'SUBMIT FOR VERIFICATION' }}</span>
       </button>
-      <span class="shortcut-legend">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to save</span>
+    </footer>
+
+    <div class="modal-backdrop" v-if="showPromptModal">
+      <section class="confirm-modal">
+        <div class="modal-eyebrow">{{ user_role === 'The Chief' ? 'DIRECT REGISTRATION' : 'VERIFICATION SUBMISSION' }}</div>
+        <h2>{{ user_role === 'The Chief' ? 'Create this Work?' : 'Submit this Work for verification?' }}</h2>
+        <p>{{ user_role === 'The Chief' ? 'This Work will be registered directly as an approved catalogue record.' : 'This Work will be submitted to The Chief. It will remain pending until a decision is made.' }}</p>
+        <label><span>Reason for this catalogue action</span><input v-model="creationReason" placeholder="e.g. New acquisition / New translation edition" /></label>
+        <div class="modal-actions"><button class="cancel-btn" @click="showPromptModal = false">CANCEL</button><button class="confirm-btn" @click="executeConfirmedCreation">{{ user_role === 'The Chief' ? 'CREATE WORK' : 'SUBMIT FOR VERIFICATION' }}</button></div>
+      </section>
     </div>
 
-    <div class="modal-overlay-shroud" v-if="showPromptModal">
-      <div class="modal-alert-box border-emerald">
-        <div class="modal-tag">SYSTEM_TRANSACTION_ALERT</div>
-        
-        <h3 class="modal-heading">CONFIRM AUTHORITY RECORD REGISTRATION</h3>
-        
-        <p class="modal-body-text">
-          You are establishing a new master authority entry layout within the security ledger registry context matrices.
-        </p>
-
-        <div class="modal-input-field-block">
-          <label class="modal-input-label">SPECIFY_OPERATIONAL_CHANGE_JUSTIFICATION</label>
-          <input 
-            type="text" 
-            v-model="creationReason" 
-            placeholder="e.g., Initial acquisition entry / New community catalog release..." 
-            class="modal-reason-input"
-          />
-        </div>
-
-        <div class="modal-button-row">
-          <button class="m-btn m-btn-confirm bg-emerald" @click="executeConfirmedCreation">
-            EXECUTE
-          </button>
-          <button class="m-btn m-btn-dismiss" @click="showPromptModal = false">
-            DISMISS
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="result" class="operational-response-deck">
-      <div v-if="result.work_id" class="status-card-panel border-emerald">
-        <div class="deck-tag text-emerald">TRANSACTION_SUCCESSFUL // REGISTRY_LINK_ACTIVE</div>
-        <div class="panel-main-row">
-          <div class="stat-block">
-            <span class="stat-label">ASSIGNED_WORK_ID</span>
-            <span class="stat-value text-white">#{{ result.work_id }}</span>
-          </div>
-          <div class="stat-block">
-            <span class="stat-label">GENERATED_ACCESSION_NO</span>
-            <span class="stat-value text-gold">{{ result.accession_no }}</span>
-          </div>
-        </div>
-        <div class="panel-footer-message">
-          <div class="spinner-inline"></div>
-          <span>Redirecting to local item ledger initialization sequences...</span>
-        </div>
-        <div class="progress-bar-container">
-          <div class="progress-fill fill-emerald"></div>
-        </div>
-      </div>
-
-      <div v-else class="status-card-panel border-crimson">
-        <div class="deck-tag text-crimson">TRANSACTION_ABORTED // SCHEMA_VALIDATION_FAILURE</div>
-        <h4 class="error-heading">Operational Request Interrupted</h4>
-        <p class="error-description">
-          {{ result.detail || result.error || "The remote catalog authority engine rejected this entity context structure layout mapping." }}
-        </p>
-      </div>
+    <div v-if="result" class="result-card" :class="result.work_id ? 'success' : 'error'">
+      <strong>{{ result.work_id ? (user_role === 'The Chief' ? 'Work created successfully' : 'Work submitted for verification') : 'Work creation failed' }}</strong>
+      <span v-if="result.work_id">Work ID #{{ result.work_id }} · Accession {{ result.accession_no }}</span>
+      <span v-else>{{ result.detail || result.error || 'The catalogue rejected the request.' }}</span>
     </div>
   </div>
 </template>
@@ -424,8 +118,13 @@ import { ref, watch, computed, onMounted, onUnmounted } from "vue"
 import { useRouter } from "vue-router"
 import axios from "axios"
 import { dispatchAuditTrail } from '@/utils/audit';
+import { storeToRefs } from "pinia"
+import { useAuthStore } from "@/stores/auth"
 
 const router = useRouter()
+const authStore = useAuthStore()
+const { userRole: user_role } = storeToRefs(authStore)
+
 const pasteInput = ref("")
 const isParsing = ref(false)
 const showAuthorSuggestions = ref(false)
@@ -433,6 +132,9 @@ const showPublisherSuggestions = ref(false)
 
 const showPromptModal = ref(false)
 const creationReason = ref("")
+
+const themeMode = ref(document.documentElement.getAttribute("data-theme") || localStorage.getItem("ui-theme") || "dark")
+let themeObserver = null
 
 const form = ref({
   title: "",
@@ -730,7 +432,7 @@ watch(
 watch(
   () => form.value.isbn,
   (newVal, oldVal) => {
-    if (!newVal) return
+    if (!newVal || isParsing.value) return
     let digits = newVal.replace(/[^0-9X]/gi, "")
     if (digits.length > 13) {
       digits = digits.slice(0, 13)
@@ -750,7 +452,6 @@ watch(
     const cleanLen = digits.length
     if ((cleanLen === 13 || cleanLen === 10) && newVal.length > (oldVal ? oldVal.length : 0)) {
       handleIsbnLookup(digits)
-      focusNextField("year-input-field")
     }
   }
 )
@@ -796,41 +497,95 @@ function focusNextField(elementId) {
   }, 10)
 }
 
-function handleMetadataPaste() {
-  if (!pasteInput.value) return
+async function handleMetadataPaste(event) {
+  const pastedText =
+    event?.clipboardData?.getData("text") || pasteInput.value || ""
+
+  if (!pastedText.trim()) return
+
   isParsing.value = true
-  
-  const text = pasteInput.value
-  const isbnMatch = text.match(/(?:ISBN(?:\-1[03])?:?\s*)?([0-9X]{10,13})/i)
+
+  const text = pastedText.trim()
+
+  // Detect ISBN-10 or ISBN-13, with or without spaces/hyphens.
+  const isbnMatch = text.match(
+    /(?:ISBN(?:[-\s]?1[03])?:?\s*)?([0-9X](?:[\s-]?[0-9X]){9,12})/i
+  )
+
   const yearMatch = text.match(/\b(18|19|20)\d{2}\b/)
   const ddcMatch = text.match(/\b([0-9]{3}(?:\.[0-9]+)?)\b/)
-  
-  if (isbnMatch) form.value.isbn = isbnMatch[1]
+
+  let cleanPastedIsbn = ""
+
+  if (isbnMatch) {
+    cleanPastedIsbn = isbnMatch[1]
+      .replace(/[\s-]/g, "")
+      .toUpperCase()
+
+    form.value.isbn = cleanPastedIsbn
+  }
+
   if (yearMatch) form.value.year = yearMatch[0]
   if (ddcMatch) form.value.ddc = ddcMatch[1]
-  
-  const lowerText = text.toLowerCase()
-  if (lowerText.includes("malayalam")) form.value.language_id = "Malayalam"
-  else if (lowerText.includes("english")) form.value.language_id = "English"
-  else if (lowerText.includes("multilingual") || lowerText.includes("multi-lingual")) form.value.language_id = "Multi -Lingual"
-  
-  if (lowerText.includes("fiction") || lowerText.includes("novel")) form.value.category = "Fiction"
-  else if (lowerText.includes("non-fiction") || lowerText.includes("biography")) form.value.category = "Non-Fiction"
-  else if (lowerText.includes("reference") || lowerText.includes("dictionary")) form.value.category = "Reference"
-  else if (lowerText.includes("religious") || lowerText.includes("bible")) form.value.category = "Religious"
-  else if (lowerText.includes("poetry") || lowerText.includes("poem")) form.value.category = "Poetry"
 
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean)
-  if (lines.length > 0 && !isbnMatch && !yearMatch) {
-    if (lines[0] && lines[0].length < 100) form.value.title = toTitleCase(lines[0])
-    if (lines[1] && lines[1].length < 60) form.value.author = toTitleCase(lines[1])
+  const lowerText = text.toLowerCase()
+
+  if (lowerText.includes("malayalam")) {
+    form.value.language_id = "Malayalam"
+  } else if (lowerText.includes("english")) {
+    form.value.language_id = "English"
+  } else if (
+    lowerText.includes("multilingual") ||
+    lowerText.includes("multi-lingual")
+  ) {
+    form.value.language_id = "Multi -Lingual"
   }
-  
-  setTimeout(() => {
-    pasteInput.value = ""
-    isParsing.value = false
-    focusNextField("title-input-field")
-  }, 400)
+
+  if (lowerText.includes("fiction") || lowerText.includes("novel")) {
+    form.value.category = "Fiction"
+  } else if (
+    lowerText.includes("non-fiction") ||
+    lowerText.includes("biography")
+  ) {
+    form.value.category = "Non-Fiction"
+  } else if (
+    lowerText.includes("reference") ||
+    lowerText.includes("dictionary")
+  ) {
+    form.value.category = "Reference"
+  } else if (
+    lowerText.includes("religious") ||
+    lowerText.includes("bible")
+  ) {
+    form.value.category = "Religious"
+  } else if (lowerText.includes("poetry") || lowerText.includes("poem")) {
+    form.value.category = "Poetry"
+  }
+
+  const lines = text
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
+
+  if (lines.length > 0 && !isbnMatch && !yearMatch) {
+    if (lines[0] && lines[0].length < 100) {
+      form.value.title = toTitleCase(lines[0])
+    }
+
+    if (lines[1] && lines[1].length < 60) {
+      form.value.author = toTitleCase(lines[1])
+    }
+  }
+
+  // IMPORTANT:
+  // A pasted ISBN must explicitly call the backend lookup.
+  // We do not rely on the ISBN watcher here.
+  if (cleanPastedIsbn.length === 10 || cleanPastedIsbn.length === 13) {
+    await handleIsbnLookup(cleanPastedIsbn)
+  }
+
+  pasteInput.value = ""
+  isParsing.value = false
 }
 
 async function checkDuplicate() {
@@ -987,713 +742,983 @@ function handleKeyDown(e) {
 
 onMounted(async () => {
   window.addEventListener("keydown", handleKeyDown)
+
+  themeObserver = new MutationObserver(() => {
+    themeMode.value = document.documentElement.getAttribute("data-theme") || "dark"
+  })
+  themeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme"]
+  })
+
   await harvestSystemGenresMatrix()
   focusNextField("parser-field-input")
 })
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown)
+  if (themeObserver) themeObserver.disconnect()
 })
 </script>
 
+
 <style scoped>
-.page-container {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 24px;
-  color: #e0e0e0;
+:root { color-scheme: dark; }
+.work-page { max-width: 1120px; margin: 0 auto; padding: 34px 30px 60px; color: #e7e4de; }
+.work-header { display:flex; justify-content:space-between; align-items:flex-start; gap:28px; margin-bottom:22px; }
+.eyebrow,.footer-label,.modal-eyebrow { font-size:10px; letter-spacing:1.8px; font-weight:700; color:#77736d; text-transform:uppercase; }
+h1 { margin:7px 0 6px; font-size:30px; font-weight:500; letter-spacing:-.4px; color:#eee9df; }
+.page-intro { margin:0; color:#8e8a84; font-size:13px; }
+.authority-badge { display:flex; align-items:center; gap:10px; padding:11px 14px; border:1px solid #292825; border-radius:8px; min-width:205px; background:#141413; }
+.authority-badge strong { display:block; font-size:11px; letter-spacing:1.1px; }
+.authority-badge small { display:block; margin-top:4px; color:#77736d; font-size:9px; letter-spacing:.8px; }
+.badge-dot { width:7px; height:7px; border-radius:50%; background:#a99776; }
+.authority-badge.keeper .badge-dot { background:#9b8f7a; }
+.authority-note { padding:15px 18px; border:1px solid #292825; border-radius:8px; margin-bottom:20px; background:#141413; }
+.authority-note .note-title { font-size:12px; font-weight:700; letter-spacing:.5px; }
+.authority-note p { margin:5px 0 0; color:#85817b; font-size:12px; line-height:1.5; }
+.chief-note { border-left:3px solid #b5a27d; }
+.keeper-note { border-left:3px solid #77736d; }
+.intake-card,.form-card,.check-card { background:#121211; border:1px solid #242320; border-radius:9px; margin-bottom:16px; overflow:visible; }
+.section-heading,.check-heading { padding:20px 22px 16px; border-bottom:1px solid #22211e; }
+.section-heading > div,.check-heading > div { display:flex; gap:13px; align-items:flex-start; }
+.section-number { flex:0 0 auto; font-size:10px; letter-spacing:1px; color:#8d8066; padding-top:2px; }
+h2 { margin:0; font-size:15px; font-weight:600; color:#ddd8ce; }
+.section-heading p,.check-heading p { margin:4px 0 0; font-size:11px; color:#706d68; }
+.parser-row { display:flex; align-items:center; gap:12px; padding:14px 18px; }
+.parser-row input { flex:1; height:40px; background:#181817; border:1px solid #2b2a27; border-radius:6px; color:#ddd8ce; padding:0 13px; outline:none; font-size:13px; }
+.parser-row input:focus { border-color:#8d8066; }
+.parser-icon { font-size:9px; letter-spacing:1px; color:#8d8066; font-weight:700; }
+.parser-status,.checking { font-size:9px; letter-spacing:1px; color:#8d8066; }
+.form-card { padding-bottom:22px; }
+.field-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; padding:20px 22px 0; }
+.field { position:relative; display:flex; flex-direction:column; gap:7px; min-width:0; }
+.field > span { font-size:10px; font-weight:700; letter-spacing:.8px; color:#85817b; text-transform:uppercase; }
+.field b { color:#b5a27d; }
+.field input,.field select,.field textarea { width:100%; box-sizing:border-box; background:#181817; border:1px solid #2b2a27; border-radius:6px; color:#ded9d0; outline:none; font:inherit; font-size:13px; }
+.field input,.field select { height:43px; padding:0 12px; }
+.field textarea { padding:11px 12px; resize:vertical; min-height:78px; }
+.field input:focus,.field select:focus,.field textarea:focus { border-color:#8d8066; }
+.field-wide,.full-field { grid-column:1 / -1; }
+.input-wrap { position:relative; }
+.input-wrap input { padding-right:62px; }
+.input-wrap button { position:absolute; right:10px; top:50%; transform:translateY(-50%); border:0; background:none; color:#65615c; font-size:18px; cursor:pointer; }
+.input-wrap em { position:absolute; right:30px; bottom:5px; font-style:normal; font-size:8px; color:#56534e; }
+.spinner { position:absolute; right:12px; top:14px; width:13px; height:13px; border:2px solid #302f2b; border-top-color:#a99776; border-radius:50%; animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.generated strong { height:43px; display:flex; align-items:center; padding:0 12px; box-sizing:border-box; background:#151514; border:1px solid #24231f; border-radius:6px; color:#65615c; font-size:12px; font-weight:500; }
+.genre-controls { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.genre-preview { margin-top:0; }
+.genre-preview > div { min-height:43px; display:flex; align-items:center; flex-wrap:wrap; gap:7px; padding:8px 10px; box-sizing:border-box; background:#151514; border:1px solid #24231f; border-radius:6px; }
+.genre-preview span { padding:5px 8px; border-radius:4px; background:#242119; color:#b5a27d; font-size:10px; letter-spacing:.3px; }
+.genre-preview small { color:#5e5b56; font-size:11px; }
+.suggestions-dropdown { position:absolute; top:68px; left:0; right:0; z-index:50; background:#191918; border:1px solid #37352f; border-radius:6px; box-shadow:0 12px 28px rgba(0,0,0,.45); overflow:hidden; }
+.suggestions-dropdown div { padding:10px 12px; color:#bbb6ae; font-size:12px; cursor:pointer; }
+.suggestions-dropdown div:hover { background:#25231f; color:#e5dfd4; }
+.valid { border-color:#587b66 !important; }
+.invalid { border-color:#824e4e !important; }
+.check-card { padding-bottom:0; }
+.check-heading { display:flex; justify-content:space-between; }
+.check-clear { display:flex; align-items:center; gap:12px; padding:18px 22px; }
+.check-clear > span { width:28px; height:28px; display:grid; place-items:center; border:1px solid #405648; border-radius:50%; color:#91aa98; }
+.check-clear strong,.check-clear small { display:block; }
+.check-clear strong { font-size:12px; }
+.check-clear small { margin-top:3px; font-size:11px; color:#6e6a64; }
+.duplicate-alert { padding:18px 22px; }
+.duplicate-alert.strong { background:#1a1413; border-top:1px solid #3a2825; }
+.duplicate-alert.medium { background:#191713; }
+.duplicate-alert.weak { background:#13171a; }
+.duplicate-title { font-size:12px; font-weight:700; margin-bottom:10px; }
+.match-row { display:flex; justify-content:space-between; align-items:center; gap:15px; padding:11px 0; border-top:1px solid #292722; }
+.match-row strong,.match-row small { display:block; }
+.match-row strong { font-size:12px; }
+.match-row small { margin-top:3px; font-size:10px; color:#77736d; }
+.match-row button { flex:0 0 auto; background:transparent; border:1px solid #4a4337; border-radius:5px; color:#b5a27d; padding:8px 10px; font-size:9px; font-weight:700; cursor:pointer; }
+.override { display:flex; gap:8px; margin-top:10px; color:#77736d; font-size:10px; }
+.authority-footer { display:flex; justify-content:space-between; align-items:center; gap:25px; padding:20px 22px; margin-top:20px; border:1px solid #2d2a25; border-radius:9px; background:#161513; }
+.authority-footer strong { display:block; margin-top:4px; font-size:14px; font-weight:600; }
+.authority-footer p { margin:5px 0 0; color:#77736d; font-size:11px; }
+.submit-btn { min-width:230px; height:46px; padding:0 22px; border:1px solid #b5a27d; border-radius:6px; background:#b5a27d; color:#161513; font-size:11px; font-weight:800; letter-spacing:.8px; cursor:pointer; }
+.submit-btn:hover:not(:disabled) { background:#c6b58f; }
+.submit-btn:disabled { opacity:.45; cursor:not-allowed; }
+.modal-backdrop { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; padding:20px; background:rgba(7,7,6,.78); backdrop-filter:blur(5px); }
+.confirm-modal { width:min(470px,100%); padding:28px; box-sizing:border-box; border:1px solid #35322c; border-radius:10px; background:#171715; box-shadow:0 25px 70px rgba(0,0,0,.6); }
+.confirm-modal h2 { margin-top:8px; font-size:20px; color:#ece7de; }
+.confirm-modal > p { margin:10px 0 22px; color:#8a867f; font-size:12px; line-height:1.6; }
+.confirm-modal label span { display:block; margin-bottom:7px; font-size:10px; color:#85817b; text-transform:uppercase; letter-spacing:.7px; }
+.confirm-modal input { width:100%; height:43px; box-sizing:border-box; background:#10100f; border:1px solid #2e2c28; border-radius:6px; color:#ddd8ce; padding:0 12px; outline:none; }
+.modal-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:22px; }
+.cancel-btn,.confirm-btn { height:39px; padding:0 16px; border-radius:5px; font-size:10px; font-weight:700; cursor:pointer; }
+.cancel-btn { background:transparent; border:1px solid #34322e; color:#99958e; }
+.confirm-btn { background:#b5a27d; border:1px solid #b5a27d; color:#151411; }
+.result-card { margin-top:16px; padding:16px 20px; border-radius:8px; display:flex; flex-direction:column; gap:5px; font-size:12px; }
+.result-card.success { background:#141b17; border:1px solid #304738; color:#a8bea9; }
+.result-card.error { background:#1b1515; border:1px solid #49302f; color:#c99591; }
+.result-card span { color:#77736d; font-size:11px; }
+@media (max-width:760px) { .work-page{padding:24px 16px 45px}.work-header,.authority-footer{flex-direction:column;align-items:stretch}.authority-badge{min-width:0}.field-grid{grid-template-columns:1fr}.field-wide,.full-field{grid-column:auto}.genre-controls{grid-template-columns:1fr}.submit-btn{width:100%}.match-row{align-items:flex-start;flex-direction:column}.match-row button{width:100%} }
+
+
+
+/* ============================================================
+   VERIFIED THEME PALETTE
+   App.vue writes data-theme="light" / "dark" on <html>.
+   themeMode mirrors that state, and these explicit component
+   classes guarantee that Create Work changes with the shell.
+============================================================ */
+
+.work-page.theme-dark {
+  --cw-page: #030712;
+  --cw-card: #0f172a;
+  --cw-card-2: #111827;
+  --cw-input: #181817;
+  --cw-border: #1e293b;
+  --cw-border-soft: #242320;
+  --cw-text: #f9fafb;
+  --cw-muted: #9ca3af;
+  --cw-accent: #2dd4bf;
+  --cw-accent-warm: #b5a27d;
+}
+
+.work-page.theme-light {
+  --cw-page: #f8fafc;
+  --cw-card: #ffffff;
+  --cw-card-2: #ffffff;
+  --cw-input: #ffffff;
+  --cw-border: #e2e8f0;
+  --cw-border-soft: #d8e0e8;
+  --cw-text: #0f172a;
+  --cw-muted: #475569;
+  --cw-accent: #0d9488;
+  --cw-accent-warm: #806f4f;
+}
+
+.work-page.theme-light,
+.work-page.theme-dark {
+  color: var(--cw-text);
+  background: transparent;
+}
+
+.work-page.theme-light h1,
+.work-page.theme-light h2,
+.work-page.theme-light .authority-badge strong,
+.work-page.theme-light .authority-footer strong,
+.work-page.theme-light .check-clear strong,
+.work-page.theme-light .match-row strong {
+  color: var(--cw-text);
+}
+
+.work-page.theme-light .eyebrow,
+.work-page.theme-light .footer-label,
+.work-page.theme-light .modal-eyebrow,
+.work-page.theme-light .parser-icon,
+.work-page.theme-light .parser-status,
+.work-page.theme-light .checking,
+.work-page.theme-light .section-number {
+  color: var(--cw-accent);
 }
 
-.page-title {
-  font-size: 24px;
-  font-weight: 500;
-  color: #cfb997;
-  margin-bottom: 24px;
-  letter-spacing: 0.5px;
+.work-page.theme-light .page-intro,
+.work-page.theme-light .authority-note p,
+.work-page.theme-light .section-heading p,
+.work-page.theme-light .check-heading p,
+.work-page.theme-light .authority-footer p,
+.work-page.theme-light .match-row small,
+.work-page.theme-light .override,
+.work-page.theme-light .check-clear small,
+.work-page.theme-light .field > span,
+.work-page.theme-light .authority-badge small {
+  color: var(--cw-muted);
 }
 
-.subtitle {
-  font-size: 16px;
-  color: #8c8c8c;
-  font-weight: 400;
-  margin-left: 6px;
+.work-page.theme-light .authority-badge,
+.work-page.theme-light .authority-note,
+.work-page.theme-light .intake-card,
+.work-page.theme-light .form-card,
+.work-page.theme-light .check-card,
+.work-page.theme-light .authority-footer,
+.work-page.theme-light .confirm-modal {
+  background: var(--cw-card);
+  border-color: var(--cw-border);
+  color: var(--cw-text);
 }
 
-.parser-wrapper {
-  background: #121212;
-  border: 1px dashed #333333;
-  border-radius: 6px;
-  padding: 16px;
-  margin-bottom: 28px;
+.work-page.theme-light .section-heading,
+.work-page.theme-light .check-heading,
+.work-page.theme-light .match-row {
+  border-color: var(--cw-border);
 }
 
-.parser-wrapper.working {
-  border-color: #cfb997;
-  background: #171614;
+.work-page.theme-light .parser-row input,
+.work-page.theme-light .field input,
+.work-page.theme-light .field select,
+.work-page.theme-light .field textarea,
+.work-page.theme-light .confirm-modal input,
+.work-page.theme-light .generated strong,
+.work-page.theme-light .genre-preview > div {
+  background: var(--cw-input);
+  border-color: var(--cw-border);
+  color: var(--cw-text);
 }
 
-.parser-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #cfb997;
+.work-page.theme-light .parser-row input::placeholder,
+.work-page.theme-light .field input::placeholder,
+.work-page.theme-light .field textarea::placeholder,
+.work-page.theme-light .confirm-modal input::placeholder {
+  color: #64748b;
+  opacity: 1;
 }
 
-.parser-hint {
-  font-size: 11px;
-  color: #555555;
-  font-weight: 400;
+.work-page.theme-light .parser-row input:focus,
+.work-page.theme-light .field input:focus,
+.work-page.theme-light .field select:focus,
+.work-page.theme-light .field textarea:focus,
+.work-page.theme-light .confirm-modal input:focus {
+  border-color: var(--cw-accent);
+  box-shadow: 0 0 0 2px rgba(13,148,136,.10);
 }
 
-.parser-field {
-  width: 100%;
-  height: 38px;
-  padding: 0 12px;
-  background: #181818;
-  border: 1px solid #262626;
-  border-radius: 4px;
-  color: #a3a8b4;
-  font-size: 13px;
-  outline: none;
-  box-sizing: border-box;
+.work-page.theme-light .input-wrap button {
+  color: #64748b;
 }
 
-.parser-field:focus {
-  border-color: #cfb997;
+.work-page.theme-light .input-wrap em {
+  color: #64748b;
 }
 
-.form-section {
-  display: grid;
-  grid-template-columns: 1fr 340px;
-  gap: 32px;
-  background: #111111;
-  border: 1px solid #1c1c1c;
-  border-radius: 6px;
-  padding: 24px;
-  align-items: start;
+.work-page.theme-light .generated strong {
+  color: #64748b;
 }
 
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 24px;
+.work-page.theme-light .genre-preview span {
+  background: rgba(13,148,136,.10);
+  color: #0f766e;
 }
 
-.system-feedback-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  position: relative;
-  min-height: 200px;
+.work-page.theme-light .genre-preview small {
+  color: #64748b;
 }
 
-.floating-group {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 100%;
-  height: 48px !important;
-  max-height: 48px !important;
-  min-height: 48px !important;
-  box-sizing: border-box !important;
+.work-page.theme-light .suggestions-dropdown {
+  background: #ffffff;
+  border-color: var(--cw-border);
+  box-shadow: 0 12px 28px rgba(15,23,42,.14);
 }
 
-.floating-group.full-width {
-  grid-column: span 2;
-  height: auto !important;
-  max-height: none !important;
-  min-height: auto !important;
+.work-page.theme-light .suggestions-dropdown div {
+  color: #334155;
 }
 
-.form-input, 
-.form-select {
-  width: 100%;
-  height: 48px !important;
-  max-height: 48px !important;
-  min-height: 48px !important;
-  padding: 0 40px 0 16px;
-  background: #161616;
-  border: 1px solid #282828;
-  border-radius: 4px;
-  color: #e0e0e0;
-  font-size: 14px;
-  outline: none;
-  box-sizing: border-box !important;
-  line-height: 46px !important;
+.work-page.theme-light .suggestions-dropdown div:hover {
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
-.mandatory-field {
-  border-left: 3px solid #cfb997;
-}
-
-.structural-lock {
-  background: #141414;
-  border-color: #1f1f1f;
-  color: #666666;
-  cursor: not-allowed;
-}
-
-.form-select {
-  appearance: none;
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www' viewBox='0 0 24 24' fill='none' stroke='%238c8c8c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
-  background-repeat: no-repeat;
-  background-position: right 16px center;
-  background-size: 16px;
-  padding-right: 40px;
-}
-
-.floating-label {
-  position: absolute;
-  left: 14px;
-  top: 50% !important;
-  transform: translateY(-50%) !important;
-  color: #555555;
-  font-size: 14px;
-  pointer-events: none;
-  background: #111111;
-  padding: 0 4px;
-  transition: transform 0.15s ease, top 0.15s ease, font-size 0.15s ease;
-  line-height: 1 !important;
-}
-
-.read-only-group .floating-label {
-  background: #141414;
-}
-
-.form-input:focus, 
-.form-select:focus {
-  border-color: #cfb997;
-  background: #1a1a1a;
-}
-
-.form-input:focus ~ .floating-label,
-.form-input.has-value ~ .floating-label,
-.form-select:focus ~ .floating-label,
-.form-select.has-value ~ .floating-label,
-.structural-lock ~ .floating-label {
-  top: 0 !important;
-  transform: translateY(-50%) !important;
-  font-size: 11px;
-  color: #cfb997;
-}
-
-.structural-lock ~ .floating-label {
-  color: #555555;
-}
-
-.form-input.valid-field,
-.form-input.valid-field:focus {
-  border-color: #10b981;
-}
-
-.form-input.invalid-field,
-.form-input.invalid-field:focus {
-  border-color: #ef4444;
-}
-
-.dropdown-divider-line {
-  color: #2d2d2d;
-  text-align: center;
-}
-
-.suggestions-dropdown {
-  position: absolute;
-  top: 52px;
-  left: 0;
-  width: 100%;
-  background: #161616;
-  border: 1px solid #282828;
-  border-radius: 4px;
-  max-height: 200px;
-  overflow-y: auto;
-  z-index: 100;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-}
-
-.suggestion-item {
-  padding: 10px 16px;
-  font-size: 13px;
-  color: #c5c5c5;
-  cursor: pointer;
-}
-
-.suggestion-item:hover {
-  background: #202020;
-  color: #cfb997;
-}
-
-.clear-btn {
-  position: absolute;
-  right: 14px;
-  background: none;
-  border: none;
-  color: #555555;
-  font-size: 18px;
-  cursor: pointer;
-  padding: 0;
-  line-height: 1;
-}
-
-.clear-btn:hover {
-  color: #ea585c;
-}
-
-.floating-group:focus-within .char-counter {
-  opacity: 0.6;
-}
-
-.char-counter {
-  position: absolute;
-  right: 40px;
-  bottom: 4px;
-  font-size: 10px;
-  color: #555555;
-  opacity: 0;
-  pointer-events: none;
-  z-index: 5;
-  line-height: 1 !important;
-}
-
-.embedded-input-spinner {
-  position: absolute;
-  right: 40px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 14px;
-  height: 14px;
-  border: 2px solid #282828;
-  border-top-color: #cfb997;
-  border-radius: 50%;
-  animation: spinInline 0.6s linear infinite;
-  pointer-events: none;
-  z-index: 4;
-}
-
-.chip-dock-wrapper {
-  width: 100%;
-  background-color: #16181f;
-  border: 1px solid #22252e;
-  border-radius: 6px;
-  padding: 14px 18px;
-  box-sizing: border-box;
-}
-
-.dock-label {
-  font-size: 9px;
-  font-weight: 700;
-  color: #525966;
-  letter-spacing: 0.5px;
-  display: block;
-  margin-bottom: 8px;
-}
-
-.chip-assembly-dock {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.active-badge-chip {
-  font-size: 10px;
-  font-weight: bold;
-  background-color: rgba(236, 72, 153, 0.08);
-  border: 1px solid rgba(236, 72, 153, 0.2);
-  color: #ec4899;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-.dock-empty-text {
-  font-size: 12px;
-  color: #525966;
-  font-style: italic;
-}
-
-.split-genre-selectors {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-  width: 100%;
-}
-
-.dropdown-wrapper {
-  position: relative;
-  width: 100%;
-}
-
-.select-compact {
-  height: 44px !important;
-  font-size: 13px !important;
-  border-left: none !important;
-  cursor: pointer;
-}
-
-.manual-override-animation {
-  margin-top: 4px;
-}
-
-.manual-text-input {
-  border-color: rgba(245, 158, 11, 0.3) !important;
-}
-
-.manual-text-input:focus {
-  border-color: #f59e0b !important;
-}
-
-.active-amber-label {
-  color: #f59e0b !important;
-}
-
-.form-actions-footer {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 24px;
-}
-
-.submit-btn {
-  height: 46px;
-  padding: 0 40px;
-  background: #cfb997;
-  color: #121212;
-  border: none;
-  border-radius: 4px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.submit-btn:hover:not(:disabled) {
-  background: #e5cfab;
-}
-
-.submit-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.submit-btn.btn-frozen {
-  background: #241818;
-  color: #ea585c;
-  border: 1px solid #442021;
-}
-
-.shortcut-legend {
-  font-size: 12px;
-  color: #555555;
-}
-
-kbd {
-  background: #1c1c1c;
-  border: 1px solid #333333;
-  color: #8c8c8c;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-family: inherit;
-  font-size: 11px;
-}
-
-.banner-alert {
-  padding: 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.banner-alert.strong {
-  background: #1c1212;
-  border: 1px solid #442323;
-  color: #ea585c;
-}
-
-.banner-alert.medium {
-  background: #1c1812;
-  border: 1px solid #443723;
-  color: #eab308;
-}
-
-.banner-alert.weak {
-  background: #12171c;
-  border: 1px solid #233544;
-  color: #38bdf8;
-}
-
-.banner-header {
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-
-.matches-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.match-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 14px;
-  background: #141414;
-  border: 1px solid #242424;
-  border-radius: 4px;
-}
-
-.match-details {
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.match-title {
-  color: #e0e0e0;
-  font-weight: 500;
-}
-
-.match-meta {
-  font-size: 12px;
-  color: #8c8c8c;
-}
-
-.action-btn-secondary {
-  height: 32px;
-  padding: 0 12px;
-  background: #222222;
-  color: #cfb997;
-  border: 1px solid #333333;
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  width: 100%;
-}
-
-.action-btn-secondary:hover {
-  background: #2c2c2c;
-}
-
-.override-container {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid #442323;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  color: #8c8c8c;
-  font-size: 13px;
-}
-
-.custom-checkbox {
-  accent-color: #ea585c;
-}
-
-.skeleton-loader-banner {
-  position: absolute !important;
-  left: 0 !important;
-  top: 0 !important;
-  background: #141414;
-  border: 1px solid #1c1c1c;
-  border-radius: 6px;
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  box-sizing: border-box;
-  z-index: 5;
-}
-
-.skeleton-line {
-  background: linear-gradient(90deg, #1f1f1f 25%, #2c2c2c 50%, #1f1f1f 75%);
-  background-size: 200% 100%;
-  animation: loadingPulse 1.5s infinite ease-in-out;
-  border-radius: 4px;
-}
-
-.skeleton-line.header-pulse {
-  width: 120px;
-  height: 14px;
-}
-
-.skeleton-line.card-pulse {
-  width: 100%;
-  height: 45px;
-}
-
-@keyframes loadingPulse {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-.modal-overlay-shroud { 
-  position: fixed; 
-  top: 0; 
-  left: 0; 
-  width: 100vw; 
-  height: 100vh; 
-  background-color: rgba(10, 11, 13, 0.85); 
-  backdrop-filter: blur(4px); 
-  z-index: 10000; 
-  display: flex; 
-  align-items: center; 
-  justify-content: center; 
-  box-sizing: border-box;
-}
-.modal-alert-box { background-color: #16181f; border-top: 4px solid #22252e; padding: 40px; border-radius: 8px; width: 100%; max-width: 480px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
-.border-emerald { border-top-color: #10b981; }
-.modal-tag { font-size: 10px; font-weight: 700; color: #525966; letter-spacing: 2px; margin-bottom: 16px; text-transform: uppercase; }
-.modal-heading { font-size: 18px; font-weight: 700; color: #ffffff; margin: 0 0 16px 0; letter-spacing: 0.5px; }
-.modal-body-text { font-size: 13px; line-height: 1.6; color: #a3a8b4; margin: 0 0 24px 0; font-family: inherit; }
-.modal-input-field-block { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; width: 100%; box-sizing: border-box; }
-.modal-input-label { font-size: 10px; font-weight: 700; color: #cfb997; letter-spacing: 1px; }
-.modal-reason-input { background-color: #111216; border: 1px solid #22252e; border-radius: 4px; padding: 12px; font-family: inherit; font-size: 13px; color: #ffffff; width: 100%; box-sizing: border-box; }
-.modal-reason-input:focus { outline: none; border-color: #cfb997; }
-.modal-button-row { display: flex; justify-content: flex-end; gap: 16px; }
-.m-btn { font-family: inherit; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; }
-.bg-emerald { background-color: #10b981; color: #ffffff; }
-.bg-emerald:hover { background-color: #059669; }
-.m-btn-dismiss { background-color: transparent; border: 1px solid #2e333d; color: #e2e4e9; }
-.m-btn-dismiss:hover { background-color: rgba(255,255,255,0.03); }
-
-.operational-response-deck {
-  margin-top: 28px;
-  width: 100%;
-}
-
-.status-card-panel {
-  background-color: #16181f;
-  border: 1px solid #22252e;
-  border-top: 4px solid #22252e;
-  border-radius: 6px;
-  padding: 24px;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-}
-
-.border-crimson {
-  border-top-color: #ef4444 !important;
-}
-
-.text-emerald {
-  color: #10b981 !important;
-}
-
-.text-crimson {
-  color: #ef4444 !important;
-}
-
-.text-white {
+.work-page.theme-light .submit-btn,
+.work-page.theme-light .confirm-btn {
+  background: #0d9488;
+  border-color: #0d9488;
   color: #ffffff;
 }
 
-.text-gold {
-  color: #cfb997;
+.work-page.theme-light .submit-btn:hover:not(:disabled),
+.work-page.theme-light .confirm-btn:hover:not(:disabled) {
+  background: #0f766e;
 }
 
-.deck-tag {
-  font-size: 9px;
+.work-page.theme-light .cancel-btn {
+  background: transparent;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+
+.work-page.theme-light .match-row button {
+  border-color: #b8c5d2;
+  color: #0f766e;
+}
+
+.work-page.theme-light .modal-backdrop {
+  background: rgba(15,23,42,.38);
+}
+
+.work-page.theme-light .result-card.success {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.work-page.theme-light .result-card.error {
+  background: #fff7f7;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.work-page.theme-light .result-card span {
+  color: #64748b;
+}
+
+.work-page.theme-light .isbn-top-alert {
+  background: #fff4f2;
+  border-color: #f0b8b1;
+  border-left-color: #b45149;
+  color: #7f2924;
+  box-shadow: 0 6px 18px rgba(127,41,36,.08);
+}
+
+.work-page.theme-light .isbn-top-alert p {
+  color: #8b4a45;
+}
+
+.work-page.theme-light .isbn-lookup-status.error {
+  background: #fff4f2;
+  border-color: #efc1bc;
+  color: #9f3f38;
+}
+
+.work-page.theme-light .isbn-lookup-status.success {
+  color: #28734b;
+}
+
+/* Keep dark mode deliberately close to the original approved look. */
+.work-page.theme-dark {
+  color: var(--cw-text);
+}
+
+.work-page.theme-dark .authority-badge,
+.work-page.theme-dark .authority-note,
+.work-page.theme-dark .intake-card,
+.work-page.theme-dark .form-card,
+.work-page.theme-dark .check-card,
+.work-page.theme-dark .authority-footer,
+.work-page.theme-dark .confirm-modal {
+  background: var(--cw-card);
+  border-color: var(--cw-border);
+}
+
+.work-page.theme-dark .field input,
+.work-page.theme-dark .field select,
+.work-page.theme-dark .field textarea,
+.work-page.theme-dark .parser-row input,
+.work-page.theme-dark .confirm-modal input {
+  background: var(--cw-input);
+  border-color: var(--cw-border-soft);
+  color: var(--cw-text);
+}
+
+.work-page.theme-dark .section-heading,
+.work-page.theme-dark .check-heading,
+.work-page.theme-dark .match-row {
+  border-color: var(--cw-border-soft);
+}
+
+
+/* ============================================================
+   CREATE WORK — REFINED LIGHT THEME
+   Cool archival workspace + white catalogue cards.
+   The authority badge is intentionally a separate warm
+   institutional surface.
+============================================================ */
+
+.work-page.theme-light {
+  --cw-page: #e9edf3;
+  --cw-card: #ffffff;
+  --cw-input: #f7f9fb;
+  --cw-border: #cfd7e2;
+  --cw-border-soft: #dde3eb;
+  --cw-text: #172033;
+  --cw-muted: #536174;
+  --cw-accent: #0d9488;
+  --cw-accent-warm: #806f4f;
+
+  max-width: none;
+  width: 100%;
+  min-height: 100%;
+  background: var(--cw-page);
+  padding: 34px 30px 60px;
+}
+
+/* Keep the workspace background full-width while preserving the
+   comfortable reading width of the actual catalogue content. */
+.work-page.theme-light > .work-header,
+.work-page.theme-light > .authority-note,
+.work-page.theme-light > .intake-card,
+.work-page.theme-light > .form-card,
+.work-page.theme-light > .check-card,
+.work-page.theme-light > .authority-footer,
+.work-page.theme-light > .result-card {
+  width: min(1120px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Header */
+.work-page.theme-light .eyebrow,
+.work-page.theme-light .footer-label,
+.work-page.theme-light .modal-eyebrow {
+  color: #0f766e;
+}
+
+.work-page.theme-light h1,
+.work-page.theme-light h2,
+.work-page.theme-light .authority-footer strong,
+.work-page.theme-light .check-clear strong,
+.work-page.theme-light .match-row strong {
+  color: var(--cw-text);
+}
+
+.work-page.theme-light .page-intro,
+.work-page.theme-light .section-heading p,
+.work-page.theme-light .check-heading p,
+.work-page.theme-light .authority-footer p,
+.work-page.theme-light .field > span,
+.work-page.theme-light .authority-badge small,
+.work-page.theme-light .check-clear small,
+.work-page.theme-light .match-row small,
+.work-page.theme-light .override {
+  color: var(--cw-muted);
+}
+
+/* Chief authority badge — deliberately different from ordinary cards. */
+.work-page.theme-light .authority-badge.chief {
+  background: #f3ecdd;
+  border-color: #d7c7a5;
+  color: #302a20;
+  box-shadow: 0 3px 10px rgba(76, 59, 29, 0.08);
+}
+
+.work-page.theme-light .authority-badge.chief strong {
+  color: #302a20;
+}
+
+.work-page.theme-light .authority-badge.chief small {
+  color: #74664e;
+}
+
+.work-page.theme-light .authority-badge.chief .badge-dot {
+  background: #a88f5d;
+}
+
+/* Keeper gets a cool verification identity rather than the Chief's gold. */
+.work-page.theme-light .authority-badge.keeper {
+  background: #e7f0f2;
+  border-color: #b8d0d5;
+  color: #18353b;
+}
+
+.work-page.theme-light .authority-badge.keeper strong {
+  color: #18353b;
+}
+
+.work-page.theme-light .authority-badge.keeper small {
+  color: #557078;
+}
+
+.work-page.theme-light .authority-badge.keeper .badge-dot {
+  background: #4f8b91;
+}
+
+/* Authority explanation remains distinct from ordinary catalogue cards. */
+.work-page.theme-light .authority-note {
+  background: #f4f7fa;
+  border-color: #ccd6e1;
+  color: var(--cw-text);
+}
+
+.work-page.theme-light .chief-note {
+  border-left-color: #a88f5d;
+}
+
+.work-page.theme-light .keeper-note {
+  border-left-color: #4f8b91;
+}
+
+.work-page.theme-light .authority-note .note-title {
+  color: var(--cw-text);
+}
+
+.work-page.theme-light .authority-note p {
+  color: var(--cw-muted);
+}
+
+/* Normal catalogue surfaces */
+.work-page.theme-light .intake-card,
+.work-page.theme-light .form-card,
+.work-page.theme-light .check-card,
+.work-page.theme-light .authority-footer {
+  background: var(--cw-card);
+  border-color: var(--cw-border);
+  box-shadow: 0 2px 8px rgba(23, 32, 51, 0.035);
+}
+
+.work-page.theme-light .section-heading,
+.work-page.theme-light .check-heading,
+.work-page.theme-light .match-row {
+  border-color: var(--cw-border-soft);
+}
+
+.work-page.theme-light .section-number {
+  color: #0d8179;
+}
+
+/* Inputs are intentionally one step darker than the white cards. */
+.work-page.theme-light .parser-row input,
+.work-page.theme-light .field input,
+.work-page.theme-light .field select,
+.work-page.theme-light .field textarea,
+.work-page.theme-light .confirm-modal input,
+.work-page.theme-light .generated strong,
+.work-page.theme-light .genre-preview > div {
+  background: var(--cw-input);
+  border-color: var(--cw-border);
+  color: var(--cw-text);
+}
+
+.work-page.theme-light .parser-row input::placeholder,
+.work-page.theme-light .field input::placeholder,
+.work-page.theme-light .field textarea::placeholder,
+.work-page.theme-light .confirm-modal input::placeholder {
+  color: #718096;
+  opacity: 1;
+}
+
+.work-page.theme-light .parser-row input:focus,
+.work-page.theme-light .field input:focus,
+.work-page.theme-light .field select:focus,
+.work-page.theme-light .field textarea:focus,
+.work-page.theme-light .confirm-modal input:focus {
+  border-color: #0d9488;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.10);
+}
+
+.work-page.theme-light .input-wrap button {
+  color: #64748b;
+}
+
+.work-page.theme-light .input-wrap em,
+.work-page.theme-light .generated strong {
+  color: #64748b;
+}
+
+.work-page.theme-light .parser-icon,
+.work-page.theme-light .parser-status,
+.work-page.theme-light .checking {
+  color: #0f766e;
+}
+
+/* Genre surfaces */
+.work-page.theme-light .genre-preview span {
+  background: #e4f2ef;
+  color: #0f766e;
+}
+
+.work-page.theme-light .genre-preview small {
+  color: #64748b;
+}
+
+/* Suggestions */
+.work-page.theme-light .suggestions-dropdown {
+  background: #ffffff;
+  border-color: var(--cw-border);
+  box-shadow: 0 12px 28px rgba(23, 32, 51, 0.14);
+}
+
+.work-page.theme-light .suggestions-dropdown div {
+  color: #334155;
+}
+
+.work-page.theme-light .suggestions-dropdown div:hover {
+  background: #edf2f6;
+  color: #172033;
+}
+
+/* Catalogue check */
+.work-page.theme-light .check-clear > span {
+  border-color: #9ab5a3;
+  color: #3d7350;
+}
+
+.work-page.theme-light .duplicate-alert.strong {
+  background: #fff7f5;
+  border-top-color: #edc8c2;
+}
+
+.work-page.theme-light .duplicate-alert.medium {
+  background: #fffaf0;
+}
+
+.work-page.theme-light .duplicate-alert.weak {
+  background: #f2f7f9;
+}
+
+.work-page.theme-light .match-row button {
+  border-color: #9bb8bd;
+  color: #0f766e;
+}
+
+/* Authority action */
+.work-page.theme-light .submit-btn,
+.work-page.theme-light .confirm-btn {
+  background: #0d9488;
+  border-color: #0d9488;
+  color: #ffffff;
+}
+
+.work-page.theme-light .submit-btn:hover:not(:disabled),
+.work-page.theme-light .confirm-btn:hover:not(:disabled) {
+  background: #0f766e;
+}
+
+.work-page.theme-light .cancel-btn {
+  background: transparent;
+  border-color: #c2ccd7;
+  color: #475569;
+}
+
+/* Modal */
+.work-page.theme-light .modal-backdrop {
+  background: rgba(23, 32, 51, 0.42);
+}
+
+.work-page.theme-light .confirm-modal {
+  background: #ffffff;
+  border-color: var(--cw-border);
+  color: var(--cw-text);
+  box-shadow: 0 25px 70px rgba(23, 32, 51, 0.24);
+}
+
+.work-page.theme-light .confirm-modal h2 {
+  color: var(--cw-text);
+}
+
+.work-page.theme-light .confirm-modal > p {
+  color: var(--cw-muted);
+}
+
+.work-page.theme-light .confirm-modal label span {
+  color: var(--cw-muted);
+}
+
+/* ISBN warning */
+.work-page.theme-light .isbn-top-alert {
+  background: #fff4f2;
+  border-color: #efc3bc;
+  border-left-color: #b45149;
+  color: #7f2924;
+  box-shadow: 0 6px 18px rgba(127, 41, 36, 0.08);
+}
+
+.work-page.theme-light .isbn-top-alert p {
+  color: #8b4a45;
+}
+
+/* Result */
+.work-page.theme-light .result-card.success {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  color: #166534;
+}
+
+.work-page.theme-light .result-card.error {
+  background: #fff7f7;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.work-page.theme-light .result-card span {
+  color: #64748b;
+}
+
+@media (max-width: 760px) {
+  .work-page.theme-light {
+    padding: 24px 16px 45px;
+  }
+}
+
+
+/* ============================================================
+   FINAL LIGHT-MODE CONTRAST PASS
+   Goal: make every structural layer unmistakable.
+============================================================ */
+
+.work-page.theme-light {
+  background: #e9edf3;
+}
+
+/* Catalogue cards: visibly separated from the workspace. */
+.work-page.theme-light .intake-card,
+.work-page.theme-light .form-card,
+.work-page.theme-light .check-card,
+.work-page.theme-light .authority-footer {
+  background: #ffffff;
+  border: 1px solid #c4ceda;
+  box-shadow:
+    0 2px 4px rgba(23, 32, 51, 0.035),
+    0 8px 20px rgba(23, 32, 51, 0.045);
+}
+
+/* Section headers get their own quiet surface, so the card
+   does not read as one uninterrupted white sheet. */
+.work-page.theme-light .section-heading,
+.work-page.theme-light .check-heading {
+  background: #f4f6f9;
+  border-bottom: 1px solid #d4dce5;
+}
+
+/* Give the first rapid-intake body a matching visual division. */
+.work-page.theme-light .intake-card .parser-row {
+  background: #ffffff;
+}
+
+/* Inputs: clearly identifiable, but still restrained. */
+.work-page.theme-light .parser-row input,
+.work-page.theme-light .field input,
+.work-page.theme-light .field select,
+.work-page.theme-light .field textarea,
+.work-page.theme-light .confirm-modal input,
+.work-page.theme-light .generated strong,
+.work-page.theme-light .genre-preview > div {
+  background: #f5f7fa;
+  border: 1px solid #c5cfda;
+  color: #172033;
+}
+
+/* Slightly stronger focus so the active field is obvious. */
+.work-page.theme-light .parser-row input:focus,
+.work-page.theme-light .field input:focus,
+.work-page.theme-light .field select:focus,
+.work-page.theme-light .field textarea:focus,
+.work-page.theme-light .confirm-modal input:focus {
+  border-color: #0d9488;
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.11);
+  background: #ffffff;
+}
+
+/* Chief authority: unmistakably separate from catalogue cards. */
+.work-page.theme-light .authority-badge.chief {
+  background: #efe5cf;
+  border: 1px solid #cfbb91;
+  box-shadow:
+    0 2px 5px rgba(76, 59, 29, 0.06),
+    0 7px 16px rgba(76, 59, 29, 0.07);
+}
+
+.work-page.theme-light .authority-badge.chief strong {
+  color: #332b1d;
+}
+
+.work-page.theme-light .authority-badge.chief small {
+  color: #756447;
+}
+
+.work-page.theme-light .authority-badge.chief .badge-dot {
+  background: #a98e58;
+  box-shadow: 0 0 0 3px rgba(169, 142, 88, 0.12);
+}
+
+/* Authority note: separate from both the page and the catalogue cards. */
+.work-page.theme-light .authority-note {
+  background: #f7f8fa;
+  border: 1px solid #cbd5df;
+  box-shadow: 0 2px 7px rgba(23, 32, 51, 0.025);
+}
+
+/* Keep the Chief footer/action area visually authoritative. */
+.work-page.theme-light .authority-footer {
+  border-left: 3px solid #a98e58;
+}
+
+/* Check area should read as a deliberate status panel. */
+.work-page.theme-light .check-clear {
+  background: #f8fafb;
+  border: 1px solid #d2dbe4;
+  border-radius: 7px;
+}
+
+/* Make the section number and headings slightly more structured. */
+.work-page.theme-light .section-number {
+  color: #0d8179;
   font-weight: 700;
-  letter-spacing: 1px;
-  margin-bottom: 16px;
-  text-transform: uppercase;
 }
 
-.panel-main-row {
-  display: flex;
-  gap: 40px;
+.work-page.theme-light .field > span {
+  color: #465569;
+  font-weight: 700;
+}
+
+/* Small separation between consecutive cards. */
+.work-page.theme-light .intake-card,
+.work-page.theme-light .form-card,
+.work-page.theme-light .check-card {
+  margin-bottom: 18px;
+}
+
+
+/* LIGHT MODE — SLIGHTLY STRONGER CONTRAST */
+.work-page.theme-light {
+  background: #e3e8f0;
+}
+
+.work-page.theme-light .intake-card,
+.work-page.theme-light .form-card,
+.work-page.theme-light .check-card,
+.work-page.theme-light .authority-footer {
+  border-color: #b8c4d1;
+  box-shadow:
+    0 2px 5px rgba(23, 32, 51, 0.05),
+    0 9px 22px rgba(23, 32, 51, 0.065);
+}
+
+.work-page.theme-light .section-heading,
+.work-page.theme-light .check-heading {
+  background: #edf1f5;
+  border-bottom-color: #c6d0db;
+}
+
+.work-page.theme-light .parser-row input,
+.work-page.theme-light .field input,
+.work-page.theme-light .field select,
+.work-page.theme-light .field textarea,
+.work-page.theme-light .generated strong,
+.work-page.theme-light .genre-preview > div {
+  background: #f1f4f7;
+  border-color: #b9c5d1;
+}
+
+.work-page.theme-light .parser-row input:hover,
+.work-page.theme-light .field input:hover,
+.work-page.theme-light .field select:hover,
+.work-page.theme-light .field textarea:hover {
+  border-color: #aab8c6;
+}
+
+.work-page.theme-light .authority-note {
+  background: #f1f4f7;
+  border-color: #bdc9d5;
+}
+
+.work-page.theme-light .check-clear {
+  background: #f1f5f7;
+  border-color: #c1ccd6;
+}
+
+.work-page.theme-light .authority-badge.chief {
+  background: #eadfc7;
+  border-color: #c4ad7d;
+}
+
+
+/* ============================================================
+   LIGHT MODE — TURQUOISE CATALOGUE CARDS
+   The light theme now mirrors the dark theme's visual structure:
+   coloured catalogue cards, distinct fields, and clear hierarchy.
+============================================================ */
+
+.work-page.theme-light {
+  background: #e7eef0;
+}
+
+/* Main catalogue cards: turquoise/blue-green, not white. */
+.work-page.theme-light .intake-card,
+.work-page.theme-light .form-card,
+.work-page.theme-light .check-card {
+  background: #d5eaea;
+  border: 1px solid #a9cdcd;
+  box-shadow:
+    0 2px 5px rgba(20, 67, 70, 0.06),
+    0 9px 22px rgba(20, 67, 70, 0.07);
+}
+
+/* Section headers are a lighter turquoise layer within each card. */
+.work-page.theme-light .section-heading,
+.work-page.theme-light .check-heading {
+  background: #c9e3e3;
+  border-bottom: 1px solid #a9caca;
+}
+
+/* Body remains lighter than the card, while retaining the tint. */
+.work-page.theme-light .intake-card .parser-row,
+.work-page.theme-light .form-card .form-body,
+.work-page.theme-light .check-card .check-body {
+  background: transparent;
+}
+
+/* Inputs remain visibly inset from the turquoise cards. */
+.work-page.theme-light .parser-row input,
+.work-page.theme-light .field input,
+.work-page.theme-light .field select,
+.work-page.theme-light .field textarea,
+.work-page.theme-light .generated strong,
+.work-page.theme-light .genre-preview > div {
+  background: #edf6f6;
+  border: 1px solid #a9c5c7;
+  color: #172f35;
+}
+
+.work-page.theme-light .parser-row input:focus,
+.work-page.theme-light .field input:focus,
+.work-page.theme-light .field select:focus,
+.work-page.theme-light .field textarea:focus {
+  background: #f8fcfc;
+  border-color: #168f8a;
+  box-shadow: 0 0 0 3px rgba(22, 143, 138, 0.13);
+}
+
+/* Stronger headings on the coloured cards. */
+.work-page.theme-light .section-heading h2,
+.work-page.theme-light .check-heading h2 {
+  color: #17333a;
+}
+
+.work-page.theme-light .section-heading p,
+.work-page.theme-light .check-heading p {
+  color: #4d6870;
+}
+
+.work-page.theme-light .section-number {
+  color: #087c78;
+}
+
+/* Labels need enough contrast against turquoise. */
+.work-page.theme-light .field > span {
+  color: #38545b;
+  font-weight: 700;
+}
+
+/* Authority explanation sits outside the catalogue-card system. */
+.work-page.theme-light .authority-note {
+  background: #f4f7f8;
+  border-color: #bdccd1;
+}
+
+/* Chief authority remains intentionally gold and therefore stands out
+   from the turquoise catalogue surfaces. */
+.work-page.theme-light .authority-badge.chief {
+  background: #eadfc7;
+  border-color: #c4ad7d;
+}
+
+.work-page.theme-light .authority-footer {
+  background: #f5f8f8;
+  border-color: #bdccd1;
+  border-left: 3px solid #a98e58;
+}
+
+/* Status panel keeps its own neutral treatment. */
+.work-page.theme-light .check-clear {
+  background: #edf5f5;
+  border-color: #b9cdcf;
+}
+
+/* Suggestions stay clean and neutral above the tinted cards. */
+.work-page.theme-light .suggestions-dropdown {
+  background: #ffffff;
+  border-color: #b9cbd0;
+}
+
+/* Slightly stronger separation between catalogue sections. */
+.work-page.theme-light .intake-card,
+.work-page.theme-light .form-card,
+.work-page.theme-light .check-card {
   margin-bottom: 20px;
 }
 
-.stat-block {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.stat-block .stat-label {
-  font-size: 10px;
-  font-weight: 700;
-  color: #525966;
-  letter-spacing: 0.5px;
-}
-
-.stat-value {
-  font-size: 20px;
-  font-weight: 700;
-  font-family: monospace;
-}
-
-.panel-footer-message {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  color: #8c8c8c;
-  margin-bottom: 12px;
-}
-
-.spinner-inline {
-  width: 12px;
-  height: 12px;
-  border: 2px solid #22252e;
-  border-top-color: #10b981;
-  border-radius: 50%;
-  animation: spinInline 0.8s linear infinite;
-}
-
-.progress-bar-container {
-  width: 100%;
-  height: 3px;
-  background-color: #111216;
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  width: 0%;
-  animation: loadTransition 0.4s forwards cubic-bezier(0.1, 0.8, 0.3, 1);
-}
-
-.fill-emerald {
-  background-color: #10b981;
-}
-
-.error-heading {
-  font-size: 14px;
-  font-weight: 600;
-  color: #e2e4e9;
-  margin: 0 0 6px 0;
-}
-
-.error-description {
-  font-size: 13px;
-  line-height: 1.5;
-  color: #a3a8b4;
-  margin: 0;
-  font-family: monospace;
-  background-color: #0f1015;
-  padding: 12px;
-  border: 1px solid #1c1e24;
-  border-radius: 4px;
-  word-break: break-all;
-}
-
-@keyframes spinInline {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes loadTransition {
-  to { width: 100%; }
-}
 </style>

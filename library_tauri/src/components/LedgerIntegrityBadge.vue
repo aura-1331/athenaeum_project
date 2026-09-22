@@ -1,4 +1,3 @@
-Set-Content -Path "src\components\LedgerIntegrityBadge.vue" -Value @'
 <template>
   <div class="ledger-badge-container" :class="statusClass">
     <div class="badge-main">
@@ -69,15 +68,7 @@ const truncatedHash = computed(() => {
 })
 
 function getToken() {
-  return (
-    authStore.token ||
-    authStore.accessToken ||
-    authStore.access_token ||
-    (authStore.user && (authStore.user.token || authStore.user.access_token)) ||
-    localStorage.getItem('access_token') ||
-    localStorage.getItem('token') ||
-    ''
-  )
+  return authStore.accessToken || ''
 }
 
 async function verifyLedger() {
@@ -273,4 +264,3 @@ onMounted(() => {
   to { opacity: 0.4; }
 }
 </style>
-'@

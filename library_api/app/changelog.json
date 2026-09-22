@@ -1,5 +1,27 @@
 [
   {
+    "version": "v2.0.1",
+    "date": "2026-09-10",
+    "sections": [
+      {
+        "category": "Minor Redesign & UI Improvements ",
+        "notes": [
+          "Redesigned the About & System specs dashboard with modern glassmorphism UI",
+          "Added standalone Release History & Changelog viewer",
+          "Improved OTA update feedback and download indicators"
+        ]
+      },
+      {
+        "category": "Authority Registry",
+        "notes": [
+          "Added mandatory audit justification comments",
+          "Implemented side-drawer alias and variant manager"
+        ]
+      }
+    ]
+  },
+
+  {
     "version": "v2.0.0",
     "date": "2026-08-29",
     "sections": [

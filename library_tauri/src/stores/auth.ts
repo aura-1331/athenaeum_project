@@ -26,8 +26,8 @@ export const useAuthStore = defineStore('auth', () => {
   // -------------------------
   // 1. STATE
   // -------------------------
-  const accessToken = ref<string | null>(localStorage.getItem('access_token') || null)
-  const refreshToken = ref<string | null>(localStorage.getItem('refresh_token') || null)
+  const accessToken = ref<string | null>(null)
+  const refreshToken = ref<string | null>(null)
   const userId = ref<string>("USR-01")
   const userName = ref<string>("Archive Operator")
   const userRole = ref<string>("The Seeker")
@@ -54,65 +54,156 @@ export const useAuthStore = defineStore('auth', () => {
   const isAuthenticated = computed(() => !!accessToken.value)
 
   // -------------------------
+  // ROLE-BASED PERMISSIONS
+  // -------------------------
+
+  const rolePermissions: Record<string, string[]> = {
+    "the chief": [
+      "dashboard.view",
+      "catalogue.view",
+      "catalogue.create",
+      "catalogue.edit",
+      "catalogue.delete",
+      "catalogue.approve",
+      "search.view",
+      "audit.view",
+      "operations.view",
+      "operations.execute",
+      "classification.view",
+      "classification.edit",
+      "incidents.view",
+      "incidents.manage",
+      "reports.view",
+      "settings.manage",
+      "users.manage"
+    ],
+
+    "the keeper": [
+      "dashboard.view",
+      "catalogue.view",
+      "catalogue.create",
+      "catalogue.edit",
+      "search.view",
+      "operations.view",
+      "operations.execute",
+      "classification.view",
+      "reports.view"
+    ],
+
+    "the seeker": [
+      "dashboard.view",
+      "catalogue.view",
+      "search.view"
+    ],
+
+    "temporary seeker": [
+      "dashboard.view",
+      "catalogue.view",
+      "search.view"
+    ]
+  }
+
+  // Normalize the role received from the backend.
+  const normalizedRole = computed(() => {
+    return String(userRole.value || "")
+      .trim()
+      .toLowerCase()
+  })
+
+  // Check whether the current user has a specific permission.
+  function hasPermission(permission: string): boolean {
+    const permissions = rolePermissions[normalizedRole.value] || []
+    return permissions.includes(permission)
+  }
+
+  // -------------------------
   // 3. ACTIONS
   // -------------------------
   function login(tokens: any, userObj?: any) {
-    const rawToken = typeof tokens === 'string' 
-      ? tokens 
+    const rawToken = typeof tokens === 'string'
+      ? tokens
       : (tokens?.access_token || tokens?.access || null)
 
-    const rawRefresh = typeof tokens === 'object'
-      ? (tokens?.refresh_token || tokens?.refresh || null)
-      : null
-
     accessToken.value = rawToken
-    refreshToken.value = rawRefresh
-
-    if (rawToken) {
-      localStorage.setItem('access_token', rawToken)
-      localStorage.setItem('token', rawToken)
-    }
-
-    if (rawRefresh) {
-      localStorage.setItem('refresh_token', rawRefresh)
-    }
+    refreshToken.value = null
 
     if (userObj) {
-      userId.value = String(userObj.id || userObj.user_id || userObj.operator_id || "USR-01")
-      userName.value = userObj.name || userObj.username || "Archive Operator"
-      userRole.value = userObj.role || userObj.user_role || "The Seeker"
-      localStorage.setItem('user', JSON.stringify(userObj))
+      userId.value = String(
+        userObj.id ||
+        userObj.user_id ||
+        userObj.operator_id ||
+        "USR-01"
+      )
+
+      userName.value =
+        userObj.name ||
+        userObj.username ||
+        "Archive Operator"
+
+      userRole.value =
+        userObj.role ||
+        userObj.user_role ||
+        "The Seeker"
+
+      localStorage.setItem(
+        'user',
+        JSON.stringify(userObj)
+      )
     }
   }
 
   async function logout() {
     const tokenVal = accessToken.value
     const sessionId = localStorage.getItem('active_session_id')
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+    const baseUrl =
+      import.meta.env.VITE_API_URL ||
+      'http://127.0.0.1:8000'
 
-    // 1. Dispatch logout telemetry to backend
+    // 1. Revoke the refresh session and clear the HttpOnly cookie
+    try {
+      await fetch(
+        `${baseUrl}/auth/logout`,
+        {
+          method: 'POST',
+          credentials: 'include'
+        }
+      )
+    } catch (err) {
+      console.warn(
+        'Could not revoke refresh session:',
+        err
+      )
+    }
+
+    // 2. Dispatch logout telemetry to backend
     if (tokenVal) {
       try {
-        await fetch(`${baseUrl}/status_audit/session/logout`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${tokenVal}`
-          },
-          body: JSON.stringify({
-            session_id: sessionId || null,
-            user_id: userId.value,
-            username: userName.value,
-            role: userRole.value,
-            reason: 'Operator initiated sign-out'
-          })
-        })
+        await fetch(
+          `${baseUrl}/status_audit/session/logout`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${tokenVal}`
+            },
+            body: JSON.stringify({
+              session_id: sessionId || null,
+              user_id: userId.value,
+              username: userName.value,
+              role: userRole.value,
+              reason: 'Operator initiated sign-out'
+            })
+          }
+        )
       } catch (err) {
-        console.warn('Could not record logout audit event:', err)
+        console.warn(
+          'Could not record logout audit event:',
+          err
+        )
       }
     }
 
-    // 2. Reset Pinia State & clean up storage
+    // 3. Reset Pinia State & clean up storage
     accessToken.value = null
     refreshToken.value = null
     userId.value = "USR-01"
@@ -123,9 +214,12 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('token')
     localStorage.removeItem('user')
-    localStorage.setItem("logout", Date.now().toString())
+    localStorage.setItem(
+      "logout",
+      Date.now().toString()
+    )
 
-    // 3. Redirect to login screen
+    // 4. Redirect to login screen
     if (router) {
       await router.push('/login')
     }
@@ -142,10 +236,18 @@ export const useAuthStore = defineStore('auth', () => {
     token,
     role,
     user,
+
+    normalizedRole,
+    hasPermission,
+
     login,
     logout
   }
 }, {
+  // Persist identity/session information,
+  // but never persist authentication tokens.
   // @ts-ignore
-  persist: true
+  persist: {
+    omit: ['accessToken', 'refreshToken']
+  }
 })

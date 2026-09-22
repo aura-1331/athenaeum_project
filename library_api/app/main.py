@@ -1,6 +1,8 @@
 import asyncio
 import platform
 import time
+import uuid
+from urllib import response
 import pyotp
 import qrcode
 import io
@@ -11,7 +13,9 @@ import json
 from pathlib import Path
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Depends, HTTPException, Request, Form
+from fastapi import FastAPI, Depends, HTTPException, Request, Form, Response
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
@@ -20,8 +24,26 @@ from jose import jwt, JWTError
 from app.audit_utils import audit_action
 from pdf.pdf_generator import generate_pdf
 from app.database import get_connection, record_audit
-from app.token_manager import PUBLIC_KEY, ALGORITHM, create_token
-from app.auth import router as auth_router, get_current_user
+from app.token_manager import (
+    PUBLIC_KEY,
+    ALGORITHM,
+    REFRESH_EXPIRE_DAYS,
+    create_token,
+    consume_once,
+)
+from app.auth import router as auth_router, get_current_user, limiter
+
+def consume_totp_once(user_id, totp) -> bool:
+    """Allow a valid TOTP time-step to be consumed only once."""
+    now = datetime.now(timezone.utc)
+    time_step = int(now.timestamp()) // totp.interval
+    ttl_seconds = totp.interval * 2
+
+    return consume_once(
+        f"2fa:totp:{user_id}:{time_step}",
+        ttl_seconds
+    )
+
 
 from app.utils.security import (
     hash_password,
@@ -46,7 +68,7 @@ from app.routers import (
     print as print_router,
     circulation,
     admin_config,
-    authority,  
+    authority,
     profile
 )
 
@@ -64,6 +86,12 @@ if platform.system() == "Windows":
 app = FastAPI(
     title="Athenaeum Library API",
     swagger_ui_parameters={"deepLinking": True},
+)
+
+app.state.limiter = limiter
+app.add_exception_handler(
+    RateLimitExceeded,
+    _rate_limit_exceeded_handler
 )
 
 app.add_middleware(
@@ -113,7 +141,7 @@ class KeeperRecommendationModel(BaseModel):
 
 class ChiefDecisionModel(BaseModel):
     decision: str
-    notes: str | None = None    
+    notes: str | None = None
 
 
 # ----------------------------
@@ -273,7 +301,7 @@ async def chief_decide_request(
         is_approved = req.decision == "APPROVE"
         action_type = "ACCESS_REQUEST_APPROVE" if is_approved else "ACCESS_REQUEST_REJECT"
         target_id = operator_id if is_approved else f"REQ-{request_id}"
-        
+
         default_reason = (
             f"Approved access request #{request_id} for {request_data[0]} ({request_data[2]})"
             if is_approved
@@ -406,7 +434,7 @@ async def revoke_user(
 
 
 # -----------------------------
-# Keeper Review Recommendation 
+# Keeper Review Recommendation
 # -----------------------------
 @app.post("/keeper/recommend-request/{request_id}")
 async def keeper_recommend_request(
@@ -498,6 +526,84 @@ async def keeper_recommend_request(
         cur.close()
         conn.close()
 
+# ----------------------------
+# KEEPER NOTIFICATIONS
+# ----------------------------
+@app.get("/notifications")
+async def get_notifications(
+    current_user: dict = Depends(get_current_user)
+):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        user_id = current_user["user_id"]
+
+        cur.execute(
+            """
+            SELECT
+                n.notification_id,
+                n.message,
+                n.is_read,
+                n.created_at
+            FROM public.chief_notifications n
+            INNER JOIN public.users u
+                ON u.identity_id = n.identity_id
+            WHERE u.user_id = %s
+                AND n.is_read IS NOT TRUE
+            ORDER BY n.created_at DESC, n.notification_id DESC
+            """,
+            (user_id,)
+        )
+
+        rows = cur.fetchall()
+
+        return [
+            {
+                "notification_id": row[0],
+                "message": row[1],
+                "is_read": row[2],
+                "created_at": row[3]
+            }
+            for row in rows
+        ]
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ---------------------------------
+# KEEPER NOTIFICATIONS MARK AS READ
+# ---------------------------------
+
+
+@app.post("/notifications/read")
+async def mark_notifications_read(
+    current_user: dict = Depends(get_current_user)
+):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        user_id = current_user["user_id"]
+
+        cur.execute("""
+            UPDATE public.chief_notifications n
+            SET is_read = TRUE
+            FROM public.users u
+            WHERE n.identity_id = u.identity_id
+              AND u.user_id = %s
+              AND n.is_read IS NOT TRUE
+        """, (user_id,))
+
+        conn.commit()
+
+        return {"status": "success"}
+
+    finally:
+        cur.close()
+        conn.close()
 
 # ----------------------------
 # Request Logger Middleware
@@ -572,8 +678,10 @@ def generate_operator_id(role: str, cur=None) -> str:
 # LOGIN & TOKEN ISSUANCE
 # ----------------------------
 @app.post("/token", tags=["Security"])
+@limiter.limit("5/minute")
 async def login(
     request: Request,
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     remember_me: bool = Form(False),
     otp_code: str | None = Form(None)
@@ -616,7 +724,7 @@ async def login(
                 status_code=403,
                 detail=f"Account is {user[3]}"
             )
-        
+
         if user[4] and user[4].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
             raise HTTPException(
                 status_code=403,
@@ -653,12 +761,20 @@ async def login(
                         extra_metadata={"operator_id": user[6]}
                     )
                     raise HTTPException(status_code=401, detail="Invalid 2FA passcode")
+
+                if not consume_totp_once(user[0], totp):
+                    raise HTTPException(
+                        status_code=401,
+                        detail="2FA code already used."
+                    )
+
             else:
                 preauth_token = create_token(
                     {
                         "sub": str(user[0]),
                         "scope": "2fa_preauth",
-                        "role": normalize_role(user[2])
+                        "role": normalize_role(user[2]),
+                        "jti": str(uuid.uuid4())
                     },
                     token_type="access"
                 )
@@ -709,7 +825,7 @@ async def login(
             },
             token_type="access"
         )
-        
+
         response_payload = {
             "access_token": access_token,
             "token_type": "bearer",
@@ -746,8 +862,16 @@ async def login(
                 """,
                 (jti, payload["sub"], expires)
             )
-            
-            response_payload["refresh_token"] = refresh_token
+
+
+            response.set_cookie(
+                key="refresh_token",
+             value=refresh_token,
+                httponly=True,
+             secure=False,
+                samesite="Strict",
+                max_age=REFRESH_EXPIRE_DAYS * 86400,
+            )
 
         conn.commit()
         return response_payload
@@ -761,9 +885,11 @@ async def login(
 # 2FA LOGIN VERIFICATION
 # ----------------------------
 @app.post("/login/verify-2fa", tags=["Security"])
+@limiter.limit("5/minute")
 async def verify_login_2fa(
     request: Request,
-    req: Login2FARequest
+    req: Login2FARequest,
+    response: Response
 ):
     conn = get_connection()
     cur = conn.cursor()
@@ -815,6 +941,40 @@ async def verify_login_2fa(
                 extra_metadata={"operator_id": user[5]}
             )
             raise HTTPException(status_code=401, detail="Invalid 2FA code.")
+
+        if not consume_totp_once(user[0], totp):
+            raise HTTPException(
+                status_code=401,
+                detail="2FA code already used."
+            )
+
+        preauth_jti = payload.get("jti")
+        if not preauth_jti:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid 2FA session."
+            )
+
+        try:
+            preauth_exp = int(payload["exp"])
+            preauth_ttl = max(
+                1,
+                preauth_exp - int(datetime.now(timezone.utc).timestamp())
+            )
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid 2FA session."
+            )
+
+        if not consume_once(
+            f"2fa:preauth:{preauth_jti}",
+            preauth_ttl
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="2FA session already used."
+            )
 
         log_audit_activity(
             request=request,
@@ -877,7 +1037,15 @@ async def verify_login_2fa(
                 (jti, refresh_payload["sub"], expires)
             )
 
-            response_payload["refresh_token"] = refresh_token
+            response.set_cookie(
+                key="refresh_token",
+                value=refresh_token,
+                httponly=True,
+                secure=False,
+                samesite="Strict",
+                max_age=REFRESH_EXPIRE_DAYS * 86400,
+            )
+
 
         conn.commit()
         return response_payload
@@ -887,56 +1055,9 @@ async def verify_login_2fa(
         conn.close()
 
 
-# ----------------------------
-# REFRESH TOKEN
-# ----------------------------
-@app.post("/refresh", tags=["Security"])
-async def refresh_token(req: RefreshRequest):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    try:
-        payload = jwt.decode(
-            req.refresh_token,
-            PUBLIC_KEY,
-            algorithms=[ALGORITHM],
-            audience="athenaeum-client",
-            issuer="athenaeum-api"
-        )
-
-        jti = payload.get("jti")
-
-        cur.execute(
-            """
-            SELECT user_id, expires_at
-            FROM refresh_tokens
-            WHERE token_id=%s
-            """,
-            (jti,)
-        )
-
-        token = cur.fetchone()
-
-        if not token:
-            raise HTTPException(401, "Token revoked")
-
-        new_access = create_token(
-            {
-                "sub": payload["sub"],
-                "role": normalize_role(payload.get("role", "The Seeker"))
-            },
-            token_type="access"
-        )
-
-        return {"access_token": new_access}
-
-    finally:
-        cur.close()
-        conn.close()
-
 
 # -------------------------------
-# PUBLIC ACCESS REQUEST 
+# PUBLIC ACCESS REQUEST
 # -------------------------------
 @app.post("/request-access")
 async def request_access(request: Request, req: AccessRequestModel):
@@ -1024,74 +1145,6 @@ async def request_access(request: Request, req: AccessRequestModel):
 
         return {
             "message": "Access request submitted"
-        }
-
-    finally:
-        cur.close()
-        conn.close()
-
-
-# ----------------------------
-# LOGOUT
-# ----------------------------
-@app.post("/logout", tags=["Security"])
-async def logout(request: Request, req: RefreshRequest):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    try:
-        payload = jwt.decode(
-            req.refresh_token,
-            PUBLIC_KEY,
-            algorithms=[ALGORITHM],
-            audience="athenaeum-client",
-            issuer="athenaeum-api"
-        )
-
-        jti = payload.get("jti")
-        sub_id = payload.get("sub")
-        role_val = payload.get("role", "Operator")
-
-        cur.execute(
-            """
-            DELETE FROM refresh_tokens
-            WHERE token_id=%s
-            """,
-            (jti,)
-        )
-
-        user_name = "Operator"
-        op_id = sub_id
-        if sub_id:
-            try:
-                cur.execute(
-                    "SELECT name, operator_id FROM users WHERE user_id=%s",
-                    (int(sub_id),)
-                )
-                user_row = cur.fetchone()
-                if user_row:
-                    user_name = user_row[0]
-                    op_id = user_row[1] or sub_id
-            except Exception:
-                pass
-
-        conn.commit()
-
-        log_audit_activity(
-            request=request,
-            user_id=str(sub_id),
-            username=user_name,
-            role=role_val,
-            designation="Staff",
-            category="SECURITY",
-            action_type="LOGOUT",
-            target_entity="SESSION",
-            target_id=str(op_id),
-            justification="Operator initiated sign-out"
-        )
-
-        return {
-            "message": "Logged out successfully"
         }
 
     finally:
@@ -1415,6 +1468,14 @@ async def change_password(
             (new_hash, user_id)
         )
 
+        cur.execute(
+            """
+            DELETE FROM refresh_tokens
+            WHERE user_id=%s
+            """,
+            (user_id,)
+        )
+
         conn.commit()
 
         log_audit_activity(
@@ -1522,6 +1583,7 @@ async def setup_2fa(
 # VERIFY 2FA
 # ----------------------------
 @app.post("/verify-2fa")
+@limiter.limit("5/minute")
 async def verify_2fa(
     request: Request,
     req: Verify2FARequest,
@@ -1566,6 +1628,12 @@ async def verify_2fa(
             raise HTTPException(
                 status_code=401,
                 detail="Invalid 2FA token"
+            )
+
+        if not consume_totp_once(user_id, totp):
+            raise HTTPException(
+                status_code=401,
+                detail="2FA code already used."
             )
 
         cur.execute(

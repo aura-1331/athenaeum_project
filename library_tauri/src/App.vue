@@ -1,21 +1,23 @@
-<script setup>
+﻿<script setup>
 import { ref, onMounted, onUnmounted, watch, computed } from "vue"
+import axios from "axios"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 import BatchRegisterModal from '@/components/print/BatchRegisterModal.vue'
 import LedgerHealth from './components/LedgerHealth.vue'
-import { 
-  LayoutDashboard, 
-  Library, 
-  Search, 
+import {
+  LayoutDashboard,
+  Library,
+  Search,
   Users,
-  ClipboardCheck, 
-  PlusCircle, 
+  ClipboardCheck,
+  PlusCircle,
   BookPlus,
   Sun,
   Moon,
   LogOut,
+  Bell,
   BookOpen,
   FileText,
   AlertTriangle,
@@ -53,6 +55,102 @@ const currentPlace = ref('Locating...')
 const lastUpdated = ref('')
 let timeInterval = null
 
+const notifications = ref([])
+let notificationPoller = null
+
+const docketCount = ref(0)
+let docketPoller = null
+
+const unreadNotifications = computed(() =>
+  notifications.value.filter(n => !n.is_read).length
+)
+
+const showNotifications = ref(false)
+
+const toggleNotifications = async () => {
+  if (showNotifications.value) {
+    // Closing the panel clears notifications that were already read.
+    notifications.value = notifications.value.filter(
+      notification => !notification.is_read
+    )
+
+    showNotifications.value = false
+    return
+  }
+
+  showNotifications.value = true
+
+  try {
+    await axios.post('/notifications/read')
+
+    // Keep them visible while the panel is open so the Keeper can read them.
+    // The badge disappears because they are now read.
+    notifications.value = notifications.value.map(notification => ({
+      ...notification,
+      is_read: true
+    }))
+  } catch (err) {
+    console.warn('Notification read update failed:', err)
+  }
+}
+
+const handleNotificationOutsideClick = (event) => {
+  if (!showNotifications.value) return
+
+  const panel = document.querySelector('.notification-panel')
+  const button = document.querySelector('.notification-btn')
+
+  if (
+    panel &&
+    !panel.contains(event.target) &&
+    button &&
+    !button.contains(event.target)
+  ) {
+    showNotifications.value = false
+
+    notifications.value = notifications.value.filter(
+      notification => !notification.is_read
+    )
+  }
+}
+
+const loadNotifications = async () => {
+  if (user_role.value !== 'The Keeper') return
+
+  try {
+    const response = await axios.get('/notifications')
+    notifications.value = Array.isArray(response.data) ? response.data : []
+  } catch (err) {
+    console.warn('Notification load failed:', err)
+  }
+}
+
+
+const loadDocketCount = async () => {
+  if (user_role.value !== 'The Chief') {
+    docketCount.value = 0
+    return
+  }
+
+  try {
+    const [worksResponse, itemsResponse] = await Promise.all([
+      axios.get('/catalogue/pending-works'),
+      axios.get('/catalogue/pending-items')
+    ])
+
+    const pendingWorks = Array.isArray(worksResponse.data)
+      ? worksResponse.data.length
+      : 0
+
+    const pendingItems = Array.isArray(itemsResponse.data)
+      ? itemsResponse.data.length
+      : 0
+
+    docketCount.value = pendingWorks + pendingItems
+  } catch (err) {
+    console.warn('Docket count load failed:', err)
+  }
+}
 const updateClock = () => {
   const now = new Date()
   currentTime.value = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -72,10 +170,10 @@ const fetchAccurateLocation = async () => {
       try {
         const lat = position.coords.latitude
         const lon = position.coords.longitude
-        
+
         const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`)
         const data = await res.json()
-        
+
         if (data && data.address) {
           const city = data.address.city || data.address.town || data.address.village || data.address.state_district
           const country = data.address.country_code ? data.address.country_code.toUpperCase() : ''
@@ -140,8 +238,11 @@ onMounted(async () => {
   updateClock()
   updateSyncTime()
   fetchAccurateLocation()
+  loadNotifications()
   timeInterval = setInterval(updateClock, 1000)
   window.addEventListener('keydown', handleGlobalKeydown)
+
+  document.addEventListener('click', handleNotificationOutsideClick)
 
   const saved = localStorage.getItem("ui-theme") || "dark"
   theme.value = saved
@@ -160,19 +261,33 @@ onMounted(async () => {
       console.warn("Tauri event listener failed:", err)
     }
   }
+  notificationPoller = setInterval(() => {
+  if (user_role.value === 'The Keeper' && !showNotifications.value) {
+    loadNotifications()
+  }
+ }, 10000)
+
+ docketPoller = setInterval(() => {
+  loadDocketCount()
+}, 10000)
+
+loadDocketCount()
+
 })
 
 onUnmounted(() => {
   if (timeInterval) clearInterval(timeInterval)
   if (unlistenNav) unlistenNav()
   window.removeEventListener('keydown', handleGlobalKeydown)
+  document.removeEventListener('click', handleNotificationOutsideClick)
+  if (notificationPoller) clearInterval(notificationPoller)
 })
 </script>
 
 <template>
   <div class="app" :class="{ 'details-window-theme': route.path.includes('/details/') }">
-    <aside 
-      v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" 
+    <aside
+      v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')"
       class="sidebar"
       :class="{ 'mobile-open': isMobileMenuOpen }"
     >
@@ -185,55 +300,147 @@ onUnmounted(() => {
       </div>
 
       <nav class="nav-links">
-        <RouterLink to="/dashboard"><LayoutDashboard :size="18" :stroke-width="1.5" /><span>Dashboard</span></RouterLink>
-        <RouterLink to="/search"><Search :size="18" :stroke-width="1.5" /><span>Search Archive</span></RouterLink>
-        <RouterLink to="/catalogue"><Library :size="18" :stroke-width="1.5" /><span>Catalogue</span></RouterLink>
+  <RouterLink to="/dashboard">
+    <LayoutDashboard :size="18" :stroke-width="1.5" />
+    <span>Dashboard</span>
+  </RouterLink>
 
-        <RouterLink 
-          v-if="user_role === 'The Chief' || user_role === 'The Keeper'" 
-          to="/admin/users"
-        >
-          <Users :size="18" :stroke-width="1.5" />
-          <span>Personnel & Access</span>
-        </RouterLink>
-        
-        <div class="nav-section-label">Inventory</div>
-        <RouterLink to="/create-work"><FileText :size="18" :stroke-width="1.5" /><span>Works</span></RouterLink>
-        <RouterLink to="/create-item"><BookOpen :size="18" :stroke-width="1.5" /><span>Items</span></RouterLink>
-        <RouterLink 
-          v-if="user_role === 'The Chief'" 
-          to="/incidents"
-        >
-          <AlertTriangle :size="18" :stroke-width="1.5" />
-          <span>Incidents</span>
-        </RouterLink>
-        
-        <div class="nav-section-label">Classification</div>
-        <RouterLink to="/classification/authors">
-          <Users :size="18" :stroke-width="1.5" />
-          <span>Authors</span>
-        </RouterLink>
-        <RouterLink to="/classification/authorities">
-          <ClipboardCheck :size="18" :stroke-width="1.5" />
-          <span>Authorities</span>
-        </RouterLink>
-        <RouterLink to="/classification/subjects">
-          <Tag :size="18" :stroke-width="1.5" />
-          <span>Subjects</span>
-        </RouterLink>
-        
-        <div class="nav-section-label">System</div>
-        <RouterLink to="/audit-trail"><ShieldCheck :size="18" :stroke-width="1.5" /><span>Audit Trail</span></RouterLink>
-        
-        <!-- BATCH PRINT TRIGGER BUTTON -->
-        <button class="sidebar-action-btn" @click="openPrintModal" title="Print Filtered Catalogue Register">
-          <Printer :size="18" :stroke-width="1.5" />
-          <span>Print Register</span>
-        </button>
+  <RouterLink to="/search">
+    <Search :size="18" :stroke-width="1.5" />
+    <span>Search Archive</span>
+  </RouterLink>
 
-        <RouterLink to="/reports"><LayoutDashboard :size="18" :stroke-width="1.5" /><span>Reports</span></RouterLink>
-        <RouterLink to="/about"><Info :size="18" :stroke-width="1.5" /><span>About</span></RouterLink>
-      </nav>
+  <RouterLink to="/catalogue">
+    <Library :size="18" :stroke-width="1.5" />
+    <span>Catalogue</span>
+  </RouterLink>
+
+  <RouterLink
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    to="/admin/users"
+  >
+    <Users :size="18" :stroke-width="1.5" />
+    <span>Personnel & Access</span>
+  </RouterLink>
+
+   <RouterLink
+  v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+  to="/docket"
+>
+  <ClipboardCheck :size="18" :stroke-width="1.5" />
+
+  <span class="nav-label-with-count">
+    <span>Docket</span>
+    <span v-if="docketCount > 0" class="docket-badge">
+      {{ docketCount }}
+    </span>
+  </span>
+</RouterLink>
+
+
+  <div
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    class="nav-section-label"
+  >
+    Inventory
+  </div>
+
+  <RouterLink
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    to="/create-work"
+  >
+    <FileText :size="18" :stroke-width="1.5" />
+    <span>Works</span>
+  </RouterLink>
+
+  <RouterLink
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    to="/create-item"
+  >
+    <BookOpen :size="18" :stroke-width="1.5" />
+    <span>Items</span>
+  </RouterLink>
+
+  <RouterLink
+    v-if="user_role === 'The Chief'"
+    to="/incidents"
+  >
+    <AlertTriangle :size="18" :stroke-width="1.5" />
+    <span>Incidents</span>
+  </RouterLink>
+
+  <div
+    v-if="user_role === 'The Chief'"
+    class="nav-section-label"
+  >
+    Classification
+  </div>
+
+  <RouterLink
+    v-if="user_role === 'The Chief'"
+    to="/classification/authors"
+  >
+    <Users :size="18" :stroke-width="1.5" />
+    <span>Authors</span>
+  </RouterLink>
+
+  <RouterLink
+    v-if="user_role === 'The Chief'"
+    to="/classification/authorities"
+  >
+    <ClipboardCheck :size="18" :stroke-width="1.5" />
+    <span>Authorities</span>
+  </RouterLink>
+
+  <RouterLink
+    v-if="user_role === 'The Chief'"
+    to="/classification/subjects"
+  >
+    <Tag :size="18" :stroke-width="1.5" />
+    <span>Subjects</span>
+  </RouterLink>
+
+  <div
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    class="nav-section-label"
+  >
+    System
+  </div>
+
+  <RouterLink
+    v-if="user_role === 'The Chief'"
+    to="/audit-trail"
+  >
+    <ShieldCheck :size="18" :stroke-width="1.5" />
+    <span>Audit Trail</span>
+  </RouterLink>
+
+  <button
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    class="sidebar-action-btn"
+    @click="openPrintModal"
+    title="Print Filtered Catalogue Register"
+  >
+    <Printer :size="18" :stroke-width="1.5" />
+    <span>Print Register</span>
+  </button>
+
+  <RouterLink
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    to="/reports"
+  >
+    <LayoutDashboard :size="18" :stroke-width="1.5" />
+    <span>Reports</span>
+  </RouterLink>
+
+  <RouterLink
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    to="/about"
+  >
+    <Info :size="18" :stroke-width="1.5" />
+    <span>About</span>
+  </RouterLink>
+</nav>
 
       <div class="sidebar-user">
         <div class="user-avatar">
@@ -246,21 +453,21 @@ onUnmounted(() => {
       </div>
     </aside>
 
-    <div 
-      v-if="isMobileMenuOpen" 
-      class="mobile-overlay" 
+    <div
+      v-if="isMobileMenuOpen"
+      class="mobile-overlay"
       @click="isMobileMenuOpen = false"
     ></div>
 
-    <main 
-      class="content-wrapper" 
-      :class="{ 
-        'no-padding': route.path.includes('/details/'), 
-        'authenticated-layout': isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print') 
+    <main
+      class="content-wrapper"
+      :class="{
+        'no-padding': route.path.includes('/details/'),
+        'authenticated-layout': isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')
       }"
     >
-      <header 
-        v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')" 
+      <header
+        v-if="isAuthenticated && !isEditing && !route.path.includes('/details/') && !route.path.includes('/print')"
         class="global-header"
       >
         <div class="header-left">
@@ -269,7 +476,7 @@ onUnmounted(() => {
           </button>
           <div class="breadcrumb">{{ route.name || 'Admin Panel' }}</div>
         </div>
-        
+
         <div class="header-actions">
           <!-- CRYPTOGRAPHIC LEDGER HEALTH STATUS PILL -->
           <LedgerHealth />
@@ -288,13 +495,52 @@ onUnmounted(() => {
             <span class="date">{{ currentDate }}</span>
             <span class="time">{{ currentTime }}</span>
           </div>
-          
+
           <div class="action-divider"></div>
-          
+          <button
+            v-if="user_role === 'The Keeper'"
+            class="header-icon-btn notification-btn"
+            title="Notifications"
+            @click="toggleNotifications"
+          >
+            <Bell :size="18" :stroke-width="1.5" />
+            <span v-if="unreadNotifications > 0" class="notification-badge">
+              {{ unreadNotifications }}
+            </span>
+          </button>
+          <div
+  v-if="user_role === 'The Keeper' && showNotifications"
+  class="notification-panel"
+>
+  <div class="notification-panel-header">
+    <span>Notifications</span>
+    <span v-if="unreadNotifications > 0">
+      {{ unreadNotifications }} unread
+    </span>
+  </div>
+
+  <div v-if="notifications.length === 0" class="notification-empty">
+    No notifications.
+  </div>
+
+  <div
+    v-for="notification in notifications"
+    :key="notification.notification_id"
+    class="notification-item"
+    :class="{ unread: !notification.is_read }"
+  >
+    <div class="notification-message">
+      {{ notification.message }}
+    </div>
+    <div class="notification-time">
+      {{ new Date(notification.created_at).toLocaleString() }}
+    </div>
+  </div>
+</div>
           <button class="header-icon-btn" @click="toggleTheme" :title="theme === 'dark' ? 'Light Mode' : 'Dark Mode'">
             <component :is="theme === 'dark' ? Sun : Moon" :size="18" :stroke-width="1.5" />
           </button>
-          
+
           <button class="header-icon-btn exit" @click="handleLogout" title="Exit System">
             <LogOut :size="18" :stroke-width="1.5" />
           </button>
@@ -455,6 +701,91 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   padding: 8px; border-radius: 8px; display: flex; transition: all 0.2s ease;
 }
 
+.notification-btn {
+  position: relative;
+}
+
+.notification-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--sidebar-bg);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.notification-panel {
+  position: absolute;
+  top: 48px;
+  right: 0;
+  width: 380px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border-main);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  z-index: 9999;
+}
+
+.notification-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-main);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.notification-empty {
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.notification-item {
+  position: relative;
+  margin: 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border-main);
+  border-radius: 10px;
+  color: var(--text-primary);
+}
+
+.notification-item.unread {
+  background: var(--hover-bg);
+  border-color: var(--accent);
+}
+
+.notification-message {
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.notification-time {
+  margin-top: 7px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
 .header-icon-btn:hover {
   color: var(--accent);
   background: var(--hover-bg);
@@ -484,6 +815,29 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
 .mobile-overlay { display: none; }
 .header-left { display: flex; align-items: center; gap: 12px; }
 
+.nav-label-with-count {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.docket-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 @media print {
   html, body, #app, .app {
     background: #ffffff !important;
@@ -508,6 +862,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
     -webkit-print-color-adjust: economy !important;
     print-color-adjust: economy !important;
   }
+
 }
 
 @media (max-width: 768px) {
@@ -524,7 +879,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
     z-index: 1000;
     background: var(--sidebar-bg);
     border-right: 1px solid var(--border-main);
-    padding-bottom: 20px; 
+    padding-bottom: 20px;
   }
   .sidebar.mobile-open { transform: translateX(0); }
   .mobile-overlay {
@@ -540,7 +895,7 @@ body { font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: anti
   }
   .content-wrapper.authenticated-layout { margin-left: 0; }
   .global-header {
-    padding: 0 15px; 
+    padding: 0 15px;
     height: auto;
     min-height: 60px;
     gap: 10px;

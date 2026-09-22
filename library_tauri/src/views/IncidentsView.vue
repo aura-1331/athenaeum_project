@@ -543,16 +543,13 @@ const reportForm = reactive({
 })
 
 function getAuthConfig() {
-  const token =
-    authStore.token ||
-    authStore.accessToken ||
-    authStore.access_token ||
-    localStorage.getItem("access_token") ||
-    localStorage.getItem("token")
+  const token = authStore.accessToken
+
   if (!token) {
     router.push("/login")
     return null
   }
+
   return { headers: { Authorization: `Bearer ${token}` } }
 }
 

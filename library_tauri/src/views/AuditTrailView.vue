@@ -259,15 +259,8 @@ const deleteCount = computed(() => logs.value.filter(l => (l.action_type || '').
 const uniqueActorsCount = computed(() => new Set(logs.value.map(l => l.actor_username || l.user_id)).size)
 
 function getToken() {
-  return (
-    authStore.token ||
-    authStore.accessToken ||
-    authStore.access_token ||
-    (authStore.user && (authStore.user.token || authStore.user.access_token)) ||
-    localStorage.getItem('access_token') ||
-    localStorage.getItem('token') ||
-    ''
-  )
+  return authStore.accessToken || ''
+
 }
 
 async function fetchLogs() {

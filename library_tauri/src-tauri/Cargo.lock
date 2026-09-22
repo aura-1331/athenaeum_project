@@ -1992,7 +1992,7 @@ dependencies = [
 
 [[package]]
 name = "library_tauri"
-version = "0.1.0"
+version = "2.1.0"
 dependencies = [
  "local-ip-address",
  "serde",
