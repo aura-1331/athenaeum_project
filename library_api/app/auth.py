@@ -1,5 +1,6 @@
 import logging
 import secrets
+import hmac
 
 from fastapi import (
     Body,
@@ -112,7 +113,13 @@ def get_current_user(
     try:
         cur.execute(
             """
-            SELECT status
+            SELECT
+                name,
+                email,
+                role,
+                operator_id,
+                identity_id,
+                status
             FROM users
             WHERE user_id = %s
             """,
@@ -121,7 +128,14 @@ def get_current_user(
 
         user = cur.fetchone()
 
-        if not user or user[0] != "APPROVED":
+        user_name = user[0]
+        user_email = user[1]
+        user_role = user[2]
+        operator_id = user[3]
+        identity_id = user[4]
+
+
+        if not user or user[5] != "APPROVED":
             raise HTTPException(
                 status_code=401,
                 detail="Account inactive"
@@ -132,12 +146,18 @@ def get_current_user(
         conn.close()
 
     # Make authenticated identity available to database/audit context.
-    request.state.actor_name = user_id
-    request.state.actor_role = role
+    request.state.actor_name = user_name
+    request.state.actor_role = user_role
 
     return {
         "user_id": user_id,
-        "role": role
+        "name": user_name,
+        "username": user_name,
+        "email": user_email,
+        "role": user_role,
+        "designation": user_role,
+        "operator_id": operator_id,
+        "identity_id": identity_id
     }
 
 
@@ -147,6 +167,20 @@ def get_current_user(
 
 def generate_csrf_token():
     return secrets.token_urlsafe(32)
+
+def validate_csrf(request: Request):
+    csrf_cookie = request.cookies.get("csrf_token")
+    csrf_header = request.headers.get("X-CSRF-Token")
+
+    if (
+        not csrf_cookie
+        or not csrf_header
+        or not hmac.compare_digest(csrf_cookie, csrf_header)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="CSRF validation failed"
+        )
 
 
 # -------------------------
@@ -227,6 +261,7 @@ async def refresh(
     request: Request,
     response: Response
 ):
+    validate_csrf(request)
     refresh_token = request.cookies.get(
         "refresh_token"
     )
@@ -417,6 +452,8 @@ async def logout(
     request: Request,
     response: Response
 ):
+
+    validate_csrf(request)
     refresh_token = request.cookies.get(
         "refresh_token"
     )

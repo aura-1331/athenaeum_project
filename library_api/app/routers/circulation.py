@@ -34,7 +34,7 @@ async def issue_book(
     days: int = 14,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -135,10 +135,9 @@ async def issue_book(
             )
         )
 
-        conn.commit()
 
         # Cryptographic ledger anchor
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(current_user.get("user_id", "UNKNOWN")),
             username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
@@ -163,8 +162,16 @@ async def issue_book(
                 "serial_no": serial_no,
                 "borrower_id": borrower_id,
                 "due_date": due_date.isoformat()
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "loan_id": loan_id,
@@ -195,7 +202,7 @@ async def return_book(
     return_data: ReturnRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -299,10 +306,9 @@ async def return_book(
                     )
                 )
 
-        conn.commit()
 
         # Cryptographic ledger anchor
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(current_user.get("user_id", "UNKNOWN")),
             username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
@@ -328,8 +334,16 @@ async def return_book(
                 "serial_no": serial_no,
                 "borrower_id": borrower_id,
                 "fine_amount": fine_amount
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "status": "success",
@@ -356,11 +370,11 @@ async def return_book(
     dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
 )
 async def list_overdue_books(
-    current_user: dict = Depends(get_current_user)
+    request: Request, current_user: dict = Depends(get_current_user)
 ):
     """Lists all books that are past their due date but haven't been returned."""
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -426,7 +440,7 @@ async def pay_fine(
 ):
     """Records payment of a fine."""
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -457,10 +471,9 @@ async def pay_fine(
         amount_paid = float(res[0])
         fine_user_id = res[1]
 
-        conn.commit()
 
         # Cryptographic ledger anchor
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(current_user.get("user_id", "UNKNOWN")),
             username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
@@ -483,8 +496,16 @@ async def pay_fine(
                 "fine_id": fine_id,
                 "user_id": fine_user_id,
                 "amount": amount_paid
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "status": "paid",

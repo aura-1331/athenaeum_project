@@ -97,8 +97,6 @@ def execute_operation(db, accession_no: str, action: str, actor: str, notes: str
             ),
         )
 
-    db.commit()
-
     return {
         "accession_no": accession_no,
         "old_status": old_status,

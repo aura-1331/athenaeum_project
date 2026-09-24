@@ -193,10 +193,9 @@ def login_session(payload: LoginSessionPayload, request: Request):
         ))
 
         row = cur.fetchone()
-        conn.commit()
 
         # Write immutable audit entry
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             session_id=session_id,
             user_id=str(payload.user_id or "3"),
@@ -206,8 +205,16 @@ def login_session(payload: LoginSessionPayload, request: Request):
             category="AUTH",
             action_type="LOGIN",
             target_entity="GLOBAL",
-            justification="Secure login session opened."
+            justification="Secure login session opened.",
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "status": "Session opened",
@@ -273,12 +280,11 @@ def logout_session(payload: LogoutSessionPayload, request: Request):
             updated_row = cur.fetchone()
             if updated_row and updated_row.get("duration_seconds") is not None:
                 duration = updated_row["duration_seconds"]
-            conn.commit()
 
         formatted_time = format_duration(duration)
 
         # Write immutable audit entry
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             session_id=target_session_id,
             user_id=user_id_str,
@@ -289,8 +295,16 @@ def logout_session(payload: LogoutSessionPayload, request: Request):
             action_type="LOGOUT",
             target_entity="GLOBAL",
             justification=reason,
-            diff_payload={"duration_seconds": duration, "duration_formatted": formatted_time}
+            diff_payload={"duration_seconds": duration, "duration_formatted": formatted_time},
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "status": "Session closed",
@@ -363,7 +377,7 @@ def get_user_sessions(user_id: Optional[str] = None, limit: int = 50, offset: in
 # 4. CRYPTOGRAPHIC LEDGER VERIFICATION
 # ------------------------------------------------------------
 @router.get("/ledger/verify")
-def get_ledger_verification(current_user: dict = Depends(get_current_user)):
+def get_ledger_verification(request: Request, current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "The Chief":
         raise HTTPException(status_code=403, detail="Chief access required.")
 
@@ -376,7 +390,7 @@ def get_ledger_verification(current_user: dict = Depends(get_current_user)):
         compromised_seq = result.get("sequence_id") or result.get("record_id")
         reason_text = result.get("reason") or result.get("detail") or "Cryptographic mismatch"
 
-        conn = get_connection()
+        conn = get_connection(request=request)
         cur = conn.cursor()
         try:
             # Check if an unresolved incident already exists for this node
@@ -421,7 +435,7 @@ def get_ledger_verification(current_user: dict = Depends(get_current_user)):
 # 5. RESTRICTED SECURITY INCIDENTS (CHIEF ONLY)
 # ------------------------------------------------------------
 @router.get("/security-incidents")
-def get_security_incidents(current_user: dict = Depends(get_current_user)):
+def get_security_incidents(request: Request, current_user: dict = Depends(get_current_user)):
     # Restrict strictly to higher authority
     if current_user.get("role") != "The Chief":
         raise HTTPException(
@@ -429,7 +443,7 @@ def get_security_incidents(current_user: dict = Depends(get_current_user)):
             detail="Access denied. Authorized executive clearance required."
         )
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
     try:

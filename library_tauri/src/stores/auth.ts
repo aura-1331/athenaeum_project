@@ -35,12 +35,15 @@ export const useAuthStore = defineStore('auth', () => {
   // Computed access_token compatibility alias
   const access_token = computed({
     get: () => accessToken.value,
-    set: (val: string | null) => { accessToken.value = val }
+    set: (val: string | null) => {
+      accessToken.value = val
+    }
   })
 
   // Backward/forward compatibility aliases
   const token = computed(() => accessToken.value || '')
   const role = computed(() => userRole.value)
+
   const user = computed(() => ({
     id: userId.value,
     user_id: userId.value,
@@ -117,7 +120,23 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   // -------------------------
-  // 3. ACTIONS
+  // 3. CSRF
+  // -------------------------
+  // csrf_token is intentionally readable by the frontend.
+  // It is sent back to the backend through X-CSRF-Token.
+  // Authentication tokens are NOT stored here.
+  function getCsrfToken(): string | null {
+    const match = document.cookie.match(
+      /(?:^|;\s*)csrf_token=([^;]*)/
+    )
+
+    return match
+      ? decodeURIComponent(match[1])
+      : null
+  }
+
+  // -------------------------
+  // 4. ACTIONS
   // -------------------------
   function login(tokens: any, userObj?: any) {
     const rawToken = typeof tokens === 'string'
@@ -155,17 +174,28 @@ export const useAuthStore = defineStore('auth', () => {
   async function logout() {
     const tokenVal = accessToken.value
     const sessionId = localStorage.getItem('active_session_id')
+
     const baseUrl =
       import.meta.env.VITE_API_URL ||
       'http://127.0.0.1:8000'
 
+    // Read the CSRF token before the logout request.
+    const csrfToken = getCsrfToken()
+
     // 1. Revoke the refresh session and clear the HttpOnly cookie
     try {
+      const headers: Record<string, string> = {}
+
+      if (csrfToken) {
+        headers['X-CSRF-Token'] = csrfToken
+      }
+
       await fetch(
         `${baseUrl}/auth/logout`,
         {
           method: 'POST',
-          credentials: 'include'
+          credentials: 'include',
+          headers
         }
       )
     } catch (err) {
@@ -214,6 +244,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+
     localStorage.setItem(
       "logout",
       Date.now().toString()

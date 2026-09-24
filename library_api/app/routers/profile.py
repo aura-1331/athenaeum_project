@@ -8,7 +8,7 @@ router = APIRouter(prefix="/profile", tags=["User Profile"])
 @audit_action("VIEW_PROFILE")  # 🛡️ Tracks profile access
 @router.get("/me")
 async def get_my_profile(request: Request, current_user: dict = Depends(get_current_user)):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         user_id = current_user['user_id']

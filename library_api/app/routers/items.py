@@ -12,10 +12,10 @@ router = APIRouter(prefix="/items", tags=["items"])
 
 @router.get("/{serial_no}")
 def get_item(
-    serial_no: int,
+    request: Request, serial_no: int,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("""
@@ -61,7 +61,7 @@ def update_item(
     current_user: dict = Depends(get_current_user),
     x_change_reason: Optional[str] = Header(default="Direct holding record revision")
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         # 1. Resolve work_id and capture existing state for audit diff
@@ -121,14 +121,13 @@ def update_item(
             serial_no
         ))
 
-        conn.commit()
 
         # 4. Cryptographic ledger anchor
         actor_id = str(current_user.get("user_id", "UNKNOWN"))
         actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
         actor_role = str(current_user.get("role", "The Keeper"))
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=actor_id,
             username=actor_name,
@@ -150,8 +149,16 @@ def update_item(
             extra_metadata={
                 "serial_no": serial_no,
                 "work_id": work_id
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {"status": "success", "serial_no": serial_no, "work_id": work_id}
 

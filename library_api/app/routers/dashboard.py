@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from app.database import get_connection
 from app.auth import get_current_user
 
@@ -6,12 +6,12 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @router.get("/summary")
-def dashboard_summary(current_user: dict = Depends(get_current_user)):
+def dashboard_summary(request: Request, current_user: dict = Depends(get_current_user)):
     conn = None
     cursor = None
 
     try:
-        conn = get_connection()
+        conn = get_connection(request=request)
         cursor = conn.cursor()
 
         # Official Dashboard totals match the accepted catalogue.

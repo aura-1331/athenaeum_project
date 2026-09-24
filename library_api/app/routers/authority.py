@@ -382,7 +382,6 @@ def update_authority_details(
     )
 
     result = cur.fetchone()
-    conn.commit()
 
     columns = [desc[0] for desc in cur.description]
     authority_data = dict(zip(columns, result))
@@ -391,7 +390,7 @@ def update_authority_details(
     actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
     actor_role = str(current_user.get("role", "The Chief"))
 
-    log_audit_activity(
+    audit_ok = log_audit_activity(
         request=request,
         user_id=actor_id,
         username=actor_name,
@@ -417,8 +416,16 @@ def update_authority_details(
         extra_metadata={
             "authority_id": authority_id,
             "authority_code": updated_authority_code
-        }
+        },
+        conn=conn
     )
+
+    if not audit_ok:
+        raise RuntimeError(
+            "Audit record could not be written; operation rolled back"
+        )
+    
+    conn.commit()
 
     return {
         "status": "success",
@@ -454,13 +461,12 @@ def verify_authority(
         reason=payload.reason
     )
     prev_status = result.pop("_previous_status", "PROVISIONAL")
-    conn.commit()
 
     actor_id = str(current_user.get("user_id", "UNKNOWN"))
     actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
     actor_role = str(current_user.get("role", "The Chief"))
 
-    log_audit_activity(
+    audit_ok = log_audit_activity(
         request=request,
         user_id=actor_id,
         username=actor_name,
@@ -482,8 +488,16 @@ def verify_authority(
         extra_metadata={
             "authority_id": authority_id,
             "authority_code": result.get("authority_code")
-        }
+        },
+        conn=conn
     )
+
+    if not audit_ok:
+        raise RuntimeError(
+            "Audit record could not be written; operation rolled back"
+        )
+    
+    conn.commit()
 
     return {"status": "success", "message": "Authority verified successfully.", "authority": result}
 
@@ -515,13 +529,12 @@ def reject_authority(
         reason=payload.reason
     )
     prev_status = result.pop("_previous_status", "PROVISIONAL")
-    conn.commit()
 
     actor_id = str(current_user.get("user_id", "UNKNOWN"))
     actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
     actor_role = str(current_user.get("role", "The Chief"))
 
-    log_audit_activity(
+    audit_ok = log_audit_activity(
         request=request,
         user_id=actor_id,
         username=actor_name,
@@ -543,8 +556,16 @@ def reject_authority(
         extra_metadata={
             "authority_id": authority_id,
             "authority_code": result.get("authority_code")
-        }
+        },
+        conn=conn
     )
+
+    if not audit_ok:
+        raise RuntimeError(
+            "Audit record could not be written; operation rolled back"
+        )
+    
+    conn.commit()
 
     return {"status": "success", "message": "Authority rejected successfully.", "authority": result}
 
@@ -576,13 +597,12 @@ def reopen_authority(
         reason=payload.reason
     )
     prev_status = result.pop("_previous_status", "UNKNOWN")
-    conn.commit()
 
     actor_id = str(current_user.get("user_id", "UNKNOWN"))
     actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
     actor_role = str(current_user.get("role", "The Chief"))
 
-    log_audit_activity(
+    audit_ok = log_audit_activity(
         request=request,
         user_id=actor_id,
         username=actor_name,
@@ -604,8 +624,16 @@ def reopen_authority(
         extra_metadata={
             "authority_id": authority_id,
             "authority_code": result.get("authority_code")
-        }
+        },
+        conn=conn
     )
+
+    if not audit_ok:
+        raise RuntimeError(
+            "Audit record could not be written; operation rolled back"
+        )
+    
+    conn.commit()
 
     return {"status": "success", "message": "Authority re-opened for provisional review.", "authority": result}
 
@@ -666,7 +694,6 @@ def create_variant(
     )
 
     result = cur.fetchone()
-    conn.commit()
 
     columns = [desc[0] for desc in cur.description]
     variant_data = dict(zip(columns, result))
@@ -675,7 +702,7 @@ def create_variant(
     actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
     actor_role = str(current_user.get("role", "The Chief"))
 
-    log_audit_activity(
+    audit_ok = log_audit_activity(
         request=request,
         user_id=actor_id,
         username=actor_name,
@@ -698,8 +725,16 @@ def create_variant(
         extra_metadata={
             "authority_id": authority_id,
             "variant_id": variant_data["variant_id"]
-        }
+        },
+        conn=conn
     )
+
+    if not audit_ok:
+        raise RuntimeError(
+            "Audit record could not be written; operation rolled back"
+        )
+    
+    conn.commit()
 
     return {
         "status": "success",
@@ -784,7 +819,6 @@ def update_variant(
     )
 
     result = cur.fetchone()
-    conn.commit()
 
     columns = [desc[0] for desc in cur.description]
     variant_data = dict(zip(columns, result))
@@ -793,7 +827,7 @@ def update_variant(
     actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
     actor_role = str(current_user.get("role", "The Chief"))
 
-    log_audit_activity(
+    audit_ok = log_audit_activity(
         request=request,
         user_id=actor_id,
         username=actor_name,
@@ -819,8 +853,16 @@ def update_variant(
         extra_metadata={
             "authority_id": authority_id,
             "variant_id": variant_id
-        }
+        },
+        conn=conn
     )
+
+    if not audit_ok:
+        raise RuntimeError(
+            "Audit record could not be written; operation rolled back"
+        )
+    
+    conn.commit()
 
     return {
         "status": "success",
@@ -880,13 +922,12 @@ def delete_variant(
         (variant_id, authority_id)
     )
     cur.fetchone()
-    conn.commit()
 
     actor_id = str(current_user.get("user_id", "UNKNOWN"))
     actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
     actor_role = str(current_user.get("role", "The Chief"))
 
-    log_audit_activity(
+    audit_ok = log_audit_activity(
         request=request,
         user_id=actor_id,
         username=actor_name,
@@ -907,8 +948,16 @@ def delete_variant(
         extra_metadata={
             "authority_id": authority_id,
             "variant_id": variant_id
-        }
+        },
+        conn=conn
     )
+
+    if not audit_ok:
+        raise RuntimeError(
+            "Audit record could not be written; operation rolled back"
+        )
+    
+    conn.commit()
 
     return {
         "status": "success",

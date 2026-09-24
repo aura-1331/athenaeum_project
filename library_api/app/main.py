@@ -31,7 +31,7 @@ from app.token_manager import (
     create_token,
     consume_once,
 )
-from app.auth import router as auth_router, get_current_user, limiter
+from app.auth import generate_csrf_token, router as auth_router, get_current_user, limiter
 
 def consume_totp_once(user_id, totp) -> bool:
     """Allow a valid TOTP time-step to be consumed only once."""
@@ -180,7 +180,7 @@ async def chief_decide_request(
             detail="Invalid decision."
         )
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -372,7 +372,7 @@ async def revoke_user(
             detail="Chief cannot revoke themselves."
         )
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -390,7 +390,6 @@ async def revoke_user(
         if not revoked_user:
             raise HTTPException(status_code=404, detail="User not found.")
 
-        conn.commit()
 
         target_name, target_email, target_op_id, target_role, _ = revoked_user
 
@@ -398,7 +397,7 @@ async def revoke_user(
         admin_name = str(current_user.get("name") or current_user.get("username") or "The Chief")
         admin_role_val = str(current_user.get("role") or "The Chief")
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=admin_id,
             username=admin_name,
@@ -421,8 +420,16 @@ async def revoke_user(
                 "revoked_email": target_email,
                 "revoked_operator_id": target_op_id,
                 "revoked_role": target_role
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "message": f"User access revoked for {target_name} ({target_op_id})."
@@ -455,7 +462,7 @@ async def keeper_recommend_request(
             detail="Invalid recommendation."
         )
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -488,12 +495,11 @@ async def keeper_recommend_request(
             )
         )
 
-        conn.commit()
 
         keeper_id = str(current_user.get("user_id") or current_user.get("sub") or "SYSTEM")
         keeper_name = str(current_user.get("name") or current_user.get("username") or "The Keeper")
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=keeper_id,
             username=keeper_name,
@@ -515,8 +521,16 @@ async def keeper_recommend_request(
                 "requested_role": req_row[2],
                 "recommendation": req.recommendation,
                 "keeper_notes": req.notes
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "message": "Recommendation submitted."
@@ -531,9 +545,9 @@ async def keeper_recommend_request(
 # ----------------------------
 @app.get("/notifications")
 async def get_notifications(
-    current_user: dict = Depends(get_current_user)
+    request: Request, current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -580,9 +594,9 @@ async def get_notifications(
 
 @app.post("/notifications/read")
 async def mark_notifications_read(
-    current_user: dict = Depends(get_current_user)
+    request: Request, current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -873,6 +887,18 @@ async def login(
                 max_age=REFRESH_EXPIRE_DAYS * 86400,
             )
 
+            csrf_token = generate_csrf_token()
+
+            response.set_cookie(
+                key="csrf_token",
+                value=csrf_token,
+                httponly=False,
+                secure=False,
+                samesite="Strict",
+                max_age=REFRESH_EXPIRE_DAYS * 86400,
+                path="/",
+            )
+
         conn.commit()
         return response_payload
 
@@ -1120,9 +1146,8 @@ async def request_access(request: Request, req: AccessRequestModel):
         )
 
         new_request_id = cur.fetchone()[0]
-        conn.commit()
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id="PUBLIC_APPLICANT",
             username=req.full_name,
@@ -1140,8 +1165,16 @@ async def request_access(request: Request, req: AccessRequestModel):
                 "purpose": req.purpose,
                 "requested_role": req.requested_role,
                 "temporary_access": req.temporary_access
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "message": "Access request submitted"
@@ -1207,7 +1240,7 @@ async def admin_create_user(
             "Password too weak"
         )
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -1309,13 +1342,12 @@ async def admin_create_user(
             )
         )
 
-        conn.commit()
 
         admin_id = str(current_user.get("user_id") or current_user.get("sub") or "SYSTEM")
         admin_name = str(current_user.get("name") or current_user.get("username") or "The Chief")
         admin_role_val = str(current_user.get("role") or "The Chief")
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=admin_id,
             username=admin_name,
@@ -1331,8 +1363,16 @@ async def admin_create_user(
                 "created_name": name,
                 "created_email": email,
                 "assigned_role": role
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "message": "User created successfully",
@@ -1348,11 +1388,11 @@ async def admin_create_user(
 # ADMIN: LIST USERS
 # ----------------------------
 @app.get("/admin/users", tags=["Admin"])
-async def list_users(current_user: dict = Depends(get_current_user)):
+async def list_users(request: Request, current_user: dict = Depends(get_current_user)):
     if current_user.get("role") not in ["The Chief", "The Keeper"]:
         raise HTTPException(status_code=403, detail="Access Denied")
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1383,11 +1423,11 @@ async def list_users(current_user: dict = Depends(get_current_user)):
 # ADMIN: LIST ACCESS REQUESTS
 # ----------------------------
 @app.get("/admin/access-requests", tags=["Admin"])
-async def list_access_requests(current_user: dict = Depends(get_current_user)):
+async def list_access_requests(request: Request, current_user: dict = Depends(get_current_user)):
     if current_user.get("role") not in ["The Chief", "The Keeper"]:
         raise HTTPException(status_code=403, detail="Access Denied")
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1426,7 +1466,7 @@ async def change_password(
     new_password: str,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -1476,9 +1516,8 @@ async def change_password(
             (user_id,)
         )
 
-        conn.commit()
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(user_id),
             username=str(user[1]),
@@ -1490,8 +1529,16 @@ async def change_password(
             target_id=user[3] or str(user_id),
             justification="Operator-initiated credential rotation",
             diff_payload={"password": {"old": "[PROTECTED]", "new": "[PROTECTED]"}},
-            extra_metadata={"operator_id": user[3]}
+            extra_metadata={"operator_id": user[3]},
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "message": "Password updated"
@@ -1510,7 +1557,7 @@ async def setup_2fa(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -1589,7 +1636,7 @@ async def verify_2fa(
     req: Verify2FARequest,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -1645,9 +1692,8 @@ async def verify_2fa(
             (user_id,)
         )
 
-        conn.commit()
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(user_id),
             username=str(user[1]),
@@ -1659,8 +1705,16 @@ async def verify_2fa(
             target_id=user[3] or str(user_id),
             justification="Enrolled and verified TOTP multi-factor authenticator",
             diff_payload={"twofa_enabled": {"old": False, "new": True}},
-            extra_metadata={"operator_id": user[3]}
+            extra_metadata={"operator_id": user[3]},
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "message": "2FA enabled"

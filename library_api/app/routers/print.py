@@ -17,7 +17,7 @@ async def print_book(
     request: Request, 
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:

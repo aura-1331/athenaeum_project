@@ -23,7 +23,7 @@ def run_operation(
     request: Request, 
     current_user: dict = Depends(get_current_user)
 ):
-    db = get_connection()
+    db = get_connection(request=request)
     try:
         result = execute_operation(
             db,
@@ -38,7 +38,7 @@ def run_operation(
         actor_name = str(current_user.get("username") or current_user.get("name") or payload.actor or "Archive Operator")
         actor_role = str(current_user.get("role", "The Keeper"))
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=actor_id,
             username=actor_name,
@@ -61,8 +61,14 @@ def run_operation(
             extra_metadata={
                 "accession_no": payload.accession_no,
                 "action": payload.action
-            }
+            },
+            conn=db,
         )
+
+        if not audit_ok:
+            raise RuntimeError("Audit record could not be written; operation rolled back")
+
+        db.commit()
 
         return result
     except Exception as e:
@@ -78,7 +84,7 @@ def get_allowed(
     request: Request, 
     current_user: dict = Depends(get_current_user)
 ):
-    db = get_connection()
+    db = get_connection(request=request)
     try:
         with db.cursor() as cur:
             cur.execute("SELECT action FROM get_allowed_transitions(%s)", (accession_no,))

@@ -133,8 +133,8 @@ def resolve_authority(cur, author_name: str, user_id: int) -> int:
     return cur.fetchone()[0]
 
 @router.get("/next-numbers")
-def get_next_numbers(language: str, category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
-    conn = get_connection()
+def get_next_numbers(request: Request, language: str, category: Optional[str] = None, current_user: dict = Depends(get_current_user)):
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("SELECT COALESCE(MAX(serial_no), 0) + 1 FROM public.items")
@@ -255,8 +255,8 @@ async def lookup_isbn(isbn: str, current_user: dict = Depends(get_current_user))
     raise HTTPException(status_code=404, detail="No metadata found for this ISBN")
 
 @router.get("/authors/search", response_model=List[str])
-def search_authors(q: str, current_user: dict = Depends(get_current_user)):
-    conn = get_connection()
+def search_authors(request: Request, q: str, current_user: dict = Depends(get_current_user)):
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("""
@@ -276,8 +276,8 @@ def search_authors(q: str, current_user: dict = Depends(get_current_user)):
         conn.close()
 
 @router.get("/publishers/search", response_model=List[str])
-def search_publishers(q: str, current_user: dict = Depends(get_current_user)):
-    conn = get_connection()
+def search_publishers(request: Request, q: str, current_user: dict = Depends(get_current_user)):
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("""
@@ -311,7 +311,7 @@ def create_work(
     x_device_id: Optional[str] = Header(default="Desktop Browser Workstation"),
     x_ip_address: Optional[str] = Header(default="127.0.0.1")
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         token_user_id = current_user.get("user_id")
@@ -439,9 +439,8 @@ def create_work(
         )
         created_serial_no = cur.fetchone()[0]
 
-        conn.commit()
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(token_user_id),
             username=real_name,
@@ -467,8 +466,16 @@ def create_work(
                 "work_id": work_id,
                 "serial_no": created_serial_no,
                 "accession_no": final_accession_no
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "work_id": work_id,
@@ -490,10 +497,10 @@ def create_work(
 # interprets /work/59 as the numeric serial_no route.
 @router.get("/work/{work_id}")
 def get_work_for_item_accession(
-    work_id: int,
+    request: Request, work_id: int,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute("""
@@ -538,7 +545,7 @@ async def create_item(
     x_device_id: Optional[str] = Header(default="Desktop Browser Workstation"),
     x_ip_address: Optional[str] = Header(default="127.0.0.1")
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         token_user_id = current_user.get("user_id")
@@ -625,9 +632,8 @@ async def create_item(
 
         created_serial_no = cur.fetchone()[0]
 
-        conn.commit()
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(token_user_id),
             username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
@@ -653,8 +659,16 @@ async def create_item(
                 "work_id": existing_work_id,
                 "device_id": x_device_id,
                 "ip_address": x_ip_address
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "serial_no": created_serial_no,
@@ -684,9 +698,9 @@ async def create_item(
     dependencies=[Depends(require_role(["The Keeper"]))]
 )
 def list_my_submissions(
-    current_user: dict = Depends(get_current_user)
+    request: Request, current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
@@ -754,7 +768,7 @@ async def resubmit_work(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
@@ -855,9 +869,8 @@ async def resubmit_work(
             WHERE work_id = %s
         """, (token_user_id, work_id))
 
-        conn.commit()
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(token_user_id),
             username=str(
@@ -886,8 +899,16 @@ async def resubmit_work(
                 "title": updated["title"],
                 "status": "PENDING"
             },
-            extra_metadata={"resubmission": True}
+            extra_metadata={"resubmission": True},
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "message": (
@@ -920,8 +941,8 @@ async def resubmit_work(
     tags=["Admin Operations"],
     dependencies=[Depends(require_role(["The Chief"]))]
 )
-def list_pending_works(current_user: dict = Depends(get_current_user)):
-    conn = get_connection()
+def list_pending_works(request: Request, current_user: dict = Depends(get_current_user)):
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute("""
@@ -968,8 +989,8 @@ def list_pending_works(current_user: dict = Depends(get_current_user)):
     tags=["Admin Operations"],
     dependencies=[Depends(require_role(["The Chief"]))]
 )
-def list_pending_items(current_user: dict = Depends(get_current_user)):
-    conn = get_connection()
+def list_pending_items(request: Request, current_user: dict = Depends(get_current_user)):
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute("""
@@ -1026,7 +1047,7 @@ async def approve_item(
             detail="Action must be APPROVE or REJECT."
         )
 
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         if decision == "APPROVE":
@@ -1078,7 +1099,7 @@ async def approve_item(
               AND u.identity_id IS NOT NULL
         """, (notification_message, serial_no))
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(current_user.get("user_id", "UNKNOWN")),
             username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
@@ -1097,8 +1118,14 @@ async def approve_item(
                 "work_id": row["work_id"],
                 "decision": decision
             },
-            extra_metadata={"reason": reason}
+            extra_metadata={"reason": reason},
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
 
         conn.commit()
 
@@ -1122,8 +1149,8 @@ async def approve_item(
 
 
 @router.get("/{serial_no}")
-def get_book(serial_no: int, current_user: dict = Depends(get_current_user)):
-    conn = get_connection()
+def get_book(request: Request, serial_no: int, current_user: dict = Depends(get_current_user)):
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         query = """
@@ -1172,7 +1199,7 @@ def get_book(serial_no: int, current_user: dict = Depends(get_current_user)):
 
 @router.get("/")
 def get_catalogue(
-    page: int = 1, 
+    request: Request, page: int = 1, 
     limit: int = 50, 
     sort_by: str = "serial_no", 
     order: str = "asc",
@@ -1183,7 +1210,7 @@ def get_catalogue(
     category: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         user_role = current_user.get('role', 'GUEST')
@@ -1274,7 +1301,7 @@ async def update_ledger_record(
     x_device_id: Optional[str] = Header(default="Desktop Browser Workstation"),
     x_ip_address: Optional[str] = Header(default="127.0.0.1")
 ):    
-    lookup_conn = get_connection()
+    lookup_conn = get_connection(request=request)
     lookup_cur = lookup_conn.cursor()
     try:
         token_user_id = int(current_user.get("user_id"))
@@ -1371,9 +1398,8 @@ async def update_ledger_record(
         if final_call_no:
             cur.execute("UPDATE public.items SET call_no = %s WHERE work_id = %s", (final_call_no, work_id))
 
-        conn.commit()
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(token_user_id),
             username=real_name,
@@ -1396,8 +1422,16 @@ async def update_ledger_record(
                 "serial_no": serial_no,
                 "work_id": work_id,
                 "device_id": x_device_id
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {"status": "success", "call_no": final_call_no}
     except Exception as e:
@@ -1421,7 +1455,7 @@ async def approve_work(
     work_id: int, action: str, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)
 ):    
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         decision = action.strip().upper()
@@ -1486,9 +1520,8 @@ async def approve_work(
             WHERE w.work_id = %s
               AND u.identity_id IS NOT NULL
         """, (notification_message, work_id))
-        conn.commit()
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(current_user.get("user_id", "UNKNOWN")),
             username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
@@ -1510,8 +1543,16 @@ async def approve_work(
             extra_metadata={
                 "work_id": work_id,
                 "decision": new_status
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {"message": f"Work '{work_title}' {new_status}."}
     except Exception as e:
@@ -1533,7 +1574,7 @@ async def soft_delete_book(
     book_id: int, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)
 ):    
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("""
@@ -1548,9 +1589,8 @@ async def soft_delete_book(
             raise HTTPException(status_code=404, detail="Item not found.")
 
         work_id, accession_no = row
-        conn.commit()
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=str(current_user.get("user_id", "UNKNOWN")),
             username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
@@ -1573,8 +1613,16 @@ async def soft_delete_book(
             extra_metadata={
                 "serial_no": book_id,
                 "accession_no": accession_no
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {"status": "success"}
     except Exception as e:
@@ -1585,8 +1633,8 @@ async def soft_delete_book(
         conn.close()
 
 @router.post("/check-duplicate")
-def check_duplicate(payload: DuplicateCheckRequest, current_user: dict = Depends(get_current_user)):
-    conn = get_connection()
+def check_duplicate(request: Request, payload: DuplicateCheckRequest, current_user: dict = Depends(get_current_user)):
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("""

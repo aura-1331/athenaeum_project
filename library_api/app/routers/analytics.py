@@ -1,16 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from app.auth import get_current_user, require_role # 1. Import dependencies
 from app.database import get_connection
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 @router.get("/status-transitions", dependencies=[Depends(require_role(["The Chief"]))]) # 2. Add Security Guard
-def status_transition_counts(current_user: dict = Depends(get_current_user)):
+def status_transition_counts(request: Request, current_user: dict = Depends(get_current_user)):
     # 3. Manual role check removed
     conn = None
     cursor = None
     try:
-        conn = get_connection()
+        conn = get_connection(request=request)
         cursor = conn.cursor()
 
         cursor.execute(

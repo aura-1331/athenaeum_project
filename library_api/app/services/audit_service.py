@@ -24,28 +24,51 @@ def _audit_json_default(obj: Any) -> Any:
     return str(obj)
 
 
+AUDIT_HASH_FIELDS = (
+    "id",
+    "session_id",
+    "timestamp",
+    "user_id",
+    "username",
+    "role",
+    "designation",
+    "machine_name",
+    "ip_address",
+    "category",
+    "action_type",
+    "target_entity",
+    "target_id",
+    "endpoint",
+    "http_method",
+    "justification",
+    "diff_payload",
+    "extra_metadata",
+    "sequence_id",
+)
+
+
 def calculate_audit_hash(prev_hash: str, payload: dict) -> str:
     """
-    Produces a deterministic SHA-256 digest over the previous hash
-    and canonicalized audit record attributes.
+    Produces a deterministic SHA-256 digest over every persisted
+    audit_activities field except record_hash itself.
+
+    prev_hash is included explicitly as the chain predecessor.
     """
-    canonical_repr = json.dumps(
-        {
-            "prev_hash": prev_hash,
-            "user_id": str(payload.get("user_id") or ""),
-            "username": str(payload.get("username") or ""),
-            "role": str(payload.get("role") or ""),
-            "action_type": str(payload.get("action_type") or ""),
-            "target_entity": str(payload.get("target_entity") or ""),
-            "target_id": str(payload.get("target_id") or ""),
-            "justification": str(payload.get("justification") or ""),
-            "diff_payload": payload.get("diff_payload") or {},
-            "extra_metadata": payload.get("extra_metadata") or {}
+    canonical_payload = {
+        "prev_hash": prev_hash,
+        **{
+            field: payload.get(field)
+            for field in AUDIT_HASH_FIELDS
         },
+    }
+
+    canonical_repr = json.dumps(
+        canonical_payload,
         sort_keys=True,
-        separators=(',', ':'),
-        default=_audit_json_default
+        separators=(",", ":"),
+        default=_audit_json_default,
     )
+
     return hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
 
 
@@ -59,10 +82,13 @@ def verify_audit_ledger() -> dict[str, Any]:
 
     try:
         cur.execute("""
-            SELECT 
-                sequence_id, id, user_id, username, role, action_type,
-                target_entity, target_id, justification, diff_payload,
-                extra_metadata, prev_hash, record_hash
+            SELECT
+                sequence_id, id, session_id, "timestamp",
+                user_id, username, role, designation,
+                machine_name, ip_address, category, action_type,
+                target_entity, target_id, endpoint, http_method,
+                justification, diff_payload, extra_metadata,
+                prev_hash, record_hash
             FROM audit_activities
             WHERE record_hash IS NOT NULL
             ORDER BY sequence_id ASC
@@ -75,9 +101,30 @@ def verify_audit_ledger() -> dict[str, Any]:
         expected_prev_hash = GENESIS_HASH
 
         for r in rows:
-            seq_id, rec_id, uid, uname, urole, act_type, tent, tid, just, diff, meta, p_hash, r_hash = r
+            (
+                seq_id,
+                rec_id,
+                session_id,
+                timestamp,
+                uid,
+                uname,
+                urole,
+                designation,
+                machine_name,
+                ip_address,
+                category,
+                act_type,
+                tent,
+                tid,
+                endpoint,
+                http_method,
+                just,
+                diff,
+                meta,
+                p_hash,
+                r_hash,
+            ) = r
 
-            # Check 1: Chain link continuity
             if p_hash != expected_prev_hash:
                 return {
                     "status": "COMPROMISED",
@@ -85,21 +132,31 @@ def verify_audit_ledger() -> dict[str, Any]:
                     "sequence_id": seq_id,
                     "record_id": rec_id,
                     "expected_prev_hash": expected_prev_hash,
-                    "found_prev_hash": p_hash
+                    "found_prev_hash": p_hash,
                 }
 
-            # Check 2: Row payload integrity
             payload = {
+                "id": rec_id,
+                "session_id": session_id,
+                "timestamp": timestamp,
                 "user_id": uid,
                 "username": uname,
                 "role": urole,
+                "designation": designation,
+                "machine_name": machine_name,
+                "ip_address": ip_address,
+                "category": category,
                 "action_type": act_type,
                 "target_entity": tent,
                 "target_id": tid,
+                "endpoint": endpoint,
+                "http_method": http_method,
                 "justification": just,
-                "diff_payload": diff if isinstance(diff, dict) else (json.loads(diff) if diff else {}),
-                "extra_metadata": meta if isinstance(meta, dict) else (json.loads(meta) if meta else {})
+                "diff_payload": diff,
+                "extra_metadata": meta,
+                "sequence_id": seq_id,
             }
+
             computed_hash = calculate_audit_hash(p_hash, payload)
 
             if computed_hash != r_hash:
@@ -109,7 +166,7 @@ def verify_audit_ledger() -> dict[str, Any]:
                     "sequence_id": seq_id,
                     "record_id": rec_id,
                     "expected_hash": computed_hash,
-                    "stored_hash": r_hash
+                    "stored_hash": r_hash,
                 }
 
             expected_prev_hash = r_hash
@@ -117,7 +174,7 @@ def verify_audit_ledger() -> dict[str, Any]:
         return {
             "status": "VALID",
             "inspected_count": len(rows),
-            "latest_head_hash": expected_prev_hash
+            "latest_head_hash": expected_prev_hash,
         }
 
     finally:
@@ -144,11 +201,15 @@ def log_audit_activity(
     session_id: Optional[str] = None,
     machine_name: Optional[str] = None,
     ip_address: Optional[str] = None,
+    conn: Optional[Any] = None,
 ) -> bool:
-    conn = None
+    owns_connection = conn is None
     cur = None
+
     try:
-        conn = get_connection()
+        if owns_connection:
+            conn = get_connection(request=request)
+
         cur = conn.cursor()
 
         # 1. Resolve host and network metadata with unconditional fallbacks
@@ -167,7 +228,6 @@ def log_audit_activity(
             if not resolved_machine and getattr(request, "headers", None):
                 resolved_machine = request.headers.get("X-Machine-Name")
 
-        # Fallbacks to satisfy audit_activities NOT NULL constraints
         if not resolved_ip:
             resolved_ip = "127.0.0.1"
 
@@ -185,77 +245,112 @@ def log_audit_activity(
 
         # 2. Fetch latest record hash in sequence with row locking
         cur.execute("""
-            SELECT record_hash 
-            FROM audit_activities 
-            WHERE record_hash IS NOT NULL 
-            ORDER BY sequence_id DESC 
-            LIMIT 1 
+            SELECT record_hash
+            FROM audit_activities
+            WHERE record_hash IS NOT NULL
+            ORDER BY sequence_id DESC
+            LIMIT 1
             FOR UPDATE
         """)
         row = cur.fetchone()
         prev_hash = row[0] if row and row[0] else GENESIS_HASH
 
-        # 3. Compute deterministic hash for current record
+        # 3. Resolve the exact persisted values BEFORE hashing.
+        entry_id = str(uuid.uuid4())
+
+        cur.execute("""
+            SELECT
+                nextval('audit_activities_sequence_id_seq'),
+                NOW()
+        """)
+        sequence_id, timestamp = cur.fetchone()
+
+        stored_user_id = str(user_id or "SYSTEM")
+        stored_username = str(username or "SYSTEM")
+        stored_role = str(role or "SYSTEM")
+        stored_designation = str(designation or "SYSTEM")
+        stored_action_type = str(action_type or "UNKNOWN")
+
+        stored_diff_payload = diff_payload if diff_payload else None
+        stored_extra_metadata = extra_metadata if extra_metadata else None
+
+        # 4. Hash the complete persisted record except record_hash itself.
         payload_data = {
-            "user_id": str(user_id or "SYSTEM"),
-            "username": str(username or "SYSTEM"),
-            "role": str(role or "SYSTEM"),
-            "action_type": str(action_type or "UNKNOWN"),
-            "target_entity": str(target_entity or ""),
-            "target_id": str(target_id or ""),
-            "justification": str(justification or ""),
-            "diff_payload": diff_payload or {},
-            "extra_metadata": extra_metadata or {}
+            "id": entry_id,
+            "session_id": session_id,
+            "timestamp": timestamp,
+            "user_id": stored_user_id,
+            "username": stored_username,
+            "role": stored_role,
+            "designation": stored_designation,
+            "machine_name": resolved_machine,
+            "ip_address": resolved_ip,
+            "category": category,
+            "action_type": stored_action_type,
+            "target_entity": target_entity,
+            "target_id": target_id,
+            "endpoint": resolved_endpoint,
+            "http_method": resolved_method,
+            "justification": justification,
+            "diff_payload": stored_diff_payload,
+            "extra_metadata": stored_extra_metadata,
+            "sequence_id": sequence_id,
         }
+
         current_hash = calculate_audit_hash(prev_hash, payload_data)
 
-        # 4. Insert record with chain linkages
-        entry_id = str(uuid.uuid4())
+        # 5. Insert the exact values that were cryptographically bound.
         cur.execute("""
             INSERT INTO audit_activities (
                 id, session_id, timestamp, user_id, username, role,
                 designation, machine_name, ip_address, category, action_type,
                 target_entity, target_id, endpoint, http_method, justification,
-                diff_payload, extra_metadata, prev_hash, record_hash
+                diff_payload, extra_metadata, sequence_id, prev_hash, record_hash
             )
             VALUES (
-                %s, %s, NOW(), %s, %s, %s,
+                %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s,
-                %s, %s, %s, %s
+                %s, %s, %s, %s, %s
             )
         """, (
             entry_id,
             session_id,
-            str(user_id or "SYSTEM"),
-            str(username or "SYSTEM"),
-            str(role or "SYSTEM"),
-            str(designation or "SYSTEM"),
+            timestamp,
+            stored_user_id,
+            stored_username,
+            stored_role,
+            stored_designation,
             resolved_machine,
             resolved_ip,
             category,
-            action_type,
+            stored_action_type,
             target_entity,
             target_id,
             resolved_endpoint,
             resolved_method,
             justification,
-            json.dumps(diff_payload, default=_audit_json_default) if diff_payload else None,
-            json.dumps(extra_metadata, default=_audit_json_default) if extra_metadata else None,
+            json.dumps(stored_diff_payload, default=_audit_json_default)
+                if stored_diff_payload is not None else None,
+            json.dumps(stored_extra_metadata, default=_audit_json_default)
+                if stored_extra_metadata is not None else None,
+            sequence_id,
             prev_hash,
-            current_hash
+            current_hash,
         ))
 
-        conn.commit()
+        if owns_connection:
+            conn.commit()
+
         return True
 
     except Exception as e:
-        if conn:
+        if owns_connection and conn:
             conn.rollback()
         print(f"[AUDIT FAILURE] Failed to write chained audit record: {e}")
         return False
     finally:
         if cur:
             cur.close()
-        if conn:
+        if owns_connection and conn:
             conn.close()

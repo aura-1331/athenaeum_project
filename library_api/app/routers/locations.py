@@ -34,7 +34,7 @@ async def move_item(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         # 1. Verify item existence
@@ -60,14 +60,13 @@ async def move_item(
         """, (payload.serial_no, payload.location_name, current_user["user_id"], payload.notes))
 
         location_id = cur.fetchone()[0]
-        conn.commit()
 
         # 4. Cryptographic ledger anchor
         actor_id = str(current_user.get("user_id", "UNKNOWN"))
         actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
         actor_role = str(current_user.get("role", "The Keeper"))
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=actor_id,
             username=actor_name,
@@ -90,8 +89,16 @@ async def move_item(
             extra_metadata={
                 "serial_no": payload.serial_no,
                 "location_id": location_id
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {"message": "Holding relocated successfully", "location_id": location_id}
     except HTTPException:
@@ -110,10 +117,10 @@ async def move_item(
 # -------------------------
 @router.get("/current/{serial_no}")
 def current_location(
-    serial_no: int,
+    request: Request, serial_no: int,
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("""

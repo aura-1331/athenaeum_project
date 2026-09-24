@@ -65,14 +65,13 @@ async def report_incident(
                 (new_status, payload.serial_no)
             )
 
-        conn.commit()
 
         # 4. Cryptographic ledger anchor
         actor_id = str(current_user.get("user_id", "UNKNOWN"))
         actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
         actor_role = str(current_user.get("role", "The Keeper"))
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=actor_id,
             username=actor_name,
@@ -100,8 +99,16 @@ async def report_incident(
                 "incident_id": incident_id,
                 "serial_no": payload.serial_no,
                 "severity": payload.severity
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {"message": "Incident reported successfully", "incident_id": incident_id}
     except HTTPException:
@@ -327,14 +334,13 @@ async def resolve_incident(
             (affected_serial_no,)
         )
 
-        conn.commit()
 
         # 4. Cryptographic ledger anchor
         actor_id = str(current_user.get("user_id", "UNKNOWN"))
         actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
         actor_role = str(current_user.get("role", "The Keeper"))
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=actor_id,
             username=actor_name,
@@ -358,8 +364,16 @@ async def resolve_incident(
             extra_metadata={
                 "incident_id": incident_id,
                 "serial_no": affected_serial_no
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {"message": "Incident resolved successfully"}
     except HTTPException:

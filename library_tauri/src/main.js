@@ -24,6 +24,20 @@ const API_BASE =
   import.meta.env.VITE_API_URL ||
   "http://127.0.0.1:8000"
 
+// -------------------------
+// CSRF
+// -------------------------
+
+function getCsrfToken() {
+  const match = document.cookie.match(
+    /(?:^|;\s*)csrf_token=([^;]*)/
+  )
+
+  return match
+    ? decodeURIComponent(match[1])
+    : null
+}
+
 /*
  * Configure the main Axios client.
  *
@@ -82,8 +96,19 @@ async function restoreSession() {
   const storedUser = localStorage.getItem("user")
 
   try {
-    const response =
-      await refreshClient.post("/auth/refresh")
+    const csrfToken = getCsrfToken()
+
+    const response = await refreshClient.post(
+      "/auth/refresh",
+      null,
+      {
+        headers: csrfToken
+          ? {
+              "X-CSRF-Token": csrfToken
+            }
+          : {}
+      }
+    )
 
     const newAccessToken =
       response.data?.access_token
@@ -192,10 +217,14 @@ axios.interceptors.response.use(
         return Promise.reject(error)
       }
 
-      originalRequest.headers = originalRequest.headers || {}
-      originalRequest.headers.Authorization = `Bearer ${auth.accessToken}`
+      originalRequest.headers =
+        originalRequest.headers || {}
+
+      originalRequest.headers.Authorization =
+        `Bearer ${auth.accessToken}`
 
       return axios(originalRequest)
+
     } catch (refreshError) {
       return Promise.reject(refreshError)
     }

@@ -16,7 +16,7 @@ def global_search(
     request: Request = None, 
     current_user: dict = Depends(get_current_user)
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     offset = (page - 1) * limit
 
@@ -57,7 +57,7 @@ def suggest(
 ):
     if not q: return []
     
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute("""

@@ -58,7 +58,7 @@ async def update_config(
     current_user: dict = Depends(get_current_user),
     x_change_reason: Optional[str] = Header(default="System configuration parameter adjustment")
 ):
-    conn = get_connection()
+    conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
@@ -97,14 +97,13 @@ async def update_config(
             )
         )
 
-        conn.commit()
 
         # 3. Anchor state transition into cryptographic ledger
         actor_id = str(current_user.get("user_id", "UNKNOWN"))
         actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
         actor_role = str(current_user.get("role", "The Chief"))
 
-        log_audit_activity(
+        audit_ok = log_audit_activity(
             request=request,
             user_id=actor_id,
             username=actor_name,
@@ -125,8 +124,16 @@ async def update_config(
             extra_metadata={
                 "config_key": normalized_key,
                 "updated_by": actor_id
-            }
+            },
+            conn=conn
         )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+        
+        conn.commit()
 
         return {
             "status": "success",
