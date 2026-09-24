@@ -22,3 +22,9 @@ library_api/*.pem
 __pycache__/
 venv/
 backups/
+# Local HTTP error-code inventory
+HTTP_ERROR_CODES.md
+
+docker-compose.yml
+
+library_tauri/runui.bat

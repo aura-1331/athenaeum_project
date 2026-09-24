@@ -19,6 +19,7 @@ export interface TokenPayload {
   access?: string
   refresh_token?: string
   refresh?: string
+  csrf_token?: string
   [key: string]: any
 }
 
@@ -122,10 +123,21 @@ export const useAuthStore = defineStore('auth', () => {
   // -------------------------
   // 3. CSRF
   // -------------------------
-  // csrf_token is intentionally readable by the frontend.
-  // It is sent back to the backend through X-CSRF-Token.
-  // Authentication tokens are NOT stored here.
+  // In production the frontend and API are on different origins,
+  // so document.cookie cannot reliably expose the API's CSRF cookie.
+  //
+  // The backend also returns csrf_token in the login response.
+  // Store that non-secret CSRF value locally and use it for the
+  // X-CSRF-Token header.
+  //
+  // The refresh token remains HttpOnly and is never stored here.
   function getCsrfToken(): string | null {
+    const storedToken = localStorage.getItem('csrf_token')
+
+    if (storedToken) {
+      return storedToken
+    }
+
     const match = document.cookie.match(
       /(?:^|;\s*)csrf_token=([^;]*)/
     )
@@ -138,13 +150,20 @@ export const useAuthStore = defineStore('auth', () => {
   // -------------------------
   // 4. ACTIONS
   // -------------------------
-  function login(tokens: any, userObj?: any) {
+  function login(tokens: TokenPayload | string, userObj?: any) {
     const rawToken = typeof tokens === 'string'
       ? tokens
       : (tokens?.access_token || tokens?.access || null)
 
     accessToken.value = rawToken
     refreshToken.value = null
+
+    if (typeof tokens !== 'string' && tokens?.csrf_token) {
+      localStorage.setItem(
+        'csrf_token',
+        tokens.csrf_token
+      )
+    }
 
     if (userObj) {
       userId.value = String(
@@ -244,6 +263,7 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('token')
     localStorage.removeItem('user')
+    localStorage.removeItem('csrf_token')
 
     localStorage.setItem(
       "logout",

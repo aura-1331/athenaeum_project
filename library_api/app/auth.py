@@ -1,4 +1,5 @@
 import logging
+import os
 import secrets
 import hmac
 
@@ -33,6 +34,10 @@ from app.token_manager import (
 # -------------------------
 
 load_dotenv()
+
+ATHENAEUM_ENV = os.getenv("ATHENAEUM_ENV", "").strip().lower()
+COOKIE_SECURE = ATHENAEUM_ENV == "production"
+COOKIE_SAMESITE = "none" if COOKIE_SECURE else "strict"
 
 # -------------------------
 # ROUTER
@@ -430,8 +435,8 @@ async def refresh(
         key="refresh_token",
         value=new_refresh_token,
         httponly=True,
-        secure=False,
-        samesite="Strict",
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
         max_age=REFRESH_EXPIRE_DAYS * 86400,
         path="/"
     )

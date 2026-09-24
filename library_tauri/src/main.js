@@ -29,6 +29,12 @@ const API_BASE =
 // -------------------------
 
 function getCsrfToken() {
+  const stored = localStorage.getItem("csrf_token")
+
+  if (stored) {
+    return stored
+  }
+
   const match = document.cookie.match(
     /(?:^|;\s*)csrf_token=([^;]*)/
   )

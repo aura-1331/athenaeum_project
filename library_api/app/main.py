@@ -1,3 +1,8 @@
+import os
+
+ATHENAEUM_ENV = os.getenv("ATHENAEUM_ENV", "").strip().lower()
+COOKIE_SECURE = ATHENAEUM_ENV == "production"
+COOKIE_SAMESITE = "none" if COOKIE_SECURE else "strict"
 import asyncio
 import platform
 import time
@@ -428,7 +433,7 @@ async def revoke_user(
             raise RuntimeError(
                 "Audit record could not be written; operation rolled back"
             )
-        
+
         conn.commit()
 
         return {
@@ -529,7 +534,7 @@ async def keeper_recommend_request(
             raise RuntimeError(
                 "Audit record could not be written; operation rolled back"
             )
-        
+
         conn.commit()
 
         return {
@@ -882,8 +887,8 @@ async def login(
                 key="refresh_token",
              value=refresh_token,
                 httponly=True,
-             secure=False,
-                samesite="Strict",
+             secure=COOKIE_SECURE,
+                samesite=COOKIE_SAMESITE,
                 max_age=REFRESH_EXPIRE_DAYS * 86400,
             )
 
@@ -893,12 +898,14 @@ async def login(
                 key="csrf_token",
                 value=csrf_token,
                 httponly=False,
-                secure=False,
-                samesite="Strict",
+                secure=COOKIE_SECURE,
+                samesite=COOKIE_SAMESITE,
                 max_age=REFRESH_EXPIRE_DAYS * 86400,
                 path="/",
             )
 
+
+            response_payload["csrf_token"] = csrf_token
         conn.commit()
         return response_payload
 
@@ -930,25 +937,36 @@ async def verify_login_2fa(
                 issuer="athenaeum-api"
             )
         except JWTError:
-            raise HTTPException(status_code=401, detail="2FA session expired. Please log in again.")
+            raise HTTPException(
+                status_code=401,
+                detail="2FA session expired. Please log in again."
+            )
 
         if payload.get("scope") != "2fa_preauth":
-            raise HTTPException(status_code=401, detail="Invalid token scope for 2FA.")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token scope for 2FA."
+            )
 
         user_id = int(payload["sub"])
 
         cur.execute(
             """
-            SELECT user_id, twofa_secret, twofa_enabled, role, name, operator_id, status
+            SELECT user_id, twofa_secret, twofa_enabled,
+                   role, name, operator_id, status
             FROM users
             WHERE user_id=%s
             """,
             (user_id,)
         )
+
         user = cur.fetchone()
 
         if not user or not user[1] or user[6] != "APPROVED":
-            raise HTTPException(status_code=403, detail="Account is disabled or 2FA is misconfigured.")
+            raise HTTPException(
+                status_code=403,
+                detail="Account is disabled or 2FA is misconfigured."
+            )
 
         totp = pyotp.TOTP(user[1])
 
@@ -966,7 +984,11 @@ async def verify_login_2fa(
                 justification="Failed second-factor authentication: incorrect TOTP code entered",
                 extra_metadata={"operator_id": user[5]}
             )
-            raise HTTPException(status_code=401, detail="Invalid 2FA code.")
+
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid 2FA code."
+            )
 
         if not consume_totp_once(user[0], totp):
             raise HTTPException(
@@ -975,6 +997,7 @@ async def verify_login_2fa(
             )
 
         preauth_jti = payload.get("jti")
+
         if not preauth_jti:
             raise HTTPException(
                 status_code=401,
@@ -985,7 +1008,9 @@ async def verify_login_2fa(
             preauth_exp = int(payload["exp"])
             preauth_ttl = max(
                 1,
-                preauth_exp - int(datetime.now(timezone.utc).timestamp())
+                preauth_exp - int(
+                    datetime.now(timezone.utc).timestamp()
+                )
             )
         except (KeyError, TypeError, ValueError):
             raise HTTPException(
@@ -1053,11 +1078,15 @@ async def verify_login_2fa(
             )
 
             jti = refresh_payload["jti"]
-            expires = datetime.fromtimestamp(refresh_payload["exp"], tz=timezone.utc)
+            expires = datetime.fromtimestamp(
+                refresh_payload["exp"],
+                tz=timezone.utc
+            )
 
             cur.execute(
                 """
-                INSERT INTO refresh_tokens (token_id, user_id, expires_at)
+                INSERT INTO refresh_tokens
+                    (token_id, user_id, expires_at)
                 VALUES (%s, %s, %s)
                 """,
                 (jti, refresh_payload["sub"], expires)
@@ -1067,11 +1096,24 @@ async def verify_login_2fa(
                 key="refresh_token",
                 value=refresh_token,
                 httponly=True,
-                secure=False,
-                samesite="Strict",
+                secure=COOKIE_SECURE,
+                samesite=COOKIE_SAMESITE,
                 max_age=REFRESH_EXPIRE_DAYS * 86400,
             )
 
+            csrf_token = generate_csrf_token()
+
+            response.set_cookie(
+                key="csrf_token",
+                value=csrf_token,
+                httponly=False,
+                secure=COOKIE_SECURE,
+                samesite=COOKIE_SAMESITE,
+                max_age=REFRESH_EXPIRE_DAYS * 86400,
+                path="/",
+            )
+
+            response_payload["csrf_token"] = csrf_token
 
         conn.commit()
         return response_payload
@@ -1079,7 +1121,6 @@ async def verify_login_2fa(
     finally:
         cur.close()
         conn.close()
-
 
 
 # -------------------------------
@@ -1173,7 +1214,7 @@ async def request_access(request: Request, req: AccessRequestModel):
             raise RuntimeError(
                 "Audit record could not be written; operation rolled back"
             )
-        
+
         conn.commit()
 
         return {
@@ -1371,7 +1412,7 @@ async def admin_create_user(
             raise RuntimeError(
                 "Audit record could not be written; operation rolled back"
             )
-        
+
         conn.commit()
 
         return {
@@ -1537,7 +1578,7 @@ async def change_password(
             raise RuntimeError(
                 "Audit record could not be written; operation rolled back"
             )
-        
+
         conn.commit()
 
         return {
@@ -1713,7 +1754,7 @@ async def verify_2fa(
             raise RuntimeError(
                 "Audit record could not be written; operation rolled back"
             )
-        
+
         conn.commit()
 
         return {

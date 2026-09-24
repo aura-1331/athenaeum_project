@@ -313,6 +313,10 @@ async function verifyPassword() {
         role: data?.role || "User",
       }
 
+    if (data?.csrf_token) {
+      localStorage.setItem("csrf_token", data.csrf_token)
+    }
+
     authStore.login({ access_token: token }, user)
     await router.push("/dashboard")
   } catch (error: any) {
@@ -397,6 +401,10 @@ async function verifyTwoFA() {
         name: data?.name || operatorId,
         role: data?.role || "User",
       }
+
+    if (data?.csrf_token) {
+      localStorage.setItem("csrf_token", data.csrf_token)
+    }
 
     authStore.login({ access_token: token }, user)
     await router.push("/dashboard")
