@@ -441,13 +441,19 @@ function returnToLogin() {
    ========================================================= */
 
 .aurora-layout {
-  position: relative;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+
   min-height: 100vh;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
+
   overflow: hidden;
+  background: #0A0A0C;
 }
 
 /* =========================================================
