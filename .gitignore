@@ -28,3 +28,5 @@ HTTP_ERROR_CODES.md
 docker-compose.yml
 
 library_tauri/runui.bat
+
+RELEASE_GUIDE.md
