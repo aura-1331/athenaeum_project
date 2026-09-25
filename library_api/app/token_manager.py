@@ -1,3 +1,4 @@
+import os
 import uuid
 import redis
 
@@ -36,11 +37,20 @@ REFRESH_EXPIRE_DAYS = 7
 # REDIS
 # -------------------------
 
-redis_client = redis.Redis(
-    host="localhost",
-    port=6379,
-    decode_responses=True
-)
+REDIS_URL = os.getenv("REDIS_URL")
+
+if REDIS_URL:
+    redis_client = redis.from_url(
+        REDIS_URL,
+        decode_responses=True
+    )
+else:
+    redis_client = redis.Redis(
+        host="localhost",
+        port=6379,
+        decode_responses=True
+    )
+
 
 def consume_once(key: str, ttl_seconds: int) -> bool:
     """Atomically consume a one-time Redis key."""
@@ -52,6 +62,7 @@ def consume_once(key: str, ttl_seconds: int) -> bool:
             ex=ttl_seconds
         )
     )
+
 
 # -------------------------
 # TOKEN CREATION
@@ -93,6 +104,7 @@ def create_token(user_data: dict, token_type: str = "access"):
         algorithm=ALGORITHM
     )
 
+
 # -------------------------
 # TOKEN VALIDATION
 # -------------------------
@@ -111,10 +123,11 @@ def decode_token(token: str):
         return payload
 
     except JWTError:
-       raise HTTPException(
-        status_code=401,
-        detail="Invalid token"
-    )
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token"
+        )
+
 
 # -------------------------
 # REFRESH TOKEN VALIDATION
@@ -147,6 +160,7 @@ def verify_refresh_token(token: str):
 
     return payload
 
+
 # -------------------------
 # REVOKE REFRESH TOKEN
 # -------------------------
@@ -162,6 +176,7 @@ def revoke_refresh_token(token: str):
         REFRESH_EXPIRE_DAYS * 86400,
         "revoked"
     )
+
 
 # -------------------------
 # ROTATE REFRESH TOKEN
