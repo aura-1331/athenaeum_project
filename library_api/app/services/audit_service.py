@@ -72,6 +72,34 @@ def calculate_audit_hash(prev_hash: str, payload: dict) -> str:
     return hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
 
 
+def calculate_legacy_audit_hash(prev_hash: str, payload: dict) -> str:
+    """
+    Reproduces the audit hash format used before the P0 audit-hardening
+    hash expansion. Kept for verification of historical ledger records.
+    """
+    canonical_payload = {
+        "prev_hash": prev_hash,
+        "user_id": str(payload.get("user_id") or ""),
+        "username": str(payload.get("username") or ""),
+        "role": str(payload.get("role") or ""),
+        "action_type": str(payload.get("action_type") or ""),
+        "target_entity": str(payload.get("target_entity") or ""),
+        "target_id": str(payload.get("target_id") or ""),
+        "justification": str(payload.get("justification") or ""),
+        "diff_payload": payload.get("diff_payload") or {},
+        "extra_metadata": payload.get("extra_metadata") or {},
+    }
+
+    canonical_repr = json.dumps(
+        canonical_payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=_audit_json_default,
+    )
+
+    return hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
+
+
 def verify_audit_ledger() -> dict[str, Any]:
     """
     Traverses audit_activities sequentially.
@@ -160,14 +188,20 @@ def verify_audit_ledger() -> dict[str, Any]:
             computed_hash = calculate_audit_hash(p_hash, payload)
 
             if computed_hash != r_hash:
-                return {
-                    "status": "COMPROMISED",
-                    "reason": "PAYLOAD_TAMPERED",
-                    "sequence_id": seq_id,
-                    "record_id": rec_id,
-                    "expected_hash": computed_hash,
-                    "stored_hash": r_hash,
-                }
+                # Historical records (created before the P0 hash expansion)
+                # use the original, narrower hash payload. Accept that format
+                # only when the legacy calculation reproduces the stored hash.
+                legacy_hash = calculate_legacy_audit_hash(p_hash, payload)
+
+                if legacy_hash != r_hash:
+                    return {
+                        "status": "COMPROMISED",
+                        "reason": "PAYLOAD_TAMPERED",
+                        "sequence_id": seq_id,
+                        "record_id": rec_id,
+                        "expected_hash": computed_hash,
+                        "stored_hash": r_hash,
+                    }
 
             expected_prev_hash = r_hash
 
