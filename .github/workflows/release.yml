@@ -1,4 +1,5 @@
 name: Release App
+
 on:
   push:
     tags:
@@ -9,7 +10,7 @@ jobs:
     permissions:
       contents: write
     runs-on: windows-latest
-    
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -17,7 +18,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 26
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -32,6 +33,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          VITE_API_URL: https://athenaeum-api.onrender.com
         with:
           projectPath: './library_tauri'
           tagName: ${{ github.ref_name }}
