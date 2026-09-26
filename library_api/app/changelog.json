@@ -1,5 +1,18 @@
 [
   {
+    "version": "v2.2.1",
+    "date": "2026-09-26",
+    "sections": [
+      {
+        "category": "Desktop Release & Stability",
+        "notes": [
+          "Updated the production desktop release pipeline to use Node.js 26",
+          "Configured the production desktop build to use the Athenaeum cloud API"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.0",
     "date": "2026-09-25",
     "sections": [
@@ -28,13 +41,12 @@
       }
     ]
   },
-
   {
     "version": "v2.0.1",
     "date": "2026-09-10",
     "sections": [
       {
-        "category": "Minor Redesign & UI Improvements ",
+        "category": "Minor Redesign & UI Improvements",
         "notes": [
           "Redesigned the About & System specs dashboard with modern glassmorphism UI",
           "Added standalone Release History & Changelog viewer",
@@ -50,7 +62,6 @@
       }
     ]
   },
-
   {
     "version": "v2.0.0",
     "date": "2026-08-29",
@@ -72,7 +83,6 @@
       }
     ]
   },
-
   {
     "version": "v1.2.0",
     "date": "2026-08-29",
@@ -94,7 +104,6 @@
       }
     ]
   },
-
   {
     "version": "v1.1.8",
     "date": "2026-08-15",
@@ -108,7 +117,6 @@
       }
     ]
   },
-
   {
     "version": "v1.1.7",
     "date": "2026-08-01",
@@ -122,7 +130,6 @@
       }
     ]
   },
-
   {
     "version": "v1.1.6",
     "date": "2026-07-15",
@@ -136,7 +143,6 @@
       }
     ]
   },
-
   {
     "version": "v1.1.5",
     "date": "2026-07-01",
@@ -150,7 +156,6 @@
       }
     ]
   },
-
   {
     "version": "v1.1.4",
     "date": "2026-06-15",
@@ -158,13 +163,12 @@
       {
         "category": "Authority Registry",
         "notes": [
-          "Added provisional vs verified status filtering",
+          "Introduced provisional vs verified status filtering",
           "Added quick search lookup across works and creators"
         ]
       }
     ]
   },
-
   {
     "version": "v1.1.3",
     "date": "2026-06-01",
@@ -178,7 +182,6 @@
       }
     ]
   },
-
   {
     "version": "v1.1.2",
     "date": "2026-05-15",
@@ -192,7 +195,6 @@
       }
     ]
   },
-
   {
     "version": "v1.1.1",
     "date": "2026-05-01",
@@ -206,7 +208,6 @@
       }
     ]
   },
-
   {
     "version": "v1.1.0",
     "date": "2026-04-15",
@@ -220,7 +221,6 @@
       }
     ]
   },
-
   {
     "version": "v1.0.0",
     "date": "2026-04-01",
