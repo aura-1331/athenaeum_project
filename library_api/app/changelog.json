@@ -1,5 +1,23 @@
 [
   {
+    "version": "v2.2.2",
+    "date": "2026-09-27",
+    "sections": [
+      {
+        "category": "Features",
+        "notes": [
+          "Add automated release workflow"
+        ]
+      },
+      {
+        "category": "Infrastructure & Release",
+        "notes": [
+          "Test release automation pipeline"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.1",
     "date": "2026-09-26",
     "sections": [
