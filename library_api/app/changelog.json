@@ -1,5 +1,17 @@
 [
   {
+    "version": "v2.2.3",
+    "date": "2026-09-28",
+    "sections": [
+      {
+        "category": "Bug Fixes",
+        "notes": [
+          "Fix production changelog endpoint"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.2",
     "date": "2026-09-27",
     "sections": [
