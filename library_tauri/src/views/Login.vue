@@ -16,29 +16,19 @@
       <div class="panel-left">
         <div class="brand-container">
           <div class="logo-mark">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 2L2 22H22L12 2Z" stroke="url(#paint0_linear)" stroke-width="1.5" stroke-linejoin="round"/>
-              <path d="M12 10L6 22H18L12 10Z" stroke="url(#paint1_linear)" stroke-width="1.5" stroke-linejoin="round"/>
-              <defs>
-                <linearGradient id="paint0_linear" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
-                  <stop stop-color="#FFFFFF"/>
-                  <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
-                </linearGradient>
-                <linearGradient id="paint1_linear" x1="12" y1="10" x2="12" y2="22" gradientUnits="userSpaceOnUse">
-                  <stop stop-color="#8A93A6"/>
-                  <stop offset="1" stop-color="#8A93A6" stop-opacity="0"/>
-                </linearGradient>
-              </defs>
-            </svg>
+            <img
+              :src="orbisLogo"
+              alt="Athenaeum Orbis"
+              class="orbis-logo"
+            />
           </div>
           <h1>Athenaeum Orbis</h1>
-          <p>Secure knowledge access layer.</p>
         </div>
 
-        <div class="system-status">
+        <!-- <div class="system-status">
           <span class="status-dot"></span>
           All systems operational
-        </div>
+        </div> -->
       </div>
 
       <!-- Right Side: Authentication -->
@@ -75,6 +65,7 @@
                       placeholder="user_id"
                       :disabled="loading"
                       @input="sanitizeIdentity"
+                      @keydown.enter.prevent="passwordInput?.focus()"
                     />
                   </div>
                 </div>
@@ -83,6 +74,7 @@
                   <label for="password">Password</label>
                   <div class="input-box">
                     <input
+                      ref="passwordInput"
                       id="password"
                       v-model="passkey"
                       :type="showPassword ? 'text' : 'password'"
@@ -192,6 +184,8 @@ import { ref } from "vue"
 import { useRouter } from "vue-router"
 import { useAuthStore } from "@/stores/auth"
 
+import orbisLogo from "@/assets/athenaeum-orbis-logo.png"
+
 const router = useRouter()
 const authStore = useAuthStore()
 
@@ -210,6 +204,8 @@ const errorMessage = ref("")
 
 const rememberMe = ref(true)
 const showPassword = ref(false)
+
+const passwordInput = ref<HTMLInputElement | null>(null)
 
 function sanitizeIdentity() {
   identityDigits.value = identityDigits.value
@@ -564,6 +560,13 @@ function returnToLogin() {
   width: 40px;
   height: 40px;
   margin-bottom: 24px;
+}
+
+.orbis-logo {
+  display: block;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
 }
 
 .brand-container h1 {
