@@ -1,5 +1,17 @@
 [
   {
+    "version": "v2.2.4",
+    "date": "2026-10-06",
+    "sections": [
+      {
+        "category": "Security & Authentication",
+        "notes": [
+          "Production enhancements across security, auditing, operations, dashboard, and system management"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.3",
     "date": "2026-09-28",
     "sections": [
