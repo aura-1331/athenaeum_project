@@ -45,7 +45,7 @@ def get_item(
 
 @router.put(
     "/{serial_no}",
-    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
+    dependencies=[Depends(require_role(["The Chief"]))]
 )
 @audit_action(
     "UPDATE_HOLDING",
@@ -169,7 +169,7 @@ def update_item(
     except Exception as e:
         if conn:
             conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         cur.close()
         conn.close()

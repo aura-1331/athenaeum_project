@@ -17,12 +17,14 @@ import AuthoritiesView from "@/views/AuthoritiesView.vue"
 import SubjectsView from "@/views/SubjectsView.vue"
 import IncidentsView from "@/views/IncidentsView.vue"
 import ReportsView from "@/views/ReportsView.vue"
-import AboutView from "@/views/AboutView.vue"
+import SettingsPage from "@/views/SettingsPage.vue"
 
 import SystemSettings from "@/views/admin/SystemSettings.vue"
 import UserManagementView from "@/views/admin/UserManagementView.vue"
 import ApprovalCenterView from "@/views/admin/ApprovalCenterView.vue"
 import DocketView from "@/views/DocketView.vue"
+import ItemReviewView from "@/views/ItemReviewView.vue"
+import WorkReviewView from "@/views/WorkReviewView.vue"
 
 const routes = [
 
@@ -42,7 +44,8 @@ const routes = [
     name: "dashboard",
     component: Dashboard,
     meta: {
-      requiresAuth: true
+      requiresAuth: true,
+      roles: ["The Chief", "The Keeper"]
     }
   },
 
@@ -165,6 +168,26 @@ const routes = [
   },
 
   {
+    path: "/review-work/:id",
+    name: "review-work",
+    component: WorkReviewView,
+    meta: {
+      requiresAuth: true,
+      roles: ["The Chief", "The Keeper"]
+    }
+  },
+
+  {
+    path: "/review-item/:id",
+    name: "review-item",
+    component: ItemReviewView,
+    meta: {
+      requiresAuth: true,
+      roles: ["The Chief", "The Keeper"]
+    }
+  },
+
+  {
     path: "/classification/authors",
     name: "Authors",
     component: AuthorsView,
@@ -215,9 +238,9 @@ const routes = [
   },
 
   {
-    path: "/about",
-    name: "about",
-    component: AboutView,
+    path: "/settings",
+    name: "settings",
+    component: SettingsPage,
     meta: {
       requiresAuth: true,
       permission: "dashboard.view"
@@ -226,12 +249,10 @@ const routes = [
 
 ]
 
-
 const router = createRouter({
   history: createWebHashHistory(),
   routes
 })
-
 
 router.beforeEach((to, from, next) => {
 
@@ -253,11 +274,16 @@ router.beforeEach((to, from, next) => {
     return
   }
 
+  const fallbackRoute =
+    auth.userRole === "The Seeker"
+      ? "/catalogue"
+      : "/dashboard"
+
   if (
     to.meta.roles &&
     !to.meta.roles.includes(auth.userRole)
   ) {
-    next("/dashboard")
+    next(fallbackRoute)
     return
   }
 
@@ -267,12 +293,11 @@ router.beforeEach((to, from, next) => {
       to.meta.permission
     )
   ) {
-    next("/dashboard")
+    next(fallbackRoute)
     return
   }
 
   next()
 })
-
 
 export default router

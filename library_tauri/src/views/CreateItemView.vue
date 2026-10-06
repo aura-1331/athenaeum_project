@@ -147,7 +147,28 @@
       <div class="result-label">
         {{ isChief ? "ACCESSION NUMBER ALLOCATED" : "COPY SUBMITTED FOR VERIFICATION" }}
       </div>
-      <div class="result-accession">{{ result.accession_no }}</div>
+
+      <div class="result-work-title">{{ result.title || "Untitled Work" }}</div>
+
+      <div class="result-details">
+        <div class="result-detail">
+          <span>Work ID</span>
+          <strong>#{{ result.work_id }}</strong>
+        </div>
+        <div class="result-detail">
+          <span>Item ID</span>
+          <strong>#{{ result.item_id }}</strong>
+        </div>
+        <div class="result-detail">
+          <span>Serial No.</span>
+          <strong>#{{ result.serial_no }}</strong>
+        </div>
+        <div class="result-detail">
+          <span>Accession No.</span>
+          <strong>{{ result.accession_no }}</strong>
+        </div>
+      </div>
+
       <p>
         {{
           isChief
@@ -820,11 +841,41 @@ h1 {
   margin-bottom: 8px;
 }
 
-.result-accession {
-  font-family: monospace;
-  font-size: 30px;
-  font-weight: 700;
+.result-work-title {
+  margin-top: 2px;
+  font-family: "Playfair Display", serif;
+  font-size: 23px;
+  line-height: 1.25;
+  font-weight: 600;
   color: inherit;
+}
+
+.result-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 24px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(36, 107, 64, .18);
+}
+
+.result-detail {
+  min-width: 130px;
+}
+
+.result-detail span {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 9px;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  opacity: .72;
+}
+
+.result-detail strong {
+  font-family: monospace;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .result-card p {

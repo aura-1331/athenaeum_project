@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from app.auth import get_current_user, require_role
 from app.database import get_connection
 from app.audit_utils import audit_action
@@ -16,8 +16,8 @@ router = APIRouter(prefix="/reports", tags=["reports"])
     dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
 )
 def accessions_report(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=1000000),
     request: Request = None,
     current_user: dict = Depends(get_current_user)
 ):
@@ -92,8 +92,8 @@ def accessions_report(
     dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
 )
 def activity_report(
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=1000000),
     request: Request = None,
     current_user: dict = Depends(get_current_user)
 ):

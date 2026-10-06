@@ -7,10 +7,6 @@ from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from fastapi import HTTPException
 
-# -------------------------
-# RSA KEYS
-# -------------------------
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 with open(BASE_DIR / "private.pem", "r") as f:
@@ -22,73 +18,37 @@ with open(BASE_DIR / "public.pem", "r") as f:
 if not PRIVATE_KEY or not PUBLIC_KEY:
     raise RuntimeError("Missing RSA keys")
 
-# -------------------------
-# JWT CONFIG
-# -------------------------
-
 ISSUER = "athenaeum-api"
 AUDIENCE = "athenaeum-client"
 ALGORITHM = "RS256"
 
-ACCESS_EXPIRE_MINUTES = 1
+ACCESS_EXPIRE_MINUTES = 15
 REFRESH_EXPIRE_DAYS = 7
-
-# -------------------------
-# REDIS
-# -------------------------
 
 REDIS_URL = os.getenv("REDIS_URL")
 
 if REDIS_URL:
-    redis_client = redis.from_url(
-        REDIS_URL,
-        decode_responses=True
-    )
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 else:
-    redis_client = redis.Redis(
-        host="localhost",
-        port=6379,
-        decode_responses=True
-    )
+    redis_client = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
 
 def consume_once(key: str, ttl_seconds: int) -> bool:
     """Atomically consume a one-time Redis key."""
-    return bool(
-        redis_client.set(
-            key,
-            "consumed",
-            nx=True,
-            ex=ttl_seconds
-        )
-    )
+    return bool(redis_client.set(key, "consumed", nx=True, ex=ttl_seconds))
 
-
-# -------------------------
-# TOKEN CREATION
-# -------------------------
 
 def create_token(user_data: dict, token_type: str = "access"):
-
     now = datetime.now(timezone.utc)
     payload = user_data.copy()
 
     if token_type == "access":
-        expire = now + timedelta(
-            minutes=ACCESS_EXPIRE_MINUTES
-        )
-
+        expire = now + timedelta(minutes=ACCESS_EXPIRE_MINUTES)
     elif token_type == "refresh":
-        expire = now + timedelta(
-            days=REFRESH_EXPIRE_DAYS
-        )
-
+        expire = now + timedelta(days=REFRESH_EXPIRE_DAYS)
         payload["jti"] = str(uuid.uuid4())
-
     else:
-        raise ValueError(
-            f"Invalid token type: {token_type}"
-        )
+        raise ValueError(f"Invalid token type: {token_type}")
 
     payload.update({
         "exp": expire,
@@ -98,115 +58,61 @@ def create_token(user_data: dict, token_type: str = "access"):
         "type": token_type
     })
 
-    return jwt.encode(
-        payload,
-        PRIVATE_KEY,
-        algorithm=ALGORITHM
-    )
+    return jwt.encode(payload, PRIVATE_KEY, algorithm=ALGORITHM)
 
-
-# -------------------------
-# TOKEN VALIDATION
-# -------------------------
 
 def decode_token(token: str):
-
     try:
-        payload = jwt.decode(
+        return jwt.decode(
             token,
             PUBLIC_KEY,
             algorithms=[ALGORITHM],
             issuer=ISSUER,
             audience=AUDIENCE
         )
-
-        return payload
-
     except JWTError:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token"
-        )
+        raise HTTPException(status_code=401, detail="Invalid token")
 
-
-# -------------------------
-# REFRESH TOKEN VALIDATION
-# -------------------------
 
 def verify_refresh_token(token: str):
-
     payload = decode_token(token)
-
     if payload.get("type") != "refresh":
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid refresh token"
-        )
-
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
     jti = payload.get("jti")
-
     if not jti:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing token identifier"
-        )
-
+        raise HTTPException(status_code=401, detail="Missing token identifier")
     if redis_client.get(f"revoked:{jti}"):
-
-        raise HTTPException(
-            status_code=401,
-            detail="Token revoked"
-        )
-
+        raise HTTPException(status_code=401, detail="Token revoked")
     return payload
 
 
-# -------------------------
-# REVOKE REFRESH TOKEN
-# -------------------------
-
 def revoke_refresh_token(token: str):
-
     payload = verify_refresh_token(token)
-
     jti = payload["jti"]
-
-    redis_client.setex(
-        f"revoked:{jti}",
-        REFRESH_EXPIRE_DAYS * 86400,
-        "revoked"
-    )
+    redis_client.setex(f"revoked:{jti}", REFRESH_EXPIRE_DAYS * 86400, "revoked")
 
 
-# -------------------------
-# ROTATE REFRESH TOKEN
-# -------------------------
-
-def rotate_refresh_token(token: str):
+def rotate_refresh_token(token: str, role: str):
+    """Rotate a refresh token using the user's current database role."""
     payload = verify_refresh_token(token)
-
     old_jti = payload["jti"]
     user_id = payload["sub"]
+
+    if role not in {"The Chief", "The Keeper", "The Seeker"}:
+        raise HTTPException(status_code=401, detail="Invalid user role")
 
     revoke_refresh_token(token)
 
     new_refresh_token = create_token(
-        {
-            "sub": user_id,
-            "role": payload.get("role", "Guest"),
-        },
+        {"sub": user_id, "role": role},
         "refresh"
     )
-
     new_payload = decode_token(new_refresh_token)
     new_jti = new_payload["jti"]
 
     return {
         "access_token": create_token(
-            {
-                "sub": user_id,
-                "role": payload.get("role", "Guest"),
-            },
+            {"sub": user_id, "role": role},
             "access"
         ),
         "refresh_token": new_refresh_token,

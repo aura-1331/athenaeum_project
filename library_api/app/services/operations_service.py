@@ -22,8 +22,9 @@ def execute_operation(db, accession_no: str, action: str, actor: str, notes: str
     ISSUE/RETURN are already handled in circulation.py
     """
 
+    action = str(action or "").strip().upper()
     if action not in ALLOWED_ACTIONS:
-        raise Exception("Invalid operation action")
+        raise ValueError("Invalid operation action")
 
     with db.cursor(cursor_factory=RealDictCursor) as cur:
 
@@ -33,6 +34,7 @@ def execute_operation(db, accession_no: str, action: str, actor: str, notes: str
             SELECT accession_no, availability_status AS status
             FROM public.items
             WHERE accession_no = %s
+              AND is_deleted = FALSE
             """,
             (accession_no,),
         )

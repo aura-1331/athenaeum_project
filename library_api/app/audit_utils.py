@@ -59,20 +59,13 @@ def audit_action(
             device_id = None
 
             if request:
+                # Never trust client-provided forwarding/device headers as authoritative.
                 ip_address = (
-                    request.headers.get("X-Forwarded-For")
-                    or request.headers.get("X-IP-Address")
-                    or (
-                        request.client.host
-                        if request.client
-                        else "127.0.0.1"
-                    )
+                    request.client.host
+                    if request.client
+                    else "UNKNOWN"
                 )
-
-                device_id = (
-                    request.headers.get("X-Device-ID")
-                    or request.headers.get("X-Machine-Name")
-                )
+                device_id = "SERVER-RECORDED-CLIENT"
 
             current_user = kwargs.get("current_user") or {}
 

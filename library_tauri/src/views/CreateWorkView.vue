@@ -694,9 +694,7 @@ async function executeConfirmedCreation() {
 
     const res = await axios.post("/catalogue/create-work", payload, {
       headers: {
-        'X-Change-Reason': operationalReason,
-        'X-Device-ID': auditData.value.deviceID,
-        'X-IP-Address': auditData.value.ip
+        'X-Change-Reason': operationalReason
       }
     });
     

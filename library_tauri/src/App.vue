@@ -5,7 +5,7 @@ import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 import BatchRegisterModal from '@/components/print/BatchRegisterModal.vue'
-import LedgerHealth from './components/LedgerHealth.vue'
+import SystemStatus from './components/SystemStatus.vue'
 import {
   LayoutDashboard,
   Library,
@@ -300,7 +300,10 @@ onUnmounted(() => {
       </div>
 
       <nav class="nav-links">
-  <RouterLink to="/dashboard">
+  <RouterLink
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    to="/dashboard"
+  >
     <LayoutDashboard :size="18" :stroke-width="1.5" />
     <span>Dashboard</span>
   </RouterLink>
@@ -435,10 +438,10 @@ onUnmounted(() => {
 
   <RouterLink
     v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
-    to="/about"
+    to="/settings"
   >
     <Info :size="18" :stroke-width="1.5" />
-    <span>About</span>
+    <span>Settings</span>
   </RouterLink>
 </nav>
 
@@ -479,7 +482,7 @@ onUnmounted(() => {
 
         <div class="header-actions">
           <!-- CRYPTOGRAPHIC LEDGER HEALTH STATUS PILL -->
-          <LedgerHealth />
+          <SystemStatus />
 
           <div class="live-meta">
             <span class="division-tag">Archive Division</span>

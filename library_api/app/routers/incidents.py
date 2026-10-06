@@ -118,7 +118,7 @@ async def report_incident(
     except Exception as e:
         if conn:
             conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         cur.close()
         conn.close()
@@ -383,7 +383,7 @@ async def resolve_incident(
     except Exception as e:
         if conn:
             conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         cur.close()
         conn.close()

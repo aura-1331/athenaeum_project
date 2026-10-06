@@ -107,7 +107,7 @@
           </div>
           <div class="telemetry-rows-stack">
             <div class="telemetry-node"><span>TEXT LANGUAGE</span><strong>{{ book.language }}</strong></div>
-            <div class="telemetry-node"><span>SOURCE LANGUAGE</span><strong>{{ book.original_language || book.language }}</strong></div>
+            <div class="telemetry-node"><span>SOURCE LANGUAGE</span><strong>{{ book.original_language || '---' }}</strong></div>
             <div class="telemetry-node">
               <span>CLASSIFICATION</span>
               <div class="inline-badge-stack justify-end">
@@ -710,7 +710,7 @@ onMounted(() => fetchBookDetails())
   }
 
   .asymmetric-cards-grid {
-    display: flex; /* Stacks the cards vertically instead of using the complex 12-column grid */
+    display: flex;
     flex-direction: column;
     padding: 0 16px 32px 16px;
     gap: 16px;
@@ -722,16 +722,16 @@ onMounted(() => fetchBookDetails())
   }
 
   .book-title {
-    font-size: 26px; /* Scales down the massive title font */
+    font-size: 26px;
   }
 
   .telemetry-rows-stack {
-    grid-template-columns: 1fr; /* Stacks the telemetry nodes vertically */
+    grid-template-columns: 1fr;
     gap: 12px;
   }
 
   .vectors-sub-grid {
-    grid-template-columns: 1fr; /* Stacks the shelf location and call sign vertically */
+    grid-template-columns: 1fr;
   }
 }
 
@@ -755,4 +755,4 @@ onMounted(() => fetchBookDetails())
     padding: 0 !important;
   }
 }
-</style>
+</style>\n

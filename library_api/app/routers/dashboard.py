@@ -1,8 +1,98 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from app.database import get_connection
-from app.auth import get_current_user
+from app.auth import get_current_user, require_role
 
-router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["dashboard"],
+    dependencies=[Depends(require_role(["The Chief", "The Keeper"]))],
+)
+
+
+@router.get("/keeper-attention")
+def keeper_attention(request: Request, current_user: dict = Depends(get_current_user)):
+    """Return real rejected submissions that require Keeper action.
+
+    Rejected work/item records are already persisted by the catalogue approval
+    workflow. This endpoint only exposes the current Keeper's own rejected
+    submissions; it does not create or alter any state.
+    """
+    if str(current_user.get("role") or "").strip().lower() != "the keeper":
+        return {"rejected_works": [], "rejected_items": []}
+
+    conn = None
+    cursor = None
+
+    try:
+        conn = get_connection(request=request)
+        cursor = conn.cursor()
+        user_id = current_user["user_id"]
+
+        cursor.execute("""
+            SELECT
+                w.work_id,
+                w.title,
+                w.created_at,
+                w.approval_reason
+            FROM public.works w
+            WHERE w.proposed_by = %s
+              AND w.status = 'REJECTED'
+            ORDER BY w.created_at DESC, w.work_id DESC
+        """, (user_id,))
+        rejected_works = [
+            {
+                "work_id": row[0],
+                "title": row[1],
+                "created_at": row[2].isoformat() if hasattr(row[2], "isoformat") else str(row[2]),
+                "reason": row[3],
+            }
+            for row in cursor.fetchall()
+        ]
+
+        cursor.execute("""
+            SELECT
+                i.serial_no,
+                i.accession_no,
+                i.work_id,
+                w.title,
+                i.created_at,
+                i.deletion_reason
+            FROM public.items i
+            INNER JOIN public.works w
+                ON w.work_id = i.work_id
+            WHERE i.proposed_by = %s
+              AND i.availability_status = 'REJECTED'
+              AND i.is_deleted = TRUE
+            ORDER BY i.created_at DESC, i.serial_no DESC
+        """, (user_id,))
+        rejected_items = [
+            {
+                "serial_no": row[0],
+                "accession_no": row[1],
+                "work_id": row[2],
+                "title": row[3],
+                "created_at": row[4].isoformat() if hasattr(row[4], "isoformat") else str(row[4]),
+                "reason": row[5],
+            }
+            for row in cursor.fetchall()
+        ]
+
+        return {
+            "rejected_works": rejected_works,
+            "rejected_items": rejected_items,
+        }
+
+    except Exception as e:
+        print(f"❌ Keeper attention lookup failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to load Keeper attention items."
+        )
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 @router.get("/summary")
@@ -54,9 +144,9 @@ def dashboard_summary(request: Request, current_user: dict = Depends(get_current
 
         cursor.execute("""
             SELECT COUNT(*)
-            FROM public.items
-            WHERE availability_status = 'DAMAGED'
-              AND is_deleted = FALSE
+            FROM public.archive_incidents
+            WHERE incident_type = 'DAMAGED'
+                AND status != 'RESOLVED'
         """)
         damaged_items = cursor.fetchone()[0]
 
@@ -119,7 +209,7 @@ def dashboard_summary(request: Request, current_user: dict = Depends(get_current
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     finally:
         if cursor:

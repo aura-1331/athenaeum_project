@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 from psycopg2.extras import RealDictCursor
 from app.database import get_connection
 from app.auth import get_current_user
@@ -10,9 +10,9 @@ router = APIRouter(prefix="/search", tags=["search"])
 @audit_action("GLOBAL_SEARCH")
 @router.get("")
 def global_search(
-    q: str = "", 
-    page: int = 1, 
-    limit: int = 10, 
+    q: str = Query("", max_length=200),
+    page: int = Query(1, ge=1, le=100000),
+    limit: int = Query(10, ge=1, le=100), 
     request: Request = None, 
     current_user: dict = Depends(get_current_user)
 ):
@@ -51,7 +51,7 @@ def global_search(
 @audit_action("SEARCH_SUGGEST")
 @router.get("/suggest")
 def suggest(
-    q: str = "", 
+    q: str = Query("", max_length=200),
     request: Request = None, 
     current_user: dict = Depends(get_current_user)
 ):

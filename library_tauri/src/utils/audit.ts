@@ -1,34 +1,18 @@
-import axios from 'axios'
-
+/**
+ * Legacy client audit hook.
+ *
+ * Security-sensitive audit records are created by the authenticated backend
+ * route that performs the mutation. This helper intentionally performs no
+ * network request because there is no client-authoritative audit endpoint.
+ */
 export async function dispatchAuditTrail(
-  actionType: string, 
-  targetModule: string, 
-  targetId: string | number | null, 
-  description: string, 
-  reason: string, 
-  oldState: any = null, 
-  newState: any = null
+  _actionType: string,
+  _targetModule: string,
+  _targetId: string | number | null,
+  _description: string,
+  _reason: string,
+  _oldState: any = null,
+  _newState: any = null
 ) {
-  try {
-    const sessionUser = localStorage.getItem('username') || localStorage.getItem('user') || 'UNKNOWN_ACTOR'
-    const sessionRole = localStorage.getItem('user_role') || localStorage.getItem('role') || 'GUEST'
-    const deviceSignature = 'EDITORIAL-STATION-01'
-    const networkIp = '127.0.0.1'
-
-    await axios.post('/status_audit/log', {
-      actor_username: sessionUser,
-      actor_role: sessionRole,
-      action_type: actionType.toUpperCase(),
-      target_module: targetModule.toUpperCase(),
-      target_id: targetId ? String(targetId) : null,
-      description: description,
-      change_reason: reason,
-      old_value: oldState,
-      new_value: newState,
-      device_id: deviceSignature,
-      ip_address: networkIp
-    })
-  } catch (err) {
-    console.error("Telemetry link lost. Local session action unlogged:", err)
-  }
+  return
 }

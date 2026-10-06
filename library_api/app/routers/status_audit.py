@@ -1,6 +1,4 @@
 import base64
-import json
-import re
 import traceback
 import uuid
 from typing import Optional
@@ -9,7 +7,7 @@ from pydantic import BaseModel
 import psycopg2.extras
 
 from app.database import get_connection
-from app.auth import get_current_user
+from app.auth import get_current_user, require_role
 from app.services.audit_service import log_audit_activity, verify_audit_ledger
 
 router = APIRouter(prefix="/status_audit", tags=["Status & Auditing"])
@@ -30,24 +28,6 @@ def format_duration(seconds: int) -> str:
     if secs > 0 or not parts:
         parts.append(f"{secs}s")
     return " ".join(parts)
-
-
-def parse_token_claims(auth_header: Optional[str]):
-    """Safely decodes JWT claims from Bearer Authorization header."""
-    if not auth_header or not auth_header.startswith("Bearer "):
-        return None, None, None
-    try:
-        token = auth_header.split(" ")[1]
-        payload_b64 = token.split(".")[1]
-        payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
-        data = json.loads(
-            base64.urlsafe_b64decode(
-                payload_b64.decode() if isinstance(payload_b64, bytes) else payload_b64
-            ).decode("utf-8")
-        )
-        return str(data.get("sub") or ""), data.get("user_name") or data.get("username"), data.get("role")
-    except Exception:
-        return None, None, None
 
 
 # ------------------------------------------------------------
@@ -72,12 +52,12 @@ class LogoutSessionPayload(BaseModel):
 # ------------------------------------------------------------
 # 1. FETCH AUDIT ACTIVITIES (Ledger View)
 # ------------------------------------------------------------
-@router.get("/system-logs")
+@router.get("/system-logs", dependencies=[Depends(require_role(["The Chief"]))])
 def get_system_logs(
     actor_filter: Optional[str] = None,
     action_filter: Optional[str] = None,
-    limit: int = Query(50, le=200),
-    offset: int = 0
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=1000000)
 ):
     conn = get_connection()
     try:
@@ -163,7 +143,8 @@ def get_system_logs(
 # 2. SESSION LIFECYCLE (LOGIN / LOGOUT / DURATION)
 # ------------------------------------------------------------
 @router.post("/session/login")
-def login_session(payload: LoginSessionPayload, request: Request):
+def login_session(payload: LoginSessionPayload, request: Request, current_user: dict = Depends(get_current_user)):
+
     conn = get_connection()
     try:
         conn.rollback()
@@ -184,11 +165,11 @@ def login_session(payload: LoginSessionPayload, request: Request):
             RETURNING id, login_at
         """, (
             session_id,
-            str(payload.user_id or "3"),
-            payload.username or "Helix Aura Ravenfall",
-            payload.role or "The Chief",
-            payload.designation or "Staff",
-            payload.machine_name or "TERMINAL-01",
+            str(current_user.get("user_id") or ""),
+            str(current_user.get("username") or current_user.get("name") or ""),
+            str(current_user.get("role") or ""),
+            str(current_user.get("designation") or current_user.get("role") or "Staff"),
+            "SERVER-RECORDED-CLIENT",
             ip_address
         ))
 
@@ -198,10 +179,10 @@ def login_session(payload: LoginSessionPayload, request: Request):
         audit_ok = log_audit_activity(
             request=request,
             session_id=session_id,
-            user_id=str(payload.user_id or "3"),
-            username=payload.username or "Helix Aura Ravenfall",
-            role=payload.role or "The Chief",
-            designation=payload.designation or "Staff",
+            user_id=str(current_user.get("user_id") or ""),
+            username=str(current_user.get("username") or current_user.get("name") or ""),
+            role=str(current_user.get("role") or ""),
+            designation=str(current_user.get("designation") or current_user.get("role") or "Staff"),
             category="AUTH",
             action_type="LOGIN",
             target_entity="GLOBAL",
@@ -219,20 +200,21 @@ def login_session(payload: LoginSessionPayload, request: Request):
         return {
             "status": "Session opened",
             "session_id": str(row["id"]),
-            "user_id": payload.user_id,
+            "user_id": str(current_user.get("user_id") or ""),
             "login_at": str(row["login_at"])
         }
     except Exception as e:
         conn.rollback()
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         cur.close()
         conn.close()
 
 
 @router.post("/session/logout")
-def logout_session(payload: LogoutSessionPayload, request: Request):
+def logout_session(payload: LogoutSessionPayload, request: Request, current_user: dict = Depends(get_current_user)):
+
     conn = get_connection()
     try:
         conn.rollback()
@@ -243,20 +225,21 @@ def logout_session(payload: LogoutSessionPayload, request: Request):
 
     try:
         ip_address = request.client.host if request.client else "127.0.0.1"
-        auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-        token_sub, token_name, token_role = parse_token_claims(auth_header)
-
-        raw_id = token_sub or payload.user_id or "3"
-        digits = re.findall(r'\d+', str(raw_id))
-        user_id_str = digits[0] if digits else str(raw_id)
-
-        username = token_name or payload.username or "Helix Aura Ravenfall"
-        role = token_role or payload.role or "The Chief"
+        user_id_str = str(current_user.get("user_id") or "")
+        username = str(current_user.get("username") or current_user.get("name") or "")
+        role = str(current_user.get("role") or "")
         reason = payload.reason or "Operator initiated sign-out"
 
         # Identify target session to close
         target_session_id = payload.session_id
-        if not target_session_id:
+        if target_session_id:
+            cur.execute("""
+                SELECT id FROM user_sessions
+                WHERE id = %s AND user_id = %s AND is_active = TRUE
+            """, (target_session_id, user_id_str))
+            if not cur.fetchone():
+                raise HTTPException(status_code=403, detail="You may only close your own active session.")
+        else:
             cur.execute("""
                 SELECT id FROM user_sessions
                 WHERE user_id = %s AND is_active = TRUE
@@ -274,9 +257,9 @@ def logout_session(payload: LogoutSessionPayload, request: Request):
                 SET logout_at = NOW(),
                     duration_seconds = GREATEST(1, EXTRACT(EPOCH FROM (NOW() - login_at))::INT),
                     is_active = FALSE
-                WHERE id = %s
+                WHERE id = %s AND user_id = %s
                 RETURNING duration_seconds
-            """, (target_session_id,))
+            """, (target_session_id, user_id_str))
             updated_row = cur.fetchone()
             if updated_row and updated_row.get("duration_seconds") is not None:
                 duration = updated_row["duration_seconds"]
@@ -315,7 +298,7 @@ def logout_session(payload: LogoutSessionPayload, request: Request):
     except Exception as e:
         conn.rollback()
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         cur.close()
         conn.close()
@@ -324,8 +307,8 @@ def logout_session(payload: LogoutSessionPayload, request: Request):
 # ------------------------------------------------------------
 # 3. GET SESSION HISTORIES
 # ------------------------------------------------------------
-@router.get("/sessions")
-def get_user_sessions(user_id: Optional[str] = None, limit: int = 50, offset: int = 0):
+@router.get("/sessions", dependencies=[Depends(require_role(["The Chief"]))])
+def get_user_sessions(user_id: Optional[str] = None, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0, le=1000000)):
     conn = get_connection()
     try:
         conn.rollback()
@@ -367,7 +350,7 @@ def get_user_sessions(user_id: Optional[str] = None, limit: int = 50, offset: in
     except Exception as e:
         conn.rollback()
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         cur.close()
         conn.close()
@@ -432,6 +415,54 @@ def get_ledger_verification(request: Request, current_user: dict = Depends(get_c
     return result
 
 # ------------------------------------------------------------
+# 5. GLOBAL SECURITY STATUS
+# ------------------------------------------------------------
+@router.get("/global-status")
+def get_global_security_status():
+    """
+    Minimal public status signal for the global application indicator.
+
+    Exposes only whether an unresolved critical ledger integrity
+    incident exists. No incident details or security records are
+    exposed through this endpoint.
+    """
+    conn = None
+    cur = None
+
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT EXISTS (
+                SELECT 1
+                FROM security_incidents
+                WHERE incident_type = 'CHAIN_INTEGRITY_BREACH'
+                  AND severity = 'CRITICAL'
+                  AND resolved = FALSE
+            )
+        """)
+
+        breach_exists = bool(cur.fetchone()[0])
+
+        return {
+            "ledger_integrity": "BREACH" if breach_exists else "OK"
+        }
+
+    except Exception:
+        # Do not convert an infrastructure failure into a
+        # security breach signal.
+        return {
+            "ledger_integrity": "UNKNOWN"
+        }
+
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+# ------------------------------------------------------------
 # 5. RESTRICTED SECURITY INCIDENTS (CHIEF ONLY)
 # ------------------------------------------------------------
 @router.get("/security-incidents")
@@ -481,7 +512,7 @@ def get_security_incidents(request: Request, current_user: dict = Depends(get_cu
     except Exception as e:
         conn.rollback()
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         cur.close()
         conn.close()

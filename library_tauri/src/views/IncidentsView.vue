@@ -40,8 +40,8 @@
       <!-- ==============================
            SECTION 1: SYSTEM INTEGRITY BREACHES (LEDGER ALERTS)
            ============================== -->
-      <section class="breach-panel">
-        <div class="breach-header collapsible-header" @click="isBreachesOpen = !isBreachesOpen">
+      <section class="breach-panel" :class="{ 'breach-panel-alert': securityBreaches.length > 0, 'breach-panel-ok': securityBreaches.length === 0 }">
+        <div class="breach-header collapsible-header" :class="{ 'breach-header-alert': securityBreaches.length > 0, 'breach-header-ok': securityBreaches.length === 0 }" @click="isBreachesOpen = !isBreachesOpen">
           <div class="breach-title">
             <span class="expand-chevron">
               {{ isBreachesOpen ? '▾' : '▸' }}
@@ -49,7 +49,7 @@
             <span class="shield-icon">🛡️</span>
             <div>
               <h3>Ledger Cryptographic Breaches</h3>
-              <p>Tamper events detected by automated hash chain verification.</p>
+              <p>{{ securityBreaches.length > 0 ? 'Tamper events detected by automated hash chain verification.' : 'Automated hash chain verification is currently intact.' }}</p>
             </div>
           </div>
           <div class="breach-counter">
@@ -68,9 +68,34 @@
 
           <div v-else-if="securityBreaches.length === 0" class="breach-empty">
             <span class="ok-icon">✓</span>
-            <div>
+            <div class="breach-empty-content">
               <strong>Ledger Integrity Intact</strong>
-              <p>No cryptographic tampering or broken chain links detected.</p>
+              <p>No unresolved cryptographic tampering or broken chain links detected.</p>
+
+              <div v-if="resolvedSecurityBreaches.length > 0" class="resolved-security-records">
+                <div class="resolved-security-heading">
+                  <span>RESOLVED SECURITY RECORDS</span>
+                  <span class="resolved-security-count">{{ resolvedSecurityBreaches.length }}</span>
+                </div>
+
+                <div
+                  v-for="b in resolvedSecurityBreaches"
+                  :key="`resolved-${b.id}`"
+                  class="resolved-security-card"
+                >
+                  <div class="resolved-security-top">
+                    <span class="font-mono text-amber">#SEC-{{ b.id }}</span>
+                    <span class="security-test-badge">{{ isSecurityTest(b) ? 'TEST' : 'RESOLVED' }}</span>
+                    <span class="status-pill resolved">CLOSED</span>
+                  </div>
+                  <div class="resolved-security-title">{{ b.incident_type }}</div>
+                  <div class="resolved-security-meta">
+                    <span>Node #{{ b.compromised_node }}</span>
+                    <span>{{ formatDate(b.detected_at) }}</span>
+                  </div>
+                  <p class="resolved-security-note">{{ b.details }}</p>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -493,6 +518,7 @@ function toggleExpand(id: number) {
 
 // SECURITY BREACHES DATA
 const securityBreaches = ref<SecurityBreach[]>([])
+const resolvedSecurityBreaches = ref<SecurityBreach[]>([])
 const breachesLoading = ref(true)
 
 // ARCHIVE ITEM INCIDENTS DATA
@@ -559,12 +585,18 @@ async function fetchSecurityBreaches() {
     const config = getAuthConfig()
     if (!config) return
     const res = await axios.get(`${baseUrl}/status_audit/security-incidents`, config)
-    securityBreaches.value = res.data?.incidents || []
+    const allSecurityIncidents = (res.data?.incidents || []) as SecurityBreach[]
+    securityBreaches.value = allSecurityIncidents.filter((incident) => incident.resolved === false)
+    resolvedSecurityBreaches.value = allSecurityIncidents.filter((incident) => incident.resolved === true)
   } catch (err: any) {
     console.error("Failed to load security breaches:", err)
   } finally {
     breachesLoading.value = false
   }
+}
+
+function isSecurityTest(incident: SecurityBreach) {
+  return /\btest\b/i.test(incident.details || '')
 }
 
 async function fetchIncidents() {
@@ -926,11 +958,22 @@ onMounted(refreshAll)
 
 /* BREACH PANEL (RED HERO) */
 .breach-panel {
-  background: rgba(239, 68, 68, 0.04);
-  border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 10px;
   overflow: hidden;
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.05);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.breach-panel-alert {
+  background: rgba(239, 68, 68, 0.04);
+  border: 1px solid rgba(239, 68, 68, 0.3);
   box-shadow: 0 4px 20px rgba(239, 68, 68, 0.05);
+}
+
+.breach-panel-ok {
+  background: rgba(16, 185, 129, 0.035);
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.05);
 }
 
 .breach-header {
@@ -938,8 +981,17 @@ onMounted(refreshAll)
   justify-content: space-between;
   align-items: center;
   padding: 16px 20px;
+  border-bottom: 1px solid transparent;
+}
+
+.breach-header-alert {
   background: rgba(239, 68, 68, 0.08);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+  border-bottom-color: rgba(239, 68, 68, 0.2);
+}
+
+.breach-header-ok {
+  background: rgba(16, 185, 129, 0.07);
+  border-bottom-color: rgba(16, 185, 129, 0.18);
 }
 
 .breach-title {
@@ -955,8 +1007,12 @@ onMounted(refreshAll)
 .breach-title h3 {
   margin: 0;
   font-size: 15px;
-  color: #ef4444;
+  color: #10b981;
   font-weight: 700;
+}
+
+.breach-panel-alert .breach-title h3 {
+  color: #ef4444;
 }
 
 .breach-title p {
@@ -1027,6 +1083,87 @@ onMounted(refreshAll)
 .breach-desc span {
   font-size: 11px;
   color: var(--text-muted, #94a3b8);
+}
+
+.breach-empty-content {
+  flex: 1;
+}
+
+.resolved-security-records {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.resolved-security-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--text-muted, #94a3b8);
+}
+
+.resolved-security-count {
+  min-width: 18px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  text-align: center;
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.resolved-security-card {
+  padding: 10px 12px;
+  border: 1px solid rgba(16, 185, 129, 0.14);
+  border-radius: 7px;
+  background: rgba(16, 185, 129, 0.025);
+}
+
+.resolved-security-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.security-test-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  color: #f59e0b;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.resolved-security-title {
+  margin-top: 7px;
+  color: var(--text-primary, #f1f5f9);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.resolved-security-meta {
+  display: flex;
+  gap: 14px;
+  margin-top: 3px;
+  color: var(--text-muted, #64748b);
+  font-family: monospace;
+  font-size: 10px;
+}
+
+.resolved-security-note {
+  margin: 7px 0 0;
+  color: var(--text-muted, #94a3b8);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.breach-panel-ok .shield-icon {
+  filter: saturate(0.8);
 }
 
 /* PANELS & TABLES */

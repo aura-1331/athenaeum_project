@@ -16,11 +16,6 @@ DB_PASS = os.getenv("DB_PASSWORD") or os.getenv("DB_PASS")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_SSLMODE = os.getenv("DB_SSLMODE", "require")
 
-print("--- ATTEMPTING CONNECTION ---")
-print(f"File looked for at: {ENV_FILE}")
-print(f"User: {DB_USER} | DB: {DB_NAME} | Pass Found: {DB_PASS is not None}")
-
-
 def get_connection(
     request: Optional[Request] = None,
     username: Optional[str] = None,
@@ -38,32 +33,17 @@ def get_connection(
         )
         conn.autocommit = False
 
-        actor_name = username
-        actor_role = role
+        # A verified FastAPI auth dependency is authoritative whenever present.
+        # Caller-supplied username/role must never override the authenticated request identity.
+        request_actor_name = getattr(request.state, "actor_name", None) if request is not None else None
+        request_actor_role = getattr(request.state, "actor_role", None) if request is not None else None
 
-        if not actor_name and request is not None:
-            actor_role = getattr(request.state, "actor_role", None) or request.headers.get("X-User-Role")
-            token_user_id = getattr(request.state, "actor_name", None) or request.headers.get("X-User-Name")
-
-            # Resolve numeric user ID to actual name
-            if token_user_id and str(token_user_id).isdigit():
-                cur_lookup = conn.cursor()
-                try:
-                    cur_lookup.execute(
-                        "SELECT name FROM public.users WHERE user_id = %s",
-                        (int(token_user_id),)
-                    )
-                    row = cur_lookup.fetchone()
-                    actor_name = row[0] if row else str(token_user_id)
-                except Exception:
-                    actor_name = str(token_user_id)
-                finally:
-                    cur_lookup.close()
-            else:
-                actor_name = token_user_id
-
-        actor_name = actor_name or "SYSTEM_UNKNOWN"
-        actor_role = actor_role or "SYSTEM_UNKNOWN"
+        if request_actor_name:
+            actor_name = str(request_actor_name)
+            actor_role = str(request_actor_role or role or "SYSTEM_UNKNOWN")
+        else:
+            actor_name = username or "SYSTEM_UNKNOWN"
+            actor_role = role or "SYSTEM_UNKNOWN"
 
         cur = conn.cursor()
         try:
@@ -78,7 +58,7 @@ def get_connection(
 
     except Exception as e:
         print(f"DATABASE CONNECTION ERROR: {e}")
-        raise RuntimeError(f"Database connection failed: {e}")
+        raise RuntimeError("Database connection failed")
 
 
 def get_db_connection(request: Request):

@@ -13,7 +13,8 @@ router = APIRouter(prefix="/operations", tags=["Operations"])
 class OperationPayload(BaseModel):
     accession_no: str
     action: str
-    actor: str
+    # Kept for backwards-compatible request bodies; never used as audit identity.
+    actor: str | None = None
     notes: str = ""
 
 @audit_action("EXECUTE_OPERATION")
@@ -29,13 +30,13 @@ def run_operation(
             db,
             payload.accession_no,
             payload.action,
-            payload.actor,
+            str(current_user.get("username") or current_user.get("name") or current_user.get("user_id")),
             payload.notes,
         )
 
         # Cryptographic ledger anchor
         actor_id = str(current_user.get("user_id", "UNKNOWN"))
-        actor_name = str(current_user.get("username") or current_user.get("name") or payload.actor or "Archive Operator")
+        actor_name = str(current_user.get("username") or current_user.get("name") or current_user.get("user_id") or "Archive Operator")
         actor_role = str(current_user.get("role", "The Keeper"))
 
         audit_ok = log_audit_activity(
@@ -55,6 +56,7 @@ def run_operation(
                 "accession_no": payload.accession_no,
                 "action": payload.action,
                 "specified_actor": payload.actor,
+                "authenticated_actor": actor_name,
                 "notes": payload.notes,
                 "execution_result": result if isinstance(result, (dict, list, str, int, bool)) else str(result)
             },
@@ -73,12 +75,12 @@ def run_operation(
         return result
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail="Operation could not be completed")
     finally:
         db.close()
 
 @audit_action("VIEW_ALLOWED_OPERATIONS")
-@router.get("/allowed/{accession_no}")
+@router.get("/allowed/{accession_no}", dependencies=[Depends(require_role(["The Keeper", "The Chief"]))])
 def get_allowed(
     accession_no: str, 
     request: Request, 

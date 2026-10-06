@@ -95,16 +95,10 @@ export const useAuthStore = defineStore('auth', () => {
     ],
 
     "the seeker": [
-      "dashboard.view",
       "catalogue.view",
       "search.view"
     ],
 
-    "temporary seeker": [
-      "dashboard.view",
-      "catalogue.view",
-      "search.view"
-    ]
   }
 
   // Normalize the role received from the backend.

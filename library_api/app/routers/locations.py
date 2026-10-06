@@ -106,7 +106,7 @@ async def move_item(
     except Exception as e:
         if conn:
             conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         cur.close()
         conn.close()
@@ -115,7 +115,7 @@ async def move_item(
 # -------------------------
 # CURRENT LOCATION (READ-ONLY)
 # -------------------------
-@router.get("/current/{serial_no}")
+@router.get("/current/{serial_no}", dependencies=[Depends(require_role(["The Keeper", "The Chief"]))])
 def current_location(
     request: Request, serial_no: int,
     current_user: dict = Depends(get_current_user)

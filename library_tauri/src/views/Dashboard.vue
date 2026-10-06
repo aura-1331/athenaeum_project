@@ -1,1314 +1,1441 @@
 <template>
-  <div class="dashboard">
-
-    <!-- =====================================================
-         LOADING STATE
-    ====================================================== -->
-    <div v-if="loading" class="dashboard-loading">
-      <div class="loading-ring"></div>
-      <span>Loading archive data...</span>
-    </div>
-
-    <template v-else>
-
-      <!-- =====================================================
-           TOP BAR
-      ====================================================== -->
-      <section class="topbar">
-        <div class="brand">
-          <div class="brand-mark"></div>
-
-          <div>
-            <span class="eyebrow">ATHENAEUM ORBIS</span>
-            <h1>Archive Intelligence Console</h1>
-          </div>
+  <div class="archive-dashboard">
+      <!-- HEADER -->
+      <header class="dashboard-header">
+        <div>
+          <div class="dashboard-brand">ATHENAEUM ORBIS</div>
+          <h1>Archive Dashboard</h1>
+          <p class="header-subtitle">
+            The current state of the collection and anything that needs attention.
+          </p>
         </div>
 
-        <div class="system-info">
+        <div class="header-actions">
+         
+
           <button
-            class="refresh-btn"
-            :class="{ 'is-loading': loading }"
-            :disabled="loading"
-            @click="loadDashboard"
+            class="refresh-control"
+            :class="{ spinning: refreshing }"
+            :disabled="refreshing"
             title="Refresh archive data"
+            :aria-busy="refreshing"
+            @click="loadDashboard"
           >
-            <RefreshCw :size="16" />
+            <RefreshCw :size="17" />
+            <span>Refresh</span>
           </button>
         </div>
-      </section>
+      </header>
 
+      <div v-if="loading" class="dashboard-loading" aria-live="polite">
+        <div class="loading-orbit" aria-hidden="true"></div>
+        <span>Loading archive data…</span>
+      </div>
 
-      <!-- =====================================================
-           KPI GRID
-      ====================================================== -->
-      <section class="kpi-grid">
+      <div v-if="loadError" class="dashboard-error" role="alert">
+        <span>{{ loadError }}</span>
+        <button type="button" @click="loadDashboard">Retry</button>
+      </div>
 
-        <div class="kpi">
-          <BookOpen class="kpi-icon" />
-          <span>Works</span>
-          <h2>{{ summaryStats.total_works ?? 0 }}</h2>
-        </div>
-
-        <div class="kpi">
-          <Book class="kpi-icon" />
-          <span>Items</span>
-          <h2>{{ summaryStats.total_items ?? 0 }}</h2>
-        </div>
-
-        <div v-if="auth.hasPermission('operations.view')" class="kpi">
-          <FileText class="kpi-icon" />
-          <span>In Circulation</span>
-          <h2>{{ inCirculation }}</h2>
-        </div>
-
-        <div class="kpi">
-          <Layers class="kpi-icon" />
-          <span>Categories</span>
-          <h2>{{ totalCategories }}</h2>
-        </div>
-
-        <div v-if="auth.hasPermission('operations.view')" class="kpi">
-          <AlertTriangle class="kpi-icon" />
-          <span>Missing</span>
-          <h2>{{ summaryStats.missing_items || 0 }}</h2>
-        </div>
-
-        <div v-if="auth.hasPermission('operations.view')" class="kpi">
-          <ShieldCheck class="kpi-icon" />
-          <span>Damaged</span>
-          <h2>{{ summaryStats.damaged_items || 0 }}</h2>
-        </div>
-
-      </section>
-
-
-      <!-- =====================================================
-           MAIN GRID
-      ====================================================== -->
-      <section class="grid">
-
-        <!-- ===================================================
-             PANEL 1: RECENT ACTIVITY
-        ==================================================== -->
-        <div v-if="auth.hasPermission('audit.view')" class="panel">
-
-          <div class="panel-header">
-            <h3>
-              <Activity :size="17" />
-              Recent Activity
-            </h3>
-
-            <RouterLink
-              v-if="auth.hasPermission('audit.view')"
-              to="/audit-trail"
-              class="view-all-link"
-            >
-              View All &rarr;
-            </RouterLink>
+      <!-- ATTENTION: RENDERED ONLY WHEN THERE IS SOMETHING TO SAY -->
+      <section
+        v-if="!loading && attentionSignals.length"
+        class="attention-section"
+        aria-labelledby="attention-title"
+      >
+        <div class="section-heading">
+          <div>
+            <div class="section-kicker attention-kicker">ATTENTION</div>
+            <h2 id="attention-title">Action Required</h2>
           </div>
 
-          <div
-            v-if="recentActivities.length === 0"
-            class="empty-state"
+          <span class="attention-summary">
+            Actionable archive exceptions
+          </span>
+        </div>
+
+        <div class="attention-list">
+          <RouterLink
+            v-for="signal in attentionSignals"
+            :key="signal.id"
+            :to="signal.to"
+            class="attention-item"
+            :class="`tone-${signal.tone}`"
           >
-            No operational events logged yet.
+            <div class="attention-icon">
+              <component :is="signal.icon" :size="19" />
+            </div>
+
+            <div class="attention-copy">
+              <strong>{{ signal.title }}</strong>
+              <em v-if="signal.subtitle">{{ signal.subtitle }}</em>
+              <span>{{ signal.description }}</span>
+            </div>
+
+            <div class="attention-count">{{ signal.count }}</div>
+            <ArrowUpRight :size="17" class="attention-arrow" />
+          </RouterLink>
+        </div>
+      </section>
+
+      <!-- COLLECTION STATE -->
+      <section v-if="!loading" class="collection-section" aria-labelledby="collection-title">
+        <div class="section-heading collection-heading">
+          <div>
+            <div class="section-kicker">COLLECTION</div>
+            <h2 id="collection-title">Archive at a glance</h2>
           </div>
 
-          <div
-            v-else
-            class="activity"
-            v-for="log in recentActivities"
-            :key="log.id"
+          <RouterLink
+            v-if="can('catalogue.view')"
+            to="/catalogue"
+            class="text-link"
           >
+            Open catalogue <ArrowUpRight :size="15" />
+          </RouterLink>
+        </div>
+
+        <div class="collection-overview">
+          <div class="collection-primary">
+            <strong>{{ totalItems.toLocaleString() }}</strong>
+            <span>items</span>
+          </div>
+
+          <div class="collection-facts">
+            <div class="collection-fact">
+              <span>Titles</span>
+              <strong>{{ numberOrZero(summaryStats.total_works) }}</strong>
+            </div>
+
+            <div class="collection-fact">
+              <span>Categories</span>
+              <strong>{{ totalCategories }}</strong>
+            </div>
+
+            <div class="collection-fact">
+              <span>Genres</span>
+              <strong>{{ totalGenres }}</strong>
+            </div>
+
+            <div class="collection-fact">
+              <span>Languages</span>
+              <strong>{{ totalLanguages }}</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- DISTRIBUTION: ONLY RENDER NON-EMPTY DATASETS -->
+      <section
+        v-if="!loading && distributionSections.length"
+        class="distribution-section"
+        aria-label="Collection composition"
+      >
+        <article
+          v-for="section in distributionSections"
+          :key="section.key"
+          class="distribution"
+        >
+          <div class="distribution-heading">
+            <div>
+              <div class="section-kicker">{{ section.kicker }}</div>
+              <h3>{{ section.title }}</h3>
+            </div>
+            <span class="distribution-total">{{ section.totalLabel }}</span>
+          </div>
+
+          <div class="distribution-list">
             <div
-              class="timeline"
-              :class="getTimelineClass(log.action_type || log.action)"
-            ></div>
-
-            <div class="activity-content">
-              <div class="activity-title-row">
-                <strong>
-                  {{ formatActionTitle(log.action_type || log.action) }}
-                </strong>
-
-                <span class="actor-tag">
-                  {{ log.actor_username || 'Operator' }}
-                </span>
+              v-for="row in section.rows"
+              :key="row.label"
+              class="distribution-row"
+            >
+              <div class="distribution-label">
+                <span>{{ row.label }}</span>
+                <strong>{{ row.count.toLocaleString() }}</strong>
               </div>
 
-              <p>
-                {{ log.summary || log.details || getBookTitle(log.serial_no) }}
-              </p>
+              <div class="distribution-track">
+                <div
+                  class="distribution-fill"
+                  :class="`fill-${section.key}`"
+                  :style="{ width: `${row.percent}%` }"
+                ></div>
+              </div>
             </div>
-
-            <small>
-              {{ formatRelativeTime(log.timestamp || log.changed_at) }}
-            </small>
           </div>
 
-        </div>
-
-
-        <!-- ===================================================
-             PANEL 2: LATEST ACCESSIONS
-        ==================================================== -->
-        <div class="panel">
-
-          <div class="panel-header">
-            <h3>
-              <Book :size="17" />
-              Latest Accessions
-            </h3>
+          <div v-if="section.hasMore" class="distribution-footer">
+            Showing the {{ section.rows.length }} largest groups.
           </div>
-
-          <div
-            class="book"
-            v-for="book in newestArrivals"
-            :key="book.serial_no"
-          >
-            <div class="book-no">
-              {{ book.accession_no }}
-            </div>
-
-            <div class="book-info">
-              <strong>{{ book.title }}</strong>
-              <span>{{ book.author }}</span>
-            </div>
-
-            <small>
-              {{ formatDate(book.created_at) }}
-            </small>
-          </div>
-
-        </div>
-
-
-        <!-- ===================================================
-             PANEL 3: CATEGORIES
-        ==================================================== -->
-        <div class="panel">
-
-          <div class="panel-header">
-            <h3>
-              <Layers :size="17" />
-              Categories
-            </h3>
-          </div>
-
-          <div
-            class="bar-row"
-            v-for="(count, name) in categoryStats"
-            :key="name"
-          >
-            <label>{{ name }}</label>
-
-            <div class="bar">
-              <div
-                class="fill"
-                :style="{
-                  width: totalItems > 0
-                    ? (count / totalItems * 100) + '%'
-                    : '0%'
-                }"
-              ></div>
-            </div>
-
-            <strong>{{ count }}</strong>
-          </div>
-
-        </div>
-
-
-        <!-- ===================================================
-             PANEL 4: LANGUAGES
-        ==================================================== -->
-        <div class="panel">
-
-          <div class="panel-header">
-            <h3>
-              <Globe :size="17" />
-              Languages
-            </h3>
-          </div>
-
-          <div
-            class="bar-row"
-            v-for="lang in summaryStats.languages"
-            :key="lang.language"
-          >
-            <label>{{ lang.language }}</label>
-
-            <div class="bar">
-              <div
-                class="fill"
-                :style="{
-                  width: totalItems > 0
-                    ? (lang.count / totalItems * 100) + '%'
-                    : '0%'
-                }"
-              ></div>
-            </div>
-
-            <strong>{{ lang.count }}</strong>
-          </div>
-
-          <div class="genre-footer">
-            {{ totalGenres }} Genres Catalogued
-          </div>
-
-        </div>
-
-
-        <!-- ===================================================
-             PANEL 5: QUICK ACTIONS
-        ==================================================== -->
-        <div class="panel">
-
-          <div class="panel-header">
-            <h3>
-              <ArrowRight :size="17" />
-              Quick Actions
-            </h3>
-          </div>
-
-          <div class="actions">
-
-            <!-- Create Work -->
-            <RouterLink
-              v-if="auth.hasPermission('catalogue.create')"
-              to="/create-work"
-            >
-              + New Work
-            </RouterLink>
-
-            <!-- Create Item -->
-            <RouterLink
-              v-if="auth.hasPermission('catalogue.create')"
-              to="/create-item"
-            >
-              + New Item
-            </RouterLink>
-
-            <!-- Catalogue -->
-            <RouterLink
-              v-if="auth.hasPermission('catalogue.view')"
-              to="/catalogue"
-            >
-              Catalogue
-            </RouterLink>
-
-            <!-- Search -->
-            <RouterLink
-              v-if="auth.hasPermission('search.view')"
-              to="/search"
-            >
-              Search
-            </RouterLink>
-
-          </div>
-
-        </div>
-
-
-        <!-- ===================================================
-             PANEL 6: ARCHIVE STATUS
-        ==================================================== -->
-        <div class="panel">
-
-          <div class="panel-header">
-            <h3>
-              <Database :size="17" />
-              Archive Status
-            </h3>
-          </div>
-
-          <div class="status">
-            <span>Database</span>
-            <div class="dot"></div>
-          </div>
-
-          <div class="status">
-            <span>Archive Loaded</span>
-            <strong>{{ totalItems }}</strong>
-          </div>
-
-          <div class="status">
-            <span>Languages</span>
-            <strong>
-              {{
-                (summaryStats.languages &&
-                summaryStats.languages.length) || 0
-              }}
-            </strong>
-          </div>
-
-          <div class="status">
-            <span>Categories</span>
-            <strong>{{ totalCategories }}</strong>
-          </div>
-
-        </div>
-
+        </article>
       </section>
 
-    </template>
+      <!-- LATEST ACCESSIONS: MAXIMUM 5 -->
+      <section
+        v-if="!loading && latestAccessions.length"
+        class="recent-section"
+        aria-labelledby="latest-accessions-title"
+      >
+        <div class="section-heading recent-heading">
+          <div>
+            <div class="section-kicker">ACCESSIONING</div>
+            <h2 id="latest-accessions-title">Latest Accessions</h2>
+          </div>
+          <RouterLink
+            v-if="can('catalogue.view')"
+            to="/catalogue"
+            class="text-link"
+          >
+            View catalogue <ArrowUpRight :size="15" />
+          </RouterLink>
+        </div>
+
+        <div class="recent-list">
+          <div
+            v-for="record in latestAccessions.slice(0, 5)"
+            :key="record.serial_no"
+            class="recent-item"
+          >
+            <div class="accession-badge">
+              {{ record.accession_no || `#${record.serial_no}` }}
+            </div>
+
+            <div class="recent-copy">
+              <strong>{{ record.title || "Untitled work" }}</strong>
+              <span>{{ record.author || "Creator not recorded" }}</span>
+            </div>
+
+            <BookOpen :size="16" class="recent-icon" />
+          </div>
+        </div>
+      </section>
+
   </div>
 </template>
 
-
 <script setup>
-import { ref, computed, onMounted } from "vue"
+import { computed, onMounted, onUnmounted, ref } from "vue"
 import axios from "axios"
-import { useAuthStore } from "@/stores/auth"
 import { RouterLink } from "vue-router"
+import { useAuthStore } from "@/stores/auth"
 
 import {
-  BookOpen,
-  Book,
-  FileText,
   AlertTriangle,
-  ShieldCheck,
-  Layers,
-  Globe,
-  Database,
-  ArrowRight,
-  Activity,
-  RefreshCw
+  ArrowUpRight,
+  BookOpen,
+  CheckCircle2,
+  RefreshCw,
+  ShieldAlert,
 } from "lucide-vue-next"
-
-
-/* =====================================================
-   AUTH
-===================================================== */
 
 const auth = useAuthStore()
 
-
-/* =====================================================
-   DATA
-===================================================== */
-
-const rawCatalogue = ref([])
-const recentActivities = ref([])
-
-const summaryStats = ref({
-  total_accessions: 0,
-  missing_items: 0,
-  damaged_items: 0,
-  languages: [],
-  recent_activity: []
-})
-
-const loading = ref(true)
-
-
-/* =====================================================
-   FETCH DATA
-===================================================== */
-
-async function loadDashboard() {
-  loading.value = true
-
+function can(permission) {
   try {
-    const [
-      summaryRes,
-      catRes,
-      auditRes
-    ] = await Promise.allSettled([
-      axios.get("/dashboard/summary"),
-
-      axios.get("/catalogue/", {
-        params: {
-          limit: 500
-        }
-      }),
-
-      axios.get("/status_audit/system-logs", {
-        params: {
-          limit: 8
-        }
-      })
-    ])
-
-
-    /* -----------------------------------------------
-       DASHBOARD SUMMARY
-    ------------------------------------------------ */
-
-    if (summaryRes.status === "fulfilled") {
-      summaryStats.value = summaryRes.value.data || {}
-    }
-
-
-    /* -----------------------------------------------
-       CATALOGUE
-    ------------------------------------------------ */
-
-    if (catRes.status === "fulfilled") {
-      rawCatalogue.value =
-        catRes.value.data?.data || []
-    }
-
-
-    /* -----------------------------------------------
-       AUDIT / RECENT ACTIVITY
-    ------------------------------------------------ */
-
-    if (
-      auditRes.status === "fulfilled" &&
-      auditRes.value.data?.items
-    ) {
-      recentActivities.value =
-        auditRes.value.data.items
-
-    } else if (
-      summaryStats.value.recent_activity?.length
-    ) {
-      recentActivities.value =
-        summaryStats.value.recent_activity
-    }
-
-  } catch (e) {
-    console.error(
-      "Failed to load dashboard data:",
-      e
-    )
-
-  } finally {
-    loading.value = false
+    return typeof auth?.hasPermission === "function"
+      ? auth.hasPermission(permission)
+      : false
+  } catch (error) {
+    return false
   }
 }
 
+const rawCatalogue = ref([])
+const latestAccessions = ref([])
+const pendingWorks = ref([])
+const pendingItems = ref([])
+const keeperAttention = ref({
+  rejected_works: [],
+  rejected_items: [],
+})
+const summaryStats = ref({
+  total_works: 0,
+  total_items: 0,
+  missing_items: 0,
+  damaged_items: 0,
+  categories: [],
+  genres: [],
+  languages: [],
+})
 
-/* =====================================================
-   COMPUTED
-===================================================== */
+const refreshing = ref(false)
+const loading = ref(true)
+const loadError = ref("")
+const requestErrors = ref({
+  summary: false,
+  catalogue: false,
+  latest: false,
+  pendingWorks: false,
+  pendingItems: false,
+})
+
+let dashboardController = null
+let loadGeneration = 0
+
+function withTimeout(requestFactory, ms = 8000, parentSignal = null) {
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+
+  if (parentSignal?.aborted) {
+    controller.abort()
+  } else {
+    parentSignal?.addEventListener("abort", abort, { once: true })
+  }
+
+  const timer = window.setTimeout(abort, ms)
+
+  return requestFactory(controller.signal).finally(() => {
+    window.clearTimeout(timer)
+    parentSignal?.removeEventListener("abort", abort)
+  })
+}
+
+async function loadDashboard() {
+  const generation = ++loadGeneration
+
+  refreshing.value = true
+  if (!rawCatalogue.value.length && !latestAccessions.value.length) {
+    loading.value = true
+  }
+  loadError.value = ""
+
+  requestErrors.value = {
+    summary: false,
+    catalogue: false,
+    latest: false,
+    pendingWorks: false,
+    pendingItems: false,
+  }
+
+  // Never present an older operational queue as current after a refresh.
+  pendingWorks.value = []
+  pendingItems.value = []
+  keeperAttention.value = {
+    rejected_works: [],
+    rejected_items: [],
+  }
+
+  dashboardController?.abort()
+  const controller = new AbortController()
+  dashboardController = controller
+  const signal = controller.signal
+
+  try {
+    const requests = [
+      withTimeout(
+        (requestSignal) => axios.get("/dashboard/summary", { signal: requestSignal }),
+        8000,
+        signal,
+      ),
+      withTimeout(
+        (requestSignal) => axios.get("/catalogue/", {
+          params: { limit: 500 },
+          signal: requestSignal,
+        }),
+        8000,
+        signal,
+      ),
+      withTimeout(
+        (requestSignal) => axios.get("/catalogue/", {
+          params: { limit: 5, order: "desc" },
+          signal: requestSignal,
+        }),
+        8000,
+        signal,
+      ),
+    ]
+
+if (can("operations.view")) {
+  requests.push(
+    withTimeout(
+      (requestSignal) => axios.get("/catalogue/pending-works", { signal: requestSignal }),
+      8000,
+      signal,
+    ),
+    withTimeout(
+      (requestSignal) => axios.get("/catalogue/pending-items", { signal: requestSignal }),
+      8000,
+      signal,
+    ),
+  )
+}
+
+requests.push(
+  withTimeout(
+    (requestSignal) =>
+      axios.get("/dashboard/keeper-attention", {
+        signal: requestSignal,
+      }),
+    8000,
+    signal,
+  ),
+)
+
+const results = await Promise.allSettled(requests)
+
+    // A newer refresh always wins.
+    if (generation !== loadGeneration || signal.aborted) return
+
+    const summaryRes = results[0]
+    const catalogueRes = results[1]
+    const latestRes = results[2]
+
+    let resultIndex = 3
+    let pendingWorksRes = null
+    let pendingItemsRes = null
+
+    if (can("operations.view")) {
+      pendingWorksRes = results[resultIndex]
+      pendingItemsRes = results[resultIndex + 1]
+      resultIndex += 2
+    }
+
+    const keeperAttentionRes = results[resultIndex]
+
+    requestErrors.value.summary = summaryRes.status === "rejected"
+    requestErrors.value.catalogue = catalogueRes.status === "rejected"
+    requestErrors.value.latest = latestRes.status === "rejected"
+
+    if (summaryRes.status === "fulfilled") {
+      const data = summaryRes.value?.data
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        summaryStats.value = {
+          ...summaryStats.value,
+          ...data,
+        }
+      }
+    }
+
+    if (catalogueRes.status === "fulfilled") {
+      const data = catalogueRes.value?.data
+      rawCatalogue.value = Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data)
+          ? data
+          : []
+    }
+
+    if (latestRes.status === "fulfilled") {
+      const data = latestRes.value?.data
+      latestAccessions.value = Array.isArray(data?.data)
+        ? data.data.slice(0, 5)
+        : Array.isArray(data)
+          ? data.slice(0, 5)
+          : []
+    }
+
+    if (can("operations.view")) {
+      requestErrors.value.pendingWorks = pendingWorksRes?.status === "rejected"
+      requestErrors.value.pendingItems = pendingItemsRes?.status === "rejected"
+
+      if (pendingWorksRes?.status === "fulfilled") {
+        const data = pendingWorksRes.value?.data
+        pendingWorks.value = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.data)
+            ? data.data
+            : []
+      }
+
+      if (pendingItemsRes?.status === "fulfilled") {
+        const data = pendingItemsRes.value?.data
+        pendingItems.value = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.data)
+            ? data.data
+            : []
+      }
+    }
+
+    // Keeper attention has its own backend role check, so process it
+    // independently of the operations.view permission.
+    if (keeperAttentionRes?.status === "fulfilled") {
+      const data = keeperAttentionRes.value?.data
+
+      keeperAttention.value = {
+        rejected_works: Array.isArray(data?.rejected_works)
+          ? data.rejected_works
+          : [],
+        rejected_items: Array.isArray(data?.rejected_items)
+          ? data.rejected_items
+          : [],
+      }
+    }
+
+    const coreFailed =
+      summaryRes.status === "rejected" &&
+      catalogueRes.status === "rejected" &&
+      latestRes.status === "rejected"
+
+    if (coreFailed) {
+      loadError.value = "Live archive data is unavailable. Showing the dashboard shell."
+    } else if (
+      summaryRes.status === "rejected" ||
+      catalogueRes.status === "rejected" ||
+      latestRes.status === "rejected"
+    ) {
+      loadError.value = "Some archive data could not be loaded. Showing the available information."
+    }
+  } catch (error) {
+    if (
+      generation === loadGeneration &&
+      error?.code !== "ERR_CANCELED" &&
+      error?.name !== "CanceledError"
+    ) {
+      console.error("Dashboard load failed:", error)
+      loadError.value = "Live archive data is unavailable. Showing the dashboard shell."
+    }
+  } finally {
+    if (generation === loadGeneration) {
+      refreshing.value = false
+      loading.value = false
+    }
+  }
+}
+
+function daysWaiting(createdAt) {
+  if (!createdAt) return 0
+
+  const created = new Date(createdAt)
+  if (Number.isNaN(created.getTime())) return 0
+
+  return Math.max(0, Math.floor((Date.now() - created.getTime()) / 86400000))
+}
+
+function oldestPendingDays(records) {
+  return records.reduce((oldest, record) => {
+    return Math.max(oldest, daysWaiting(record?.created_at))
+  }, 0)
+}
+
+function pendingDescription(records, label) {
+  const count = records.length
+  const oldestDays = oldestPendingDays(records)
+  const noun = `${label}${count === 1 ? "" : "s"}`
+
+  if (oldestDays > 0) {
+    return `${count === 1 ? "One" : count} ${noun} ${count === 1 ? "is" : "are"} waiting for verification; oldest has been waiting ${oldestDays} ${oldestDays === 1 ? "day" : "days"}.`
+  }
+
+  return `${count === 1 ? "One" : count} ${noun} ${count === 1 ? "is" : "are"} waiting for verification.`
+}
+
+/*
+ * Attention is intentionally limited to information that represents
+ * an unresolved archive task or preservation exception. History belongs
+ * in Audit Trail; incident, user and docket details stay in their
+ * dedicated sections.
+ */
+const attentionSignals = computed(() => {
+  const signals = []
+
+  if (can("operations.view")) {
+    if (pendingWorks.value.length) {
+      signals.push({
+        id: "pending-works",
+        title: "Pending Archival Work",
+        description: pendingDescription(pendingWorks.value, "archival work record"),
+        count: pendingWorks.value.length,
+        tone: "violet",
+        icon: CheckCircle2,
+        to:
+          pendingWorks.value.length === 1
+            ? `/review-work/${pendingWorks.value[0].work_id}`
+            : "/docket",
+      })
+    }
+
+    if (pendingItems.value.length) {
+      signals.push({
+        id: "pending-items",
+        title: "Pending Physical Item",
+        description: pendingDescription(pendingItems.value, "physical item record"),
+        count: pendingItems.value.length,
+        tone: "orange",
+        icon: BookOpen,
+        to:
+          pendingItems.value.length === 1
+            ? `/review-item/${pendingItems.value[0].serial_no}`
+            : "/docket",
+      })
+    }
+
+    const missing = Number(summaryStats.value.missing_items || 0)
+    const damaged = Number(summaryStats.value.damaged_items || 0)
+
+    if (missing > 0) {
+      signals.push({
+        id: "missing-items",
+        title: "Items recorded as missing",
+        description: "Review the affected preservation records.",
+        count: missing,
+        tone: "danger",
+        icon: AlertTriangle,
+        to: "/catalogue",
+      })
+    }
+
+    if (damaged > 0) {
+      signals.push({
+        id: "damaged-items",
+        title: "Items recorded as damaged",
+        description: "Review condition and preservation records.",
+        count: damaged,
+        tone: "warning",
+        icon: ShieldAlert,
+        to: "/catalogue",
+      })
+    }
+  }
+
+  // Keeper attention is independent of operations.view because the
+  // backend endpoint already restricts this data to the current Keeper.
+  const rejectedWorks = keeperAttention.value.rejected_works
+  const rejectedItems = keeperAttention.value.rejected_items
+
+  if (rejectedWorks.length > 0) {
+    signals.push({
+      id: "keeper-rejected-works",
+      title: "Archival Work",
+      subtitle: "Returned for Re-evaluation",
+      description:
+        rejectedWorks.length === 1
+          ? "1 archival work submitted by you was returned by the Chief and requires your action."
+          : `${rejectedWorks.length} archival works submitted by you were returned by the Chief and require your action.`,
+      count: rejectedWorks.length,
+      tone: "danger",
+      icon: CheckCircle2,
+      to:
+        rejectedWorks.length === 1
+          ? `/review-work/${rejectedWorks[0].work_id}`
+          : { path: "/docket", query: { filter: "ATTENTION" } },
+    })
+  }
+
+  if (rejectedItems.length > 0) {
+    signals.push({
+      id: "keeper-rejected-items",
+      title: "Physical Items",
+      subtitle: "Returned for Re-evaluation",
+      description:
+        rejectedItems.length === 1
+          ? "1 physical item submitted by you was returned by the Chief and requires your action."
+          : `${rejectedItems.length} physical items submitted by you were returned by the Chief and require your action.`,
+      count: rejectedItems.length,
+      tone: "danger",
+      icon: BookOpen,
+      to:
+        rejectedItems.length === 1
+          ? `/review-item/${rejectedItems[0].serial_no}`
+          : { path: "/docket", query: { filter: "ATTENTION" } },
+    })
+  }
+
+  return signals
+})
+
+function numberOrZero(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : 0
+}
 
 const totalItems = computed(() => {
+  if (summaryStats.value.total_items != null) {
+    const total = Number(summaryStats.value.total_items)
+    return Number.isFinite(total) && total >= 0
+      ? total
+      : rawCatalogue.value.length
+  }
+
   return rawCatalogue.value.length
 })
 
+function aggregateRows(source, labelKey = "label", countKey = "count") {
+  if (!Array.isArray(source)) return []
 
-const newestArrivals = computed(() => {
-  return [...rawCatalogue.value]
-    .sort(
-      (a, b) =>
-        (b.serial_no || 0) -
-        (a.serial_no || 0)
-    )
-    .slice(0, 8)
+  return source
+    .map((row) => {
+      if (row == null) return null
+
+      if (Array.isArray(row)) {
+        return [String(row[0] ?? "").trim(), Number(row[1] ?? 0)]
+      }
+
+      const label = row[labelKey] ?? row.category ?? row.genre ?? row.language
+      const count = row[countKey] ?? row.total ?? 0
+      return [String(label ?? "").trim(), Number(count ?? 0)]
+    })
+    .filter(([label, count]) => label && Number.isFinite(count) && count >= 0)
+    .sort((a, b) => b[1] - a[1])
+}
+
+function rowsFromEntries(entries, limit) {
+  const visible = entries.slice(0, limit)
+  const max = visible[0]?.[1] || 1
+
+  return {
+    rows: visible.map(([label, count]) => ({
+      label,
+      count,
+      percent: Math.max(3, Math.min(100, (count / max) * 100)),
+    })),
+    hasMore: entries.length > limit,
+  }
+}
+
+const categoryEntries = computed(() => {
+  // Prefer complete server-side aggregates.
+  const serverRows = aggregateRows(summaryStats.value.categories)
+  if (serverRows.length) return serverRows
+
+  // Only aggregate the catalogue locally when it is demonstrably complete.
+  const total = Number(summaryStats.value.total_items)
+  if (
+    !requestErrors.value.summary &&
+    Number.isFinite(total) &&
+    total > 0 &&
+    total <= rawCatalogue.value.length
+  ) {
+    const stats = {}
+
+    rawCatalogue.value.forEach((record) => {
+      const category = String(record?.category || "").trim() || "Uncategorised"
+      stats[category] = (stats[category] || 0) + 1
+    })
+
+    return Object.entries(stats).sort((a, b) => b[1] - a[1])
+  }
+
+  // Do not display misleading partial statistics.
+  return []
 })
 
+const categoryRows = computed(() => rowsFromEntries(categoryEntries.value, categoryEntries.value.length))
 
-const categoryStats = computed(() => {
+const genreEntries = computed(() => {
+  const serverRows = aggregateRows(summaryStats.value.genres)
+  if (serverRows.length) return serverRows
+
+  const total = Number(summaryStats.value.total_items)
+  if (
+    !requestErrors.value.summary &&
+    Number.isFinite(total) &&
+    total > 0 &&
+    total <= rawCatalogue.value.length
+  ) {
+    const stats = {}
+
+    rawCatalogue.value.forEach((record) => {
+      const genreValue = String(record?.genre || "").trim() || "Uncategorised"
+
+      genreValue
+        .split(/[/,]+/)
+        .map((value) => value.trim())
+        .filter(Boolean)
+        .forEach((genre) => {
+          stats[genre] = (stats[genre] || 0) + 1
+        })
+    })
+
+    return Object.entries(stats).sort((a, b) => b[1] - a[1])
+  }
+
+  return []
+})
+
+const genreRows = computed(() => rowsFromEntries(genreEntries.value, 5))
+
+const languageEntries = computed(() => {
+  const serverRows = aggregateRows(summaryStats.value.languages, "language")
+  if (!serverRows.length) return []
+
   const stats = {}
 
-  rawCatalogue.value.forEach(book => {
-    const cat =
-      book.category || "General"
+  serverRows.forEach(([label, count]) => {
+    const language =
+      !label || label.toLowerCase() === "unknown"
+        ? "Uncategorised"
+        : label
 
-    stats[cat] =
-      (stats[cat] || 0) + 1
+    stats[language] = (stats[language] || 0) + count
   })
 
-  return stats
+  return Object.entries(stats).sort((a, b) => b[1] - a[1])
+})
+const languageRows = computed(() => rowsFromEntries(languageEntries.value, 5))
+
+const distributionSections = computed(() => {
+  const sections = []
+
+  if (categoryRows.value.rows.length) {
+    sections.push({
+      key: "categories",
+      kicker: "COMPOSITION",
+      title: "Categories",
+      totalLabel: `${totalCategories.value} categories`,
+      ...categoryRows.value,
+    })
+  }
+
+  if (genreRows.value.rows.length) {
+    sections.push({
+      key: "genres",
+      kicker: "COMPOSITION",
+      title: "Genres",
+      totalLabel: `${totalGenres.value} genres`,
+      ...genreRows.value,
+    })
+  }
+
+  if (languageRows.value.rows.length) {
+    sections.push({
+      key: "languages",
+      kicker: "COMPOSITION",
+      title: "Languages",
+      totalLabel: `${totalLanguages.value} languages`,
+      ...languageRows.value,
+    })
+  }
+
+  return sections
 })
 
+const totalCategories = computed(() => categoryEntries.value.length)
 
-const inCirculation = computed(() => {
-  return rawCatalogue.value.filter(
-    b =>
-      b.availability_status ===
-      "IN_RESEARCH_USE"
-  ).length
+const totalGenres = computed(() => genreEntries.value.length)
+
+const totalLanguages = computed(() => languageEntries.value.length)
+
+
+onMounted(() => {
+  loadDashboard()
 })
 
-
-const totalGenres = computed(() => {
-  const genres = new Set()
-
-  rawCatalogue.value.forEach(book => {
-
-    if (book.genre) {
-
-      book.genre
-        .split(/[/,]+/)
-        .forEach(g => {
-          genres.add(g.trim())
-        })
-
-    }
-  })
-
-  return genres.size
-})
-
-
-const totalCategories = computed(() => {
-  return Object.keys(
-    categoryStats.value
-  ).length
-})
-
-
-/* =====================================================
-   HELPERS & FORMATTERS
-===================================================== */
-
-function getBookTitle(id) {
-
-  if (!id) {
-    return "System Action"
-  }
-
-  const book =
-    rawCatalogue.value.find(
-      b =>
-        String(b.serial_no) ===
-        String(id)
-    )
-
-  return book
-    ? book.title
-    : "Catalogue Record"
-}
-
-
-function formatActionTitle(action) {
-
-  if (!action) {
-    return "SYSTEM EVENT"
-  }
-
-  return action.replace(
-    /_/g,
-    " "
-  )
-}
-
-
-function getTimelineClass(action) {
-
-  if (!action) {
-    return ""
-  }
-
-  const act =
-    action.toUpperCase()
-
-  if (act.includes("LOGIN")) {
-    return "login"
-  }
-
-  if (act.includes("LOGOUT")) {
-    return "logout"
-  }
-
-  if (
-    act.includes("CREATE") ||
-    act.includes("ADD") ||
-    act.includes("NEW")
-  ) {
-    return "create"
-  }
-
-  if (
-    act.includes("DELETE") ||
-    act.includes("DROP") ||
-    act.includes("REJECT")
-  ) {
-    return "danger"
-  }
-
-  return ""
-}
-
-
-function formatRelativeTime(dateStr) {
-
-  if (!dateStr) {
-    return ""
-  }
-
-  let date =
-    new Date(dateStr)
-
-  if (
-    typeof dateStr === "string" &&
-    !dateStr.endsWith("Z") &&
-    !dateStr.includes("+")
-  ) {
-    date =
-      new Date(
-        dateStr.replace(
-          " ",
-          "T"
-        ) + "Z"
-      )
-  }
-
-  const diffMinutes =
-    Math.floor(
-      (
-        Date.now() -
-        date.getTime()
-      ) / 60000
-    )
-
-  if (
-    isNaN(diffMinutes) ||
-    diffMinutes < 1
-  ) {
-    return "Just now"
-  }
-
-  if (diffMinutes < 60) {
-    return `${diffMinutes}m ago`
-  }
-
-  if (diffMinutes < 1440) {
-    return `${Math.floor(
-      diffMinutes / 60
-    )}h ago`
-  }
-
-  return `${Math.floor(
-    diffMinutes / 1440
-  )}d ago`
-}
-
-
-function formatDate(date) {
-
-  if (!date) {
-    return ""
-  }
-
-  return new Date(
-    date
-  ).toLocaleDateString(
-    [],
-    {
-      month: "short",
-      day: "numeric",
-      year: "numeric"
-    }
-  )
-}
-
-
-/* =====================================================
-   LIFECYCLE
-===================================================== */
-
-onMounted(async () => {
-  await loadDashboard()
+onUnmounted(() => {
+  loadGeneration += 1
+  dashboardController?.abort()
+  dashboardController = null
 })
 </script>
 
-
 <style scoped>
-
-/* ===========================================================
-   ATHENAEUM ORBIS: ARCHIVE INTELLIGENCE CONSOLE
-=========================================================== */
-
-.dashboard {
-  min-height: 100vh;
-  background: var(--content-bg);
-  padding: 28px;
-  color: var(--text-primary);
+.dashboard-brand {
+  margin-bottom: 7px;
+  color: #8B5CF6;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
 }
 
+/* =========================================================
+   NEW DASHBOARD SYSTEM
+   - No fixed KPI strip
+   - No recent activity/audit duplication
+   - No empty reserved panels
+   - Attention-first
+   - Fluid reflow
+========================================================= */
 
-/* ===========================================================
-   TOP BAR
-=========================================================== */
+.archive-dashboard {
+  --dash-bg: var(--content-bg, #f1f5f2);
+  --dash-surface: var(--surface, #ffffff);
+  --dash-surface-2: var(--hover-bg, #e9f4ed);
+  --dash-text: var(--text-primary, #14221b);
+  --dash-muted: var(--text-muted, #65746c);
+  --dash-border: var(--border-main, #d6e2da);
 
-.topbar {
+  --dash-green: #13a36b;
+  --dash-green-dark: #08794d;
+  --dash-coral: #f05d4e;
+  --dash-violet: #7658e8;
+  --dash-violet-soft: #e9e3ff;
+
+  --dash-orange: #ed9a28;
+  min-height: 100vh;
+  padding: 30px clamp(20px, 3vw, 48px) 48px;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(19, 163, 107, 0.11), transparent 30%),
+    radial-gradient(circle at 4% 38%, rgba(118, 88, 232, 0.07), transparent 24%),
+    var(--dash-bg);
+  color: var(--dash-text);
+}
+
+/* Header */
+.dashboard-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 30px;
+}
+
+.section-kicker {
+  margin-bottom: 7px;
+  color: var(--dash-green-dark);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+.dashboard-header h1 {
+  margin: 0;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1;
+  letter-spacing: -1.5px;
+  font-weight: 800;
+}
+
+.header-subtitle {
+  max-width: 650px;
+  margin: 10px 0 0;
+  color: var(--dash-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.refresh-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--dash-border);
+  border-radius: 12px;
+  background: var(--dash-surface);
+  color: var(--dash-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.refresh-control:hover {
+  border-color: var(--dash-green);
+  box-shadow: 0 8px 24px rgba(20, 34, 27, .08);
+  transform: translateY(-1px);
+}
+
+.refresh-control:focus-visible,
+.text-link:focus-visible,
+.attention-item:focus-visible,
+.dashboard-error button:focus-visible {
+  outline: 3px solid var(--dash-violet);
+  outline-offset: 3px;
+}
+
+.refresh-control.spinning svg {
+  animation: spin .8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Attention */
+.attention-section {
+  margin-bottom: 30px;
+  padding: 22px;
+  border: 1px solid #f6c7c1;
+  border-radius: 20px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--dash-coral) 10%, var(--dash-surface)), var(--dash-surface) 65%);
+  box-shadow: 0 12px 36px rgba(240, 93, 78, .07);
+}
+
+.attention-kicker {
+  color: var(--dash-coral);
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.section-heading h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.15;
+  letter-spacing: -.5px;
+}
+
+.attention-summary {
+  color: var(--dash-muted);
+  font-size: 11px;
+}
+
+.attention-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.attention-item {
+  display: grid;
+  grid-template-columns: 40px 1fr auto 18px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--dash-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--dash-surface) 92%, var(--dash-bg));
+  color: inherit;
+  text-decoration: none;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.attention-item:hover {
+  transform: translateY(-2px);
+  border-color: #efaaa1;
+  box-shadow: 0 10px 24px rgba(20, 34, 27, .08);
+}
+
+.attention-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+}
+
+.tone-danger .attention-icon {
+  color: var(--dash-coral);
+  background: color-mix(in srgb, var(--dash-coral) 14%, var(--dash-surface));
+}
+
+.tone-warning .attention-icon {
+  color: #bd7100;
+  background: color-mix(in srgb, var(--dash-orange) 14%, var(--dash-surface));
+}
+ 
+.tone-violet .attention-icon {
+  color: var(--dash-violet);
+  background: color-mix(in srgb, var(--dash-violet) 14%, var(--dash-surface));
+}
+
+.tone-orange .attention-icon {
+  color: var(--dash-orange);
+  background: color-mix(in srgb, var(--dash-orange) 14%, var(--dash-surface));
+}
+
+.attention-copy {
+  min-width: 0;
+}
+
+.attention-copy strong,
+.attention-copy span {
+  display: block;
+}
+
+.attention-copy strong {
+  margin-bottom: 3px;
+  font-size: 12px;
+}
+
+.attention-copy em {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--dash-coral);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+}
+
+.attention-copy span {
+  color: var(--dash-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.attention-count {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+
+.attention-arrow {
+  color: var(--dash-muted);
+}
+
+/* Collection */
+.collection-section {
+  margin-bottom: 30px;
+}
+
+.collection-heading {
+  margin-bottom: 9px;
+}
+
+.text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--dash-green-dark);
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.collection-overview {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow: hidden;
+  min-height: 66px;
+  border: 1px solid var(--dash-border);
+  border-radius: 14px;
+  background: var(--dash-surface);
+  box-shadow: 0 6px 20px rgba(20, 34, 27, .04);
+}
+
+.collection-primary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 150px;
+  padding: 12px 18px;
+}
+
+.collection-primary strong {
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+
+.collection-primary span {
+  color: var(--dash-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.collection-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  flex: 1;
+  border-left: 1px solid var(--dash-border);
+  background: color-mix(in srgb, var(--dash-surface-2) 55%, var(--dash-surface));
+}
+
+.collection-fact {
+  padding: 8px 14px;
+  border-right: 1px solid var(--dash-border);
+}
+
+.collection-fact:last-child {
+  border-right: 0;
+}
+
+.collection-fact span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--dash-muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+}
+
+.collection-fact strong {
+  font-size: 15px;
+  letter-spacing: -.4px;
+}
+
+/* Distributions */
+.distribution-section {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+  margin-bottom: 30px;
+}
+
+.distribution {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--dash-border);
+  border-radius: 18px;
+  background: var(--dash-surface);
+  box-shadow: 0 8px 28px rgba(20, 34, 27, .05);
+}
+
+.distribution-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.distribution-heading .section-kicker {
+  margin-bottom: 5px;
+}
+
+.distribution-heading h3 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: -.2px;
+}
+
+.distribution-total {
+  white-space: nowrap;
+  color: var(--dash-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.distribution-row {
+  margin-top: 13px;
+}
+
+.distribution-label {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 28px;
-}
-
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-
-.brand-mark {
-  width: 14px;
-  height: 50px;
-  border-radius: 30px;
-  background: var(--accent);
-  box-shadow: 0 0 18px var(--hover-bg);
-}
-
-
-.eyebrow {
+  gap: 12px;
+  margin-bottom: 6px;
   font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 3px;
-  color: var(--accent);
 }
 
-
-.brand h1 {
-  margin-top: 6px;
-  font-family: "Cormorant Garamond", serif;
-  font-size: 34px;
-  color: var(--text-primary);
+.distribution-label span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--dash-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-
-/* ===========================================================
-   REFRESH BUTTON
-=========================================================== */
-
-.refresh-btn {
-  width: 42px;
-  height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 10px;
-  cursor: pointer;
-  background: var(--surface);
-  border: 1px solid var(--border-main);
-  color: var(--accent);
-  transition:
-    background .2s ease,
-    border-color .2s ease,
-    color .2s ease,
-    transform .2s ease;
+.distribution-label strong {
+  flex: 0 0 auto;
+  font-size: 11px;
 }
 
-
-.refresh-btn:hover {
-  background: var(--hover-bg);
-  border-color: var(--accent);
-  color: var(--accent);
-  transform: rotate(15deg);
+.distribution-track {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--dash-text) 9%, var(--dash-surface));
 }
 
-
-.refresh-btn.is-loading svg {
-  animation:
-    refresh-spin .8s linear infinite;
+.distribution-fill {
+  height: 100%;
+  min-width: 3px;
+  border-radius: inherit;
 }
 
+.fill-categories { background: var(--dash-green); }
+.fill-genres { background: var(--dash-violet); }
+.fill-languages { background: var(--dash-coral); }
 
-.refresh-btn:disabled {
-  cursor: wait;
-  opacity: .7;
+.distribution-footer {
+  margin-top: 15px;
+  color: var(--dash-muted);
+  font-size: 10px;
 }
 
-
-@keyframes refresh-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+/* Latest accessions */
+.recent-section {
+  margin-bottom: 30px;
+  padding: 20px;
+  border: 1px solid var(--dash-border);
+  border-radius: 18px;
+  background: var(--dash-surface);
+  box-shadow: 0 8px 28px rgba(20, 34, 27, .05);
 }
 
+.recent-heading {
+  margin-bottom: 12px;
+}
 
-/* ===========================================================
-   KPI GRID
-=========================================================== */
-
-.kpi-grid {
+.recent-list {
   display: grid;
-  grid-template-columns:
-    repeat(6, 1fr);
-  gap: 18px;
-  margin-bottom: 28px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
 }
 
-
-.kpi {
-  background: var(--surface);
-  border: 1px solid var(--border-main);
-  border-radius: 14px;
-  padding: 18px;
-  transition: .25s;
+.recent-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--dash-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--dash-surface-2) 88%, var(--dash-surface));
 }
 
-
-.kpi:hover {
-  transform: translateY(-4px);
-  border-color: var(--accent);
+.accession-badge {
+  max-width: 86px;
+  overflow: hidden;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: var(--dash-violet-soft);
+  color: #5940c8;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+.recent-copy {
+  min-width: 0;
+}
 
-.kpi-icon {
-  width: 17px;
-  height: 17px;
-  color: var(--accent);
-  margin-bottom: 14px;
+.recent-copy strong,
+.recent-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-copy strong {
+  color: var(--dash-text);
+  font-size: 11px;
+}
+
+.recent-copy span {
+  margin-top: 3px;
+  color: var(--dash-muted);
+  font-size: 10px;
+}
+
+.recent-icon {
+  color: var(--dash-green);
   opacity: .85;
 }
 
+/* The dashboard uses the application's existing theme variables for its
+   surfaces, text, borders, and background, so the same component follows
+   both light and dark themes without duplicating theme architecture. */
 
-.kpi span {
-  display: block;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  font-size: 11px;
-  letter-spacing: 1.2px;
-}
-
-
-.kpi h2 {
-  margin-top: 12px;
-  font-size: 34px;
-  font-family: "Cormorant Garamond", serif;
-  color: var(--text-primary);
-}
-
-
-.danger h2 {
-  color: #ef4444;
-}
-
-
-.warning h2 {
-  color: #f59e0b;
-}
-
-
-/* ===========================================================
-   PANELS GRID
-=========================================================== */
-
-.grid {
-  display: grid;
-  grid-template-columns:
-     1fr 1fr;
-  gap: 18px;
-}
-
-
-.panel {
-  background: var(--surface);
-  border: 1px solid var(--border-main);
-  border-radius: 12px;
-  padding: 20px;
-  box-shadow: var(--shadow);
-  align-items: start;
-}
-
-
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-
-.panel-header h3 {
+/* Header actions */
+.header-actions {
   display: flex;
   align-items: center;
-  gap: 9px;
-  font-size: 16px;
-  font-family:
-    "Cormorant Garamond",
-    serif;
-  font-weight: 600;
-  letter-spacing: .3px;
-  color: var(--text-primary);
-}
-
-
-.view-all-link {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--accent);
-  text-decoration: none;
-  transition: opacity .2s ease;
-}
-
-
-.view-all-link:hover {
-  opacity: 0.8;
-}
-
-
-/* ===========================================================
-   RECENT ACTIVITY
-=========================================================== */
-
-.empty-state {
-  padding: 36px 0;
-  text-align: center;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-
-.activity {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border-main);
-  transition: background .2s ease;
-}
-
-
-.activity:last-child {
-  border: none;
-}
-
-
-.activity:hover {
-  background: var(--hover-bg);
-}
-
-
-.timeline {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow:
-    0 0 10px
-    rgba(184, 146, 90, .4);
+  gap: 12px;
   flex-shrink: 0;
 }
 
-
-.timeline.login {
-  background: #3b82f6;
-  box-shadow:
-    0 0 10px
-    rgba(59, 130, 246, .4);
-}
-
-
-.timeline.logout {
-  background: var(--accent);
-  box-shadow:
-    0 0 10px
-    rgba(184, 146, 90, .4);
-}
-
-
-.timeline.create {
-  background: #22c55e;
-  box-shadow:
-    0 0 10px
-    rgba(34, 197, 94, .4);
-}
-
-
-.timeline.danger {
-  background: #ef4444;
-  box-shadow:
-    0 0 10px
-    rgba(239, 68, 68, .4);
-}
-
-
-.activity-content {
-  flex: 1;
-  min-width: 0;
-}
-
-
-.activity-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-
-.activity-content strong {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: .5px;
-}
-
-
-.actor-tag {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--content-bg);
-  border: 1px solid var(--border-main);
-  color: var(--text-muted);
-}
-
-
-.activity-content p {
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-
-.activity small {
-  color: var(--text-muted);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-
-/* ===========================================================
-   BOOKS & ACCESSIONS
-=========================================================== */
-
-.book {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border-main);
-  transition: background .2s ease;
-}
-
-
-.book:last-child {
-  border: none;
-}
-
-
-.book:hover {
-  background: var(--hover-bg);
-}
-
-
-.book-no {
-  width: 90px;
-  color: var(--accent);
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: .8px;
-  font-family: monospace;
-}
-
-
-.book-info {
-  flex: 1;
-  min-width: 0;
-}
-
-
-.book-info strong {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-
-.book-info span {
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-
-.book small {
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-
-/* ===========================================================
-   BARS & DISTRIBUTIONS
-=========================================================== */
-
-.bar-row {
-  display: grid;
-  grid-template-columns:
-    110px 1fr 35px;
-  gap: 10px;
-  align-items: center;
-  margin: 12px 0;
-}
-
-
-.bar {
-  height: 8px;
-  background: var(--hover-bg);
-  border-radius: 20px;
-  overflow: hidden;
-}
-
-
-.fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 20px;
-  transition: width .4s ease;
-}
-
-
-.genre-footer {
-  margin-top: 22px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-
-/* ===========================================================
-   QUICK ACTIONS
-=========================================================== */
-
-.actions {
-  display: grid;
-  grid-template-columns:
-    repeat(2, 1fr);
-  gap: 14px;
-}
-
-
-.actions a {
+/* Non-blocking API error */
+.dashboard-error {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  text-decoration: none;
-  color: var(--text-primary);
-  background: var(--content-bg);
-  border: 1px solid var(--border-main);
-  border-radius: 10px;
-  padding: 14px 16px;
-  font-size: 12px;
-  font-weight: 600;
-  transition: .25s;
-}
-
-
-.actions a:hover {
-  border-color: var(--accent);
-  transform: translateY(-3px);
-}
-
-
-/* ===========================================================
-   ARCHIVE STATUS
-=========================================================== */
-
-.status {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 13px 0;
-  border-bottom: 1px solid var(--border-main);
-  font-size: 12px;
-}
-
-
-.status:last-child {
-  border: none;
-}
-
-
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow:
-    0 0 10px
-    rgba(34, 197, 94, .65);
-}
-
-
-/* ===========================================================
-   LOADING STATE
-=========================================================== */
-
-.dashboard-loading {
-  min-height: 420px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
   gap: 16px;
-  color: var(--text-muted);
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(239, 68, 68, .25);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--dash-coral) 10%, var(--dash-surface));
+  color: var(--dash-text);
+  font-size: 12px;
 }
 
+.dashboard-error button {
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  background: var(--dash-violet);
+  color: white;
+  font-size: 12px;
+}
 
-.loading-ring {
-  width: 28px;
-  height: 28px;
-  border: 2px solid var(--border-main);
-  border-top-color: var(--accent);
+/* Loading */
+.dashboard-loading {
+  min-height: 60vh;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  color: var(--dash-muted);
+  font-size: 12px;
+}
+
+.loading-orbit {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #dce8e1;
+  border-top-color: var(--dash-green);
+  border-right-color: var(--dash-violet);
   border-radius: 50%;
-  animation:
-    dashboard-loading-spin
-    .8s linear infinite;
+  animation: spin .8s linear infinite;
 }
 
-
-@keyframes dashboard-loading-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-
-/* ===========================================================
-   RESPONSIVE
-=========================================================== */
-
-@media (max-width: 1200px) {
-
-  .kpi-grid {
-    grid-template-columns:
-      repeat(2, 1fr);
-  }
-
-  .grid {
-    grid-template-columns: 1fr;
-  }
-
-  .topbar {
-    flex-direction: column;
+/* Responsive */
+@media (max-width: 850px) {
+  .dashboard-header {
     align-items: flex-start;
-    gap: 18px;
+    flex-direction: column;
   }
 
+  .collection-overview {
+    display: block;
+  }
+
+  .collection-primary {
+    border-bottom: 1px solid var(--dash-border);
+  }
+
+  .collection-facts {
+    border-top: 1px solid var(--dash-border);
+    border-left: 0;
+  }
 }
 
-
-@media (max-width: 768px) {
-
-  .dashboard {
-    padding: 18px;
+@media (max-width: 600px) {
+  .archive-dashboard {
+    padding: 22px 16px 36px;
   }
 
-  .kpi-grid {
+  .section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+
+  .collection-overview {
+    display: block;
+  }
+
+  .collection-primary {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--dash-border);
+  }
+
+  .collection-facts {
+    padding: 0;
+  }
+
+  .attention-item {
+    grid-template-columns: 36px 1fr auto;
+  }
+
+  .attention-arrow {
+    display: none;
+  }
+
+  .recent-list,
+  .distribution-section {
     grid-template-columns: 1fr;
   }
-
-  .actions {
-    grid-template-columns: 1fr;
-  }
-
-  .bar-row {
-    grid-template-columns:
-      90px 1fr 35px;
-  }
-
 }
-
 </style>

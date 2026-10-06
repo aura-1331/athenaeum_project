@@ -37,22 +37,24 @@ def generate_identity(conn, language: str):
             prefix = (prefix + "X")[:3]
 
         cur.execute(
-            "INSERT INTO language_registry (language, prefix) VALUES (%s, %s)",
+            "INSERT INTO language_registry (language, prefix, last_number) VALUES (%s, %s, 0)",
             (language, prefix),
         )
 
-    # 3️⃣ Next accession counter per language
+    # 3️⃣ Next accession counter per language (ticket dispenser odometer)
     cur.execute(
         """
-        SELECT COUNT(*) + 1
-        FROM items
-        WHERE language = %s
+        UPDATE language_registry
+        SET last_number = COALESCE(last_number, 0) + 1
+        WHERE TRIM(prefix) = %s
+        RETURNING last_number;
         """,
-        (language,),
+        (prefix.strip(),),
     )
-    counter = cur.fetchone()[0]
+    counter_row = cur.fetchone()
+    counter = counter_row[0] if counter_row else 1
 
-    accession_no = f"{prefix}-{counter}"
+    accession_no = f"{prefix.strip()}-{counter}"
 
     cur.close()
 

@@ -4,14 +4,14 @@ from psycopg2.extras import RealDictCursor
 from io import BytesIO
 
 from app.database import get_connection
-from app.auth import get_current_user
+from app.auth import get_current_user, require_role
 from app.audit_utils import audit_action  # 🛡️ Standardized auditing
 from pdf.pdf_generator import generate_pdf
 
 router = APIRouter(prefix="/print", tags=["print"])
 
 @audit_action("PRINT_RECORD") # 🛡️ Tracks all document exports
-@router.get("/{serial_no}")
+@router.get("/{serial_no}", dependencies=[Depends(require_role(["The Keeper", "The Chief"]))])
 async def print_book(
     serial_no: int, 
     request: Request, 

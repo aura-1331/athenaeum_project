@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import logging
 import os
 import secrets
@@ -104,13 +105,11 @@ def get_current_user(
     payload = decode_token(token)
 
     if payload.get("type") != "access":
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid access token"
-        )
+        raise HTTPException(status_code=401, detail="Invalid access token")
 
-    user_id = payload["sub"]
-    role = payload.get("role", "Guest")
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid access token")
 
     conn = get_connection()
     cur = conn.cursor()
@@ -118,44 +117,44 @@ def get_current_user(
     try:
         cur.execute(
             """
-            SELECT
-                name,
-                email,
-                role,
-                operator_id,
-                identity_id,
-                status
+            SELECT name, email, role, operator_id, identity_id, status, expires_at
             FROM users
             WHERE user_id = %s
             """,
             (user_id,)
         )
-
         user = cur.fetchone()
 
-        user_name = user[0]
-        user_email = user[1]
-        user_role = user[2]
-        operator_id = user[3]
-        identity_id = user[4]
+        if not user:
+            raise HTTPException(status_code=401, detail="Account not found")
 
+        user_name, user_email, user_role, operator_id, identity_id, status, expires_at = user
 
-        if not user or user[5] != "APPROVED":
-            raise HTTPException(
-                status_code=401,
-                detail="Account inactive"
-            )
+        if status != "APPROVED":
+            raise HTTPException(status_code=401, detail="Account inactive")
+
+        if user_role not in {"The Chief", "The Keeper", "The Seeker"}:
+            raise HTTPException(status_code=401, detail="Invalid user role")
+
+        now = datetime.now(timezone.utc)
+        if user_role == "The Seeker":
+            if expires_at is None:
+                raise HTTPException(status_code=401, detail="Seeker access has no valid expiry")
+            expiry = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+            if expiry <= now:
+                raise HTTPException(status_code=401, detail="Temporary access expired")
+        elif expires_at is not None:
+            raise HTTPException(status_code=401, detail="Invalid permanent-role expiry state")
 
     finally:
         cur.close()
         conn.close()
 
-    # Make authenticated identity available to database/audit context.
     request.state.actor_name = user_name
     request.state.actor_role = user_role
 
     return {
-        "user_id": user_id,
+        "user_id": str(user_id),
         "name": user_name,
         "username": user_name,
         "email": user_email,
@@ -246,8 +245,7 @@ async def check_identity(
             )
 
         return {
-            "message": "Identity verified",
-            "name": user[0]
+            "message": "Identity verified"
         }
 
     finally:
@@ -269,11 +267,6 @@ async def refresh(
     validate_csrf(request)
     refresh_token = request.cookies.get(
         "refresh_token"
-    )
-
-    print(
-        "REFRESH COOKIE RECEIVED:",
-        bool(refresh_token)
     )
 
     if not refresh_token:
@@ -321,17 +314,45 @@ async def refresh(
               AND user_id = %s
               AND expires_at > NOW()
             """,
-            (
-                token_id,
-                str(user_id)
-            )
+            (token_id, str(user_id))
         )
-
         session_exists = cur.fetchone()
+
+        if session_exists:
+            cur.execute(
+                """
+                SELECT role, status, expires_at
+                FROM users
+                WHERE user_id = %s
+                """,
+                (str(user_id),)
+            )
+            identity = cur.fetchone()
+        else:
+            identity = None
 
     finally:
         cur.close()
         conn.close()
+
+    if session_exists:
+        if not identity:
+            raise HTTPException(status_code=401, detail="Account not found")
+
+        current_role, current_status, current_expires_at = identity
+        if current_status != "APPROVED":
+            raise HTTPException(status_code=401, detail="Account inactive")
+        if current_role not in {"The Chief", "The Keeper", "The Seeker"}:
+            raise HTTPException(status_code=401, detail="Invalid user role")
+
+        if current_role == "The Seeker":
+            if current_expires_at is None:
+                raise HTTPException(status_code=401, detail="Seeker access has no valid expiry")
+            expiry = current_expires_at if current_expires_at.tzinfo else current_expires_at.replace(tzinfo=timezone.utc)
+            if expiry <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=401, detail="Temporary access expired")
+        elif current_expires_at is not None:
+            raise HTTPException(status_code=401, detail="Invalid permanent-role expiry state")
 
     if not session_exists:
         # A missing database session can mean either an expired/revoked
@@ -372,7 +393,8 @@ async def refresh(
     # -------------------------
 
     result = rotate_refresh_token(
-        refresh_token
+        refresh_token,
+        current_role
     )
 
     # -------------------------
@@ -524,18 +546,11 @@ async def logout(
 def require_role(
     allowed_roles: list[str]
 ):
-    # Normalize roles: treat 'Sys_Arch' as 'The Chief'
     def role_checker(
         current_user: dict = Depends(get_current_user)
     ):
         user_role = current_user.get("role")
-
-        # Map Sys_Arch to The Chief
-        effective_role = (
-            "The Chief"
-            if user_role == "Sys_Arch"
-            else user_role
-        )
+        effective_role = user_role
 
         if effective_role not in allowed_roles:
             raise HTTPException(

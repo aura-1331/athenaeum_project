@@ -16,7 +16,7 @@ import secrets
 import string
 import json
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Depends, HTTPException, Request, Form, Response
 from slowapi import _rate_limit_exceeded_handler
@@ -99,17 +99,25 @@ app.add_exception_handler(
     _rate_limit_exceeded_handler
 )
 
+if ATHENAEUM_ENV == "production":
+    CORS_ORIGINS = [
+        "https://athenaeum-project.vercel.app",
+        "https://tauri.localhost",
+    ]
+else:
+    CORS_ORIGINS = [
+        "http://localhost:1420",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+        "https://athenaeum-project.vercel.app",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:1420",      # Tauri Dev
-        "http://tauri.localhost",     # Tauri Windows Production
-        "https://tauri.localhost",
-        "https://athenaeum-project.vercel.app"
-    ],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-CSRF-Token", "X-Change-Reason"],
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
@@ -137,8 +145,6 @@ class AccessRequestModel(BaseModel):
     organization: str
     purpose: str
     requested_role: str
-    temporary_access: bool = False
-    temporary_expiry: datetime | None = None
 
 class KeeperRecommendationModel(BaseModel):
     recommendation: str
@@ -160,7 +166,7 @@ def get_system_changelog():
         with open(CHANGELOG_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read changelog: {str(e)}")
+        raise HTTPException(status_code=500, detail="Unable to read changelog")
 
 
 # ----------------------------
@@ -199,6 +205,7 @@ async def chief_decide_request(
                    status
             FROM access_requests
             WHERE request_id=%s
+            FOR UPDATE
             """,
             (request_id,)
         )
@@ -212,6 +219,11 @@ async def chief_decide_request(
             )
 
         previous_status = request_data[5]
+
+        if req.decision == "APPROVE" and request_data[2] != "The Seeker":
+            raise HTTPException(status_code=400, detail="Only The Seeker may be approved through this request flow")
+
+        seeker_expiry = datetime.now(timezone.utc) + timedelta(hours=24)
 
         if previous_status in ["APPROVE", "REJECT"]:
             raise HTTPException(
@@ -277,7 +289,7 @@ async def chief_decide_request(
                     operator_id,
                     request_data[2],
                     hashed,
-                    request_data[4]
+                    seeker_expiry
                 )
             )
 
@@ -384,10 +396,20 @@ async def revoke_user(
         cur.execute(
             """
             UPDATE users
-            SET status='REVOKED'
+            SET status='REVOKED',
+                expires_at = CASE
+                    WHEN role = 'The Seeker' THEN NOW()
+                    ELSE expires_at
+                END
             WHERE user_id=%s
             RETURNING name, email, operator_id, role, status
             """,
+            (user_id,)
+        )
+
+        # Immediately invalidate any persistent refresh sessions for the revoked user.
+        cur.execute(
+            "DELETE FROM refresh_tokens WHERE user_id=%s",
             (user_id,)
         )
         revoked_user = cur.fetchone()
@@ -476,6 +498,7 @@ async def keeper_recommend_request(
             SELECT full_name, email, requested_role, status
             FROM access_requests
             WHERE request_id=%s
+            FOR UPDATE
             """,
             (request_id,)
         )
@@ -484,6 +507,12 @@ async def keeper_recommend_request(
             raise HTTPException(status_code=404, detail="Request not found.")
 
         previous_status = req_row[3]
+
+        if previous_status != "PENDING":
+            raise HTTPException(
+                status_code=409,
+                detail="This access request has already been reviewed."
+            )
 
         cur.execute(
             """
@@ -647,17 +676,9 @@ async def request_logger(request: Request, call_next):
 # Role Normalization & Helpers
 # ----------------------------
 def normalize_role(role: str) -> str:
-    role = role.lower().strip()
-
-    if role in ["the chief", "chief"]:
-        return "The Chief"
-    if role in ["the keeper", "keeper"]:
-        return "The Keeper"
-    if role in ["the seeker", "seeker"]:
-        return "The Seeker"
-    if role == "temporary seeker":
-        return "Temporary Seeker"
-
+    role = str(role or "").strip()
+    if role in {"The Chief", "The Keeper", "The Seeker"}:
+        return role
     return "INVALID"
 
 def generate_operator_id(role: str, cur=None) -> str:
@@ -666,8 +687,7 @@ def generate_operator_id(role: str, cur=None) -> str:
     role_codes = {
         "The Chief": "13F",
         "The Keeper": "27K",
-        "The Seeker": "41S",
-        "Temporary Seeker": "T9X"
+        "The Seeker": "41S"
     }
 
     role_code = role_codes.get(normalized_role, "UNK")
@@ -953,7 +973,7 @@ async def verify_login_2fa(
         cur.execute(
             """
             SELECT user_id, twofa_secret, twofa_enabled,
-                   role, name, operator_id, status
+                   role, name, operator_id, status, expires_at
             FROM users
             WHERE user_id=%s
             """,
@@ -967,6 +987,20 @@ async def verify_login_2fa(
                 status_code=403,
                 detail="Account is disabled or 2FA is misconfigured."
             )
+
+        canonical_role = normalize_role(user[3])
+        if canonical_role == "INVALID":
+            raise HTTPException(status_code=403, detail="Invalid user role")
+
+        expiry = user[7]
+        if canonical_role == "The Seeker":
+            if expiry is None:
+                raise HTTPException(status_code=403, detail="Temporary access expiry missing")
+            expiry = expiry if expiry.tzinfo else expiry.replace(tzinfo=timezone.utc)
+            if expiry <= datetime.now(timezone.utc):
+                raise HTTPException(status_code=403, detail="Temporary access expired")
+        elif expiry is not None:
+            raise HTTPException(status_code=403, detail="Invalid permanent-role expiry state")
 
         totp = pyotp.TOTP(user[1])
 
@@ -1127,10 +1161,10 @@ async def verify_login_2fa(
 # PUBLIC ACCESS REQUEST
 # -------------------------------
 @app.post("/request-access")
+@limiter.limit("3/hour")
 async def request_access(request: Request, req: AccessRequestModel):
     allowed_roles = [
-        "The Seeker",
-        "Temporary Seeker"
+        "The Seeker"
     ]
 
     if req.requested_role not in allowed_roles:
@@ -1181,8 +1215,8 @@ async def request_access(request: Request, req: AccessRequestModel):
                 req.organization,
                 req.purpose,
                 req.requested_role,
-                req.temporary_access,
-                req.temporary_expiry
+                True,
+                None
             )
         )
 
@@ -1205,7 +1239,8 @@ async def request_access(request: Request, req: AccessRequestModel):
                 "organization": req.organization,
                 "purpose": req.purpose,
                 "requested_role": req.requested_role,
-                "temporary_access": req.temporary_access
+                "temporary_access": True,
+                "temporary_expiry_hours": 24
             },
             conn=conn
         )
@@ -1243,14 +1278,10 @@ async def admin_create_user(
     allowed_roles = [
         "The Chief",
         "The Keeper",
-        "The Seeker",
-        "Temporary Seeker"
+        "The Seeker"
     ]
 
     normalized_input_role = normalize_role(role)
-
-    if role == "Temporary Seeker":
-        normalized_input_role = "Temporary Seeker"
 
     if normalized_input_role not in allowed_roles:
         raise HTTPException(
@@ -1260,7 +1291,7 @@ async def admin_create_user(
 
     role = normalized_input_role
 
-    if admin_role in ["The Seeker", "Temporary Seeker"]:
+    if admin_role == "The Seeker":
         raise HTTPException(
             status_code=403,
             detail="Access Denied"
@@ -1285,6 +1316,19 @@ async def admin_create_user(
     cur = conn.cursor()
 
     try:
+        cur.execute(
+            """
+            SELECT user_id
+            FROM users
+            WHERE LOWER(email) = LOWER(%s)
+              AND status IN ('APPROVED', 'PENDING')
+            LIMIT 1
+            """,
+            (email,)
+        )
+        if cur.fetchone():
+            raise HTTPException(status_code=409, detail="An active account already exists for this email address.")
+
         cur.execute(
             """
             SELECT identity_id
@@ -1361,7 +1405,8 @@ async def admin_create_user(
                 role,
                 status,
                 hashed_password,
-                identity_id
+                identity_id,
+                expires_at
             )
             VALUES (
                 %s,
@@ -1369,6 +1414,7 @@ async def admin_create_user(
                 %s,
                 %s,
                 'APPROVED',
+                %s,
                 %s,
                 %s
             )
@@ -1379,7 +1425,8 @@ async def admin_create_user(
                 operator_id,
                 role,
                 hashed,
-                identity_id
+                identity_id,
+                datetime.now(timezone.utc) + timedelta(hours=24) if role == "The Seeker" else None
             )
         )
 
@@ -1780,7 +1827,7 @@ app.include_router(circulation.router, dependencies=[Depends(get_current_user)])
 app.include_router(dashboard.router, dependencies=[Depends(get_current_user)])
 app.include_router(profile.router, dependencies=[Depends(get_current_user)])
 app.include_router(operations.router, dependencies=[Depends(get_current_user)])
-app.include_router(status_audit.router, dependencies=[Depends(get_current_user)])
+app.include_router(status_audit.router)
 app.include_router(admin_config.router, dependencies=[Depends(get_current_user)])
 app.include_router(incidents.router, dependencies=[Depends(get_current_user)])
 app.include_router(locations.router, dependencies=[Depends(get_current_user)])

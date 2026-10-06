@@ -259,8 +259,9 @@ def log_audit_activity(
                 resolved_endpoint = request.url.path
             if not resolved_method and getattr(request, "method", None):
                 resolved_method = request.method
-            if not resolved_machine and getattr(request, "headers", None):
-                resolved_machine = request.headers.get("X-Machine-Name")
+            # Client-supplied machine/device headers are not trusted audit identity.
+            if not resolved_machine:
+                resolved_machine = "SERVER-RECORDED-CLIENT"
 
         if not resolved_ip:
             resolved_ip = "127.0.0.1"

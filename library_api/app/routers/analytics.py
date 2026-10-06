@@ -26,7 +26,7 @@ def status_transition_counts(request: Request, current_user: dict = Depends(get_
         return [{"old_status": r[0], "new_status": r[1], "count": r[2]} for r in rows]
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         if cursor: cursor.close()
         if conn: conn.close()

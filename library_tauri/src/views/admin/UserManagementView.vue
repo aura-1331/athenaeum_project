@@ -294,20 +294,19 @@ const canProvision = computed(() => isChief.value || isKeeper.value)
 
 const availableRoles = computed(() => {
   if (isChief.value) {
-    return ['The Keeper', 'The Seeker', 'Temporary Seeker']
+    return ['The Keeper', 'The Seeker']
   }
   if (isKeeper.value) {
-    return ['The Seeker', 'Temporary Seeker']
+    return ['The Seeker']
   }
   return []
 })
 
 function roleBadgeClass(role) {
-  if (!role) return ''
-  if (role.includes('Chief')) return 'badge-chief'
-  if (role.includes('Keeper')) return 'badge-keeper'
-  if (role.includes('Temporary')) return 'badge-temp'
-  return 'badge-seeker'
+  if (role === 'The Chief') return 'badge-chief'
+  if (role === 'The Keeper') return 'badge-keeper'
+  if (role === 'The Seeker') return 'badge-seeker'
+  return ''
 }
 
 function generateSecurePassphrase() {
@@ -585,7 +584,6 @@ onMounted(() => {
 .badge-chief { background: rgba(212, 175, 55, 0.15); color: #d4af37; border: 1px solid #d4af37; }
 .badge-keeper { background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid #3b82f6; }
 .badge-seeker { background: rgba(107, 114, 128, 0.2); color: #9ca3af; border: 1px solid #4b5563; }
-.badge-temp { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid #f59e0b; }
 
 .status-indicator {
   font-size: 10px;

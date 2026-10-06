@@ -144,12 +144,12 @@ def get_next_numbers(request: Request, language: str, category: Optional[str] = 
         clean_lang = language.strip()
         
         cur.execute("""
-            SELECT COUNT(*) + 1 
-            FROM public.items i
-            JOIN public.works w ON i.work_id = w.work_id
-            WHERE w.language = %s
-        """, (clean_lang,))
-        next_accession_count = cur.fetchone()[0]
+            SELECT COALESCE(last_number, 0) + 1
+            FROM public.language_registry
+            WHERE TRIM(prefix) = %s
+        """, (lang_prefix,))
+        row = cur.fetchone()
+        next_accession_count = row[0] if row else 1
         allocated_accession = f"{lang_prefix}-{next_accession_count}"
 
         allocated_call = None
@@ -296,6 +296,57 @@ def search_publishers(request: Request, q: str, current_user: dict = Depends(get
         cur.close()
         conn.close()
 
+# ---------------------------------------------------------------------------
+# Docket history helpers (read from the hash-chained audit ledger)
+# ---------------------------------------------------------------------------
+def _audit_norm(value) -> str:
+    """Normalises a field value so None, '' and surrounding spaces compare equal."""
+    return "" if value is None else str(value).strip()
+
+
+def _history_event(row: dict) -> Optional[dict]:
+    """Turns one audit_activities row into a docket timeline event, or None to skip it."""
+    import json
+
+    diff = row.get("diff_payload") or {}
+    if isinstance(diff, str):
+        try:
+            diff = json.loads(diff)
+        except ValueError:
+            diff = {}
+
+    action = row.get("action_type")
+
+    if action in ("ACCESSION_WORK", "ACCESSION_ITEM"):
+        kind = "SUBMITTED"
+    elif action == "CURATOR_DECISION":
+        kind = "APPROVED" if str(diff.get("decision")).upper() == "APPROVED" else "REJECTED"
+    elif action == "ITEM_APPROVE":
+        kind = "APPROVED"
+    elif action == "ITEM_REJECT":
+        kind = "REJECTED"
+    elif action in ("WORK_RESUBMIT", "ITEM_RESUBMIT"):
+        kind = "RESUBMITTED"
+    elif action == "REVIEW_NOTE":
+        kind = "NOTE"
+    else:
+        return None
+
+    at = row.get("timestamp")
+
+    return {
+        "id": row.get("id"),
+        "type": kind,
+        "at": at.isoformat() if at else None,
+        "actor": row.get("username"),
+        "actor_role": row.get("role"),
+        "reason": None if kind == "SUBMITTED" else row.get("justification"),
+        "changes": diff.get("changes"),
+        "flagged_fields": diff.get("flagged_fields"),
+        "correction_note": diff.get("correction_note"),
+        "note_kind": diff.get("kind") if kind == "NOTE" else None,
+    }
+
 # --- 1. ACCESSION WORK ---
 @router.post("/create-work", dependencies=[Depends(require_role(["The Chief", "The Keeper"]))])
 @audit_action(
@@ -331,12 +382,20 @@ def create_work(
         clean_lang = payload.language.strip()
         
         cur.execute("""
-            SELECT COUNT(*) + 1 
-            FROM public.items i
-            JOIN public.works w ON i.work_id = w.work_id
-            WHERE w.language = %s
-        """, (clean_lang,))
-        next_accession_count = cur.fetchone()[0]
+            UPDATE public.language_registry
+            SET last_number = last_number + 1
+            WHERE TRIM(prefix) = %s
+            RETURNING last_number;
+        """, (lang_prefix,))
+        row = cur.fetchone()
+        if not row:
+            cur.execute("""
+                INSERT INTO public.language_registry (language, prefix, last_number)
+                VALUES (%s, %s, 1)
+                RETURNING last_number;
+            """, (clean_lang, lang_prefix))
+            row = cur.fetchone()
+        next_accession_count = row[0]
         final_accession_no = f"{lang_prefix}-{next_accession_count}"
 
         final_call_no = payload.call_no
@@ -381,10 +440,10 @@ def create_work(
                 payload.notes or None, 
                 payload.translation_compilation or None, 
                 safe_year, 
-                payload.isbn or None,
-                final_call_no,
-                "APPROVED" if real_role.strip().lower() == "the chief" else "PENDING",
-                token_user_id,
+                payload.isbn or None, 
+                final_call_no, 
+                "APPROVED" if real_role.strip().lower() == "the chief" else "PENDING", 
+                token_user_id, 
                 x_change_reason
             )
         )
@@ -439,7 +498,6 @@ def create_work(
         )
         created_serial_no = cur.fetchone()[0]
 
-
         audit_ok = log_audit_activity(
             request=request,
             user_id=str(token_user_id),
@@ -493,8 +551,6 @@ def create_work(
 
 
 # --- AUTHORIZED WORK LOOKUP FOR ITEM ACCESSION ---
-# IMPORTANT: this must appear before /{serial_no}, otherwise FastAPI
-# interprets /work/59 as the numeric serial_no route.
 @router.get("/work/{work_id}")
 def get_work_for_item_accession(
     request: Request, work_id: int,
@@ -559,7 +615,6 @@ async def create_item(
                 detail="Work ID and Language Profile are required."
             )
 
-        # Create-item works with the numeric Work ID stored by the catalogue.
         try:
             work_id_int = int(str(work_id).strip())
         except (TypeError, ValueError):
@@ -580,7 +635,6 @@ async def create_item(
 
         existing_work_id, title, language, category, call_no, work_status = work
 
-        # A new copy may only be added to an already accepted Work.
         if str(work_status).upper() != "APPROVED":
             raise HTTPException(
                 status_code=409,
@@ -594,13 +648,22 @@ async def create_item(
         serial_no = cur.fetchone()[0]
 
         lang_prefix = get_language_prefix(language)
+        
         cur.execute("""
-            SELECT COUNT(*) + 1
-            FROM public.items i
-            JOIN public.works w ON i.work_id = w.work_id
-            WHERE w.language = %s
-        """, (language.strip(),))
-        accession_count = cur.fetchone()[0]
+            UPDATE public.language_registry
+            SET last_number = last_number + 1
+            WHERE TRIM(prefix) = %s
+            RETURNING last_number;
+        """, (lang_prefix,))
+        row = cur.fetchone()
+        if not row:
+            cur.execute("""
+                INSERT INTO public.language_registry (language, prefix, last_number)
+                VALUES (%s, %s, 1)
+                RETURNING last_number;
+            """, (language.strip(), lang_prefix))
+            row = cur.fetchone()
+        accession_count = row[0]
         accession_no = f"{lang_prefix}-{accession_count}"
 
         item_status = (
@@ -631,7 +694,6 @@ async def create_item(
         ))
 
         created_serial_no = cur.fetchone()[0]
-
 
         audit_ok = log_audit_activity(
             request=request,
@@ -775,10 +837,15 @@ async def resubmit_work(
         token_user_id = int(current_user.get("user_id"))
 
         cur.execute("""
-            SELECT w.title, w.proposed_by, w.status
+            SELECT
+                w.title, w.author, w.category, w.language, w.publisher,
+                w.year, w.isbn, w.ddc, w.call_no,
+                w.translation_compilation, w.genre, w.original_language,
+                w.notes, w.proposal_reason, w.proposed_by, w.status
             FROM public.works w
             WHERE w.work_id = %s
               AND w.proposed_by = %s
+            FOR UPDATE
         """, (work_id, token_user_id))
 
         work = cur.fetchone()
@@ -795,6 +862,12 @@ async def resubmit_work(
                 detail="Only a rejected Work can be corrected and resubmitted."
             )
 
+        if _open_correction(cur, "WORK", work_id):
+            raise HTTPException(
+                status_code=409,
+                detail="This work has fields marked for correction. Use the correction form to resubmit."
+            )
+
         title = str(payload.get("title") or "").strip()
         language = str(payload.get("language") or "").strip()
 
@@ -803,6 +876,31 @@ async def resubmit_work(
                 status_code=400,
                 detail="Title and language are required."
             )
+
+        new_values = {
+            "title": title,
+            "author": payload.get("author"),
+            "category": payload.get("category"),
+            "language": language,
+            "publisher": payload.get("publisher"),
+            "year": payload.get("year"),
+            "isbn": payload.get("isbn"),
+            "ddc": payload.get("ddc"),
+            "call_no": payload.get("call_no"),
+            "translation_compilation": payload.get("translation_compilation"),
+            "genre": payload.get("genre"),
+            "original_language": payload.get("original_language"),
+            "notes": payload.get("notes"),
+            "proposal_reason": (
+                str(payload.get("proposal_reason") or "").strip()
+                or work.get("proposal_reason")
+            ),
+        }
+        field_changes = {
+            field: {"from": work.get(field), "to": new_value}
+            for field, new_value in new_values.items()
+            if _audit_norm(work.get(field)) != _audit_norm(new_value)
+        }
 
         cur.execute("""
             UPDATE public.works
@@ -869,7 +967,6 @@ async def resubmit_work(
             WHERE work_id = %s
         """, (token_user_id, work_id))
 
-
         audit_ok = log_audit_activity(
             request=request,
             user_id=str(token_user_id),
@@ -897,7 +994,8 @@ async def resubmit_work(
             diff_payload={
                 "work_id": work_id,
                 "title": updated["title"],
-                "status": "PENDING"
+                "status": "PENDING",
+                "changes": field_changes
             },
             extra_metadata={"resubmission": True},
             conn=conn
@@ -934,8 +1032,244 @@ async def resubmit_work(
     finally:
         cur.close()
         conn.close()
+
+# --- KEEPER: CORRECT AND RESUBMIT REJECTED ITEM ---
+@router.post(
+    "/resubmit-item/{serial_no}",
+    tags=["Keeper Operations"],
+    dependencies=[Depends(require_role(["The Keeper"]))]
+)
+async def resubmit_item(
+    serial_no: int,
+    payload: dict,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        token_user_id = int(current_user.get("user_id"))
+
+        cur.execute("""
+            SELECT
+                i.serial_no,
+                i.accession_no,
+                i.work_id,
+                i.call_no,
+                i.language_id,
+                i.availability_status,
+                i.is_deleted,
+                i.proposed_by,
+                w.title,
+                w.status AS work_status
+            FROM public.items i
+            INNER JOIN public.works w
+                ON w.work_id = i.work_id
+            WHERE i.serial_no = %s
+              AND i.proposed_by = %s
+        """, (serial_no, token_user_id))
+
+        item = cur.fetchone()
+
+        if not item:
+            raise HTTPException(
+                status_code=404,
+                detail="Rejected Item not found."
+            )
+
+        if str(item["availability_status"]).upper() != "REJECTED":
+            raise HTTPException(
+                status_code=409,
+                detail="Only a rejected Item can be corrected and resubmitted."
+            )
+
+        if str(item["work_status"]).upper() != "APPROVED":
+            raise HTTPException(
+                status_code=409,
+                detail="The parent Work is not approved and this Item cannot be resubmitted."
+            )
+
+        if _open_correction(cur, "ITEM", serial_no):
+            raise HTTPException(
+                status_code=409,
+                detail="This item has fields marked for correction. Use the correction form to resubmit."
+            )
+
+        cur.execute("""
+            UPDATE public.items
+            SET
+                availability_status = 'PENDING',
+                is_deleted = FALSE,
+                deletion_reason = NULL
+            WHERE serial_no = %s
+              AND proposed_by = %s
+              AND availability_status = 'REJECTED'
+              AND is_deleted = TRUE
+            RETURNING
+                serial_no,
+                accession_no,
+                work_id,
+                availability_status
+        """, (serial_no, token_user_id))
+
+        updated = cur.fetchone()
+
+        if not updated:
+            raise HTTPException(
+                status_code=409,
+                detail="The rejected Item changed before it could be resubmitted."
+            )
+
+        audit_ok = log_audit_activity(
+            request=request,
+            user_id=str(token_user_id),
+            username=str(
+                current_user.get("username")
+                or current_user.get("name")
+                or "Archive Operator"
+            ),
+            role=str(current_user.get("role") or "The Keeper"),
+            designation=str(
+                current_user.get("designation")
+                or current_user.get("role")
+                or "The Keeper"
+            ),
+            category="ARCHIVAL_GOVERNANCE",
+            action_type="ITEM_RESUBMIT",
+            target_entity="ITEM",
+            target_id=str(serial_no),
+            endpoint=request.url.path,
+            http_method="POST",
+            justification=str(
+                payload.get("reason")
+                or "Corrected rejected Item"
+            ),
+            diff_payload={
+                "serial_no": serial_no,
+                "accession_no": updated["accession_no"],
+                "work_id": updated["work_id"],
+                "status": "PENDING"
+            },
+            extra_metadata={
+                "resubmission": True
+            },
+            conn=conn
+        )
+
+        if not audit_ok:
+            raise RuntimeError(
+                "Audit record could not be written; operation rolled back"
+            )
+
+        conn.commit()
+
+        return {
+            "message": f"Item #{serial_no} resubmitted for verification.",
+            "serial_no": serial_no,
+            "status": "PENDING"
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+
+    except Exception as e:
+        conn.rollback()
+        print(f"Item resubmission failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to resubmit the rejected Item."
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+# --- DOCKET: MATTER HISTORY (from the audit ledger) ---
+@router.get(
+    "/history/{entity}/{entity_id}",
+    tags=["Docket"],
+    dependencies=[Depends(require_role(["The Chief", "The Keeper"]))]
+)
+def get_matter_history(
+    entity: str,
+    entity_id: int,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    entity_key = entity.strip().upper()
+    if entity_key not in ("WORK", "ITEM"):
+        raise HTTPException(
+            status_code=400,
+            detail="Entity must be 'work' or 'item'."
+        )
+
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        is_chief = str(current_user.get("role") or "").strip().lower() == "the chief"
+
+        if not is_chief:
+            user_id = int(current_user.get("user_id"))
+
+            if entity_key == "WORK":
+                cur.execute("""
+                    SELECT 1 FROM public.works
+                    WHERE work_id = %s AND proposed_by = %s
+                """, (entity_id, user_id))
+            else:
+                cur.execute("""
+                    SELECT 1
+                    FROM public.items i
+                    INNER JOIN public.works w ON w.work_id = i.work_id
+                    WHERE i.serial_no = %s
+                      AND (i.proposed_by = %s OR w.proposed_by = %s)
+                """, (entity_id, user_id, user_id))
+
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="Matter not found.")
+
+        cur.execute("""
+            SELECT id, "timestamp", username, role,
+                   action_type, justification, diff_payload
+            FROM audit_activities
+            WHERE target_entity = %s
+              AND target_id = %s
+              AND diff_payload IS NOT NULL
+              AND action_type IN (
+                  'ACCESSION_WORK', 'ACCESSION_ITEM', 'CURATOR_DECISION',
+                  'ITEM_APPROVE', 'ITEM_REJECT',
+                  'WORK_RESUBMIT', 'ITEM_RESUBMIT',
+                  'REVIEW_NOTE'
+              )
+            ORDER BY sequence_id ASC
+        """, (entity_key, str(entity_id)))
+
+        events = [
+            event
+            for event in (_history_event(row) for row in cur.fetchall())
+            if event
+        ]
+        return events
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        print(f"Matter history lookup failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to load the history."
+        )
+
+    finally:
+        cur.close()
+        conn.close()
+
+
 # --- CHIEF WORK APPROVAL QUEUE ---
-# IMPORTANT: this must appear before /{serial_no}.
 @router.get(
     "/pending-works",
     tags=["Admin Operations"],
@@ -964,6 +1298,13 @@ def list_pending_works(request: Request, current_user: dict = Depends(get_curren
                 w.proposed_by,
                 w.proposal_reason,
                 w.created_at,
+                COALESCE(
+                    (SELECT MAX(a."timestamp") FROM audit_activities a
+                      WHERE a.target_entity = 'WORK'
+                        AND a.target_id = w.work_id::text
+                        AND a.action_type IN ('ACCESSION_WORK', 'WORK_RESUBMIT')),
+                    w.created_at
+                ) AS waiting_since,
                 u.name AS proposer_name
             FROM public.works w
             LEFT JOIN public.users u
@@ -1002,6 +1343,13 @@ def list_pending_items(request: Request, current_user: dict = Depends(get_curren
                 i.language_id,
                 i.availability_status,
                 i.created_at,
+                COALESCE(
+                    (SELECT MAX(a."timestamp") FROM audit_activities a
+                      WHERE a.target_entity = 'ITEM'
+                        AND a.target_id = i.serial_no::text
+                        AND a.action_type IN ('ACCESSION_ITEM', 'ITEM_RESUBMIT')),
+                    i.created_at
+                ) AS waiting_since,
                 w.title,
                 w.author,
                 w.language,
@@ -1027,7 +1375,6 @@ def list_pending_items(request: Request, current_user: dict = Depends(get_curren
 
 
 # --- CHIEF ITEM APPROVAL OPERATIONS ---
-# IMPORTANT: this must appear before /{serial_no}.
 @router.post(
     "/approve-item/{serial_no}",
     tags=["Admin Operations"],
@@ -1061,15 +1408,15 @@ async def approve_item(
             """, (serial_no,))
         else:
             cur.execute("""
-        UPDATE public.items
-        SET availability_status = 'REJECTED',
-        is_deleted = TRUE,
-        deletion_reason = %s
-        WHERE serial_no = %s
-          AND availability_status = 'PENDING'
-          AND is_deleted = FALSE
-        RETURNING serial_no, accession_no, work_id
-    """, (reason, serial_no))
+                UPDATE public.items
+                SET availability_status = 'REJECTED',
+                is_deleted = TRUE,
+                deletion_reason = %s
+                WHERE serial_no = %s
+                  AND availability_status = 'PENDING'
+                  AND is_deleted = FALSE
+                RETURNING serial_no, accession_no, work_id
+            """, (reason, serial_no))
 
         row = cur.fetchone()
         if not row:
@@ -1078,7 +1425,6 @@ async def approve_item(
                 detail="Pending Item not found."
             )
 
-        # Notify the Keeper who originally proposed the Work/Item.
         notification_message = (
             f"PROPOSAL APPROVED: Item #{serial_no} has been approved by "
             f"The Chief and is now live in the Library Catalogue."
@@ -1274,7 +1620,7 @@ def get_catalogue(
         return {
             "data": items, 
             "total": total_records, 
-            "page": page,
+            "page": page, 
             "limit": limit
         }
     except Exception as e:
@@ -1301,21 +1647,15 @@ async def update_ledger_record(
     x_device_id: Optional[str] = Header(default="Desktop Browser Workstation"),
     x_ip_address: Optional[str] = Header(default="127.0.0.1")
 ):    
-    lookup_conn = get_connection(request=request)
-    lookup_cur = lookup_conn.cursor()
-    try:
-        token_user_id = int(current_user.get("user_id"))
-        lookup_cur.execute("SELECT name FROM public.users WHERE user_id = %s", (token_user_id,))
-        user_row = lookup_cur.fetchone()
-        real_name = user_row[0] if user_row else (current_user.get("username") or "Archive Operator")
-        real_role = current_user.get("role") or "The Chief"
-    finally:
-        lookup_cur.close()
-        lookup_conn.close()
-
-    conn = get_connection(username=real_name, role=real_role)
+    conn = get_connection(request=request)
     cur = conn.cursor()
     try:
+        token_user_id = int(current_user.get("user_id"))
+        cur.execute("SELECT name FROM public.users WHERE user_id = %s", (token_user_id,))
+        user_row = cur.fetchone()
+        real_name = user_row[0] if user_row else (current_user.get("username") or "Archive Operator")
+        real_role = current_user.get("role") or "The Chief"
+
         cur.execute("SET LOCAL request.jwt.claim.username = %s;", (real_name,))
         cur.execute("SET LOCAL request.jwt.claim.role = %s;", (real_role,))
         cur.execute("SET LOCAL request.jwt.claim.user_id = %s;", (str(token_user_id),))
@@ -1325,11 +1665,10 @@ async def update_ledger_record(
 
         cur.execute("""
             UPDATE public.items SET 
-                shelf = COALESCE(NULLIF(%s, ''), shelf),
-                notes = %s,
-                language_id = COALESCE(NULLIF(%s, ''), language_id)
-            WHERE serial_no = %s RETURNING work_id
-        """, (payload.get('shelf'), payload.get('notes'), payload.get('language'), serial_no))
+                shelf = NULLIF(BTRIM(%s), '')
+            WHERE serial_no = %s 
+            RETURNING work_id
+        """, (payload.get('shelf'), serial_no))
         
         res = cur.fetchone()
         if not res:
@@ -1364,20 +1703,29 @@ async def update_ledger_record(
             next_call_count = cur.fetchone()[0]
             final_call_no = f"{lang_initial}-{cat_code}-{next_call_count}.0"
 
+        raw_year = payload.get('year')
+        safe_year = None
+        if raw_year is not None and str(raw_year).strip() != "":
+            try:
+                safe_year = int(str(raw_year).strip())
+            except ValueError:
+                safe_year = None
+
         cur.execute("""
             UPDATE public.works SET 
-                title = COALESCE(NULLIF(%s, ''), title),
-                author = COALESCE(NULLIF(%s, ''), author),
-                publisher = COALESCE(NULLIF(%s, ''), publisher),
-                isbn = COALESCE(NULLIF(%s, ''), isbn),
-                ddc = COALESCE(NULLIF(%s, ''), ddc),
-                year = COALESCE(NULLIF(%s, 0)::text::integer, year),
-                category = NULLIF(%s, ''),
-                genre = %s,
-                original_language = COALESCE(NULLIF(%s, ''), original_language),
-                translation_compilation = %s,
-                notes = %s,
-                call_no = COALESCE(NULLIF(%s, ''), call_no)
+                title = COALESCE(NULLIF(BTRIM(%s), ''), title),
+                author = COALESCE(NULLIF(BTRIM(%s), ''), 'Unknown'),
+                publisher = NULLIF(BTRIM(%s), ''),
+                isbn = NULLIF(BTRIM(%s), ''),
+                ddc = NULLIF(BTRIM(%s), ''),
+                year = %s,
+                category = NULLIF(BTRIM(%s), ''),
+                genre = NULLIF(BTRIM(%s), ''),
+                language = COALESCE(NULLIF(BTRIM(%s), ''), language),
+                original_language = NULLIF(BTRIM(%s), ''),
+                translation_compilation = NULLIF(BTRIM(%s), ''),
+                notes = NULLIF(BTRIM(%s), ''),
+                call_no = COALESCE(NULLIF(BTRIM(%s), ''), call_no)
             WHERE work_id = %s
         """, (
             payload.get('title'),
@@ -1385,9 +1733,10 @@ async def update_ledger_record(
             payload.get('publisher'),
             payload.get('isbn'),
             payload.get('ddc'),
-            payload.get('year'),
+            safe_year,
             new_cat,
-            payload.get('genre') if (payload.get('genre') and payload.get('genre').strip() != "") else None,
+            payload.get('genre'),
+            payload.get('language'),
             payload.get('original_language'),
             payload.get('translation_compilation'),
             payload.get('notes'),
@@ -1397,7 +1746,6 @@ async def update_ledger_record(
 
         if final_call_no:
             cur.execute("UPDATE public.items SET call_no = %s WHERE work_id = %s", (final_call_no, work_id))
-
 
         audit_ok = log_audit_activity(
             request=request,
@@ -1427,15 +1775,13 @@ async def update_ledger_record(
         )
 
         if not audit_ok:
-            raise RuntimeError(
-                "Audit record could not be written; operation rolled back"
-            )
+            raise RuntimeError("Audit record could not be written; operation rolled back")
         
         conn.commit()
-
         return {"status": "success", "call_no": final_call_no}
     except Exception as e:
-        if conn: conn.rollback()
+        if conn:
+            conn.rollback()
         print(f"❌ Database Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -1496,7 +1842,7 @@ async def approve_work(
                 SET is_deleted = TRUE
                 WHERE work_id = %s
             """, (work_id,))
-        # Notify the Keeper who originally proposed the Work.
+
         notification_message = (
             f"PROPOSAL APPROVED: Your proposal '{work_title}' has been "
             f"approved by The Chief and is now live in the Library Catalogue."
@@ -1647,6 +1993,1075 @@ def check_duplicate(request: Request, payload: DuplicateCheckRequest, current_us
     except Exception as e:
         print(f"❌ Duplicate check failure: {e}")
         raise HTTPException(status_code=500, detail="Duplicate verification failed")
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ===========================================================================
+# REVIEW & CORRECTION WORKFLOW (Items)
+# ===========================================================================
+ITEM_CORRECTABLE_FIELDS = ("work_id", "language_id")
+MAX_NOTE_LENGTH = 2000
+
+class ItemCorrectionRequest(BaseModel):
+    fields: List[str]
+    reason: str
+    correction_note: Optional[str] = None
+
+class ReviewNoteCreate(BaseModel):
+    body: str
+
+class ItemCorrectionSubmit(BaseModel):
+    changes: dict = {}
+    note: Optional[str] = None
+
+def _actor_info(current_user: dict) -> dict:
+    role = str(current_user.get("role") or "").strip()
+    return {
+        "user_id": int(current_user.get("user_id")),
+        "name": str(
+            current_user.get("username")
+            or current_user.get("name")
+            or "Archive Operator"
+        ),
+        "role": role,
+        "is_chief": role.lower() == "the chief",
+    }
+
+def _clean_note(text, label: str = "Note", required: bool = False) -> str:
+    value = str(text or "").strip()
+    if required and not value:
+        raise HTTPException(status_code=400, detail=f"{label} is required.")
+    if len(value) > MAX_NOTE_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{label} is too long (maximum {MAX_NOTE_LENGTH} characters)."
+        )
+    return value
+
+def _write_audit(
+    request: Request,
+    current_user: dict,
+    conn,
+    action_type: str,
+    target_id,
+    justification: str,
+    diff: dict,
+    extra: Optional[dict] = None,
+    http_method: str = "POST",
+    target_entity: str = "ITEM",
+):
+    ok = log_audit_activity(
+        request=request,
+        user_id=str(current_user.get("user_id", "UNKNOWN")),
+        username=str(
+            current_user.get("username")
+            or current_user.get("name")
+            or "Archive Operator"
+        ),
+        role=str(current_user.get("role") or "UNKNOWN"),
+        designation=str(
+            current_user.get("designation")
+            or current_user.get("role")
+            or "UNKNOWN"
+        ),
+        category="ARCHIVAL_GOVERNANCE",
+        action_type=action_type,
+        target_entity=target_entity,
+        target_id=str(target_id),
+        endpoint=request.url.path,
+        http_method=http_method,
+        justification=justification or "No reason given",
+        diff_payload=diff,
+        extra_metadata=extra or {},
+        conn=conn
+    )
+    if not ok:
+        raise RuntimeError(
+            "Audit record could not be written; operation rolled back"
+        )
+
+def _log_refusal(
+    request: Request,
+    current_user: dict,
+    action_type: str,
+    target_id,
+    detail: str,
+    attempted: dict,
+    entity: str = "ITEM",
+):
+    conn = None
+    try:
+        conn = get_connection(request=request)
+        _write_audit(
+            request, current_user, conn,
+            action_type=action_type,
+            target_id=target_id,
+            justification=detail,
+            diff={
+                ("work_id" if entity == "WORK" else "serial_no"): target_id,
+                "refused": True,
+                "attempted": attempted,
+            },
+            extra={"refused": True},
+            target_entity=entity,
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Refusal could not be audited: {e}")
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+def _load_item_for_review(cur, serial_no: int, actor: dict) -> dict:
+    cur.execute("""
+        SELECT
+            i.serial_no, i.accession_no, i.work_id, i.call_no, i.language_id,
+            i.availability_status, i.is_deleted, i.deletion_reason,
+            i.proposed_by, i.created_at,
+            w.title, w.author, w.language, w.category,
+            w.status AS work_status,
+            u.name AS proposer_name
+        FROM public.items i
+        INNER JOIN public.works w ON w.work_id = i.work_id
+        LEFT JOIN public.users u ON u.user_id = i.proposed_by
+        WHERE i.serial_no = %s
+    """, (serial_no,))
+    item = cur.fetchone()
+
+    if not item or (
+        not actor["is_chief"] and item["proposed_by"] != actor["user_id"]
+    ):
+        raise HTTPException(status_code=404, detail="Item not found.")
+    return item
+
+def _open_correction(cur, entity: str, entity_id: int):
+    cur.execute("""
+        SELECT request_id, field_names, requested_by, requested_by_name,
+               requested_at, status
+        FROM public.correction_requests
+        WHERE entity = %s AND entity_id = %s AND status = 'OPEN'
+        LIMIT 1
+    """, (entity, entity_id))
+    return cur.fetchone()
+
+def _notes_for(cur, entity: str, entity_id: int) -> list:
+    cur.execute("""
+        SELECT note_id, request_id, kind, author_name, author_role,
+               body, created_at
+        FROM public.review_notes
+        WHERE entity = %s AND entity_id = %s
+        ORDER BY note_id ASC
+    """, (entity, entity_id))
+    return [dict(row) for row in cur.fetchall()]
+
+def _item_editable_fields(actor: dict, status_value: str, correction) -> list:
+    if actor["is_chief"] or status_value != "REJECTED":
+        return []
+    if correction:
+        return [
+            f for f in correction["field_names"] if f in ITEM_CORRECTABLE_FIELDS
+        ]
+    return list(ITEM_CORRECTABLE_FIELDS)
+
+# --- REVIEW FORM DATA (Chief + owning Keeper) ---
+@router.get(
+    "/review/item/{serial_no}",
+    tags=["Docket"],
+    dependencies=[Depends(require_role(["The Chief", "The Keeper"]))]
+)
+def get_item_review(
+    serial_no: int,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        actor = _actor_info(current_user)
+        item = _load_item_for_review(cur, serial_no, actor)
+        correction = _open_correction(cur, "ITEM", serial_no)
+        notes = _notes_for(cur, "ITEM", serial_no)
+        status_value = str(item["availability_status"]).upper()
+
+        _write_audit(
+            request, current_user, conn,
+            action_type="ITEM_REVIEW_VIEWED",
+            target_id=serial_no,
+            justification="Opened the item review form",
+            diff={"serial_no": serial_no, "status": status_value},
+            http_method="GET",
+        )
+        conn.commit()
+
+        return {
+            "serial_no": item["serial_no"],
+            "accession_no": item["accession_no"],
+            "work_id": item["work_id"],
+            "call_no": item["call_no"],
+            "language_id": item["language_id"],
+            "status": status_value,
+            "rejection_reason": item["deletion_reason"],
+            "proposed_by": item["proposed_by"],
+            "proposer_name": item["proposer_name"],
+            "created_at": item["created_at"],
+            "work": {
+                "title": item["title"],
+                "author": item["author"],
+                "language": item["language"],
+                "category": item["category"],
+                "status": item["work_status"],
+            },
+            "correctable_fields": list(ITEM_CORRECTABLE_FIELDS),
+            "correction": (
+                {
+                    "request_id": correction["request_id"],
+                    "fields": list(correction["field_names"]),
+                    "requested_by": correction["requested_by_name"],
+                    "requested_at": correction["requested_at"],
+                }
+                if correction else None
+            ),
+            "legacy_rejection": status_value == "REJECTED" and correction is None,
+            "editable_fields": _item_editable_fields(actor, status_value, correction),
+            "notes": notes,
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Item review lookup failed: {e}")
+        raise HTTPException(status_code=500, detail="Unable to load the item review.")
+    finally:
+        cur.close()
+        conn.close()
+
+# --- CHIEF: SEND AN ITEM BACK WITH MARKED FIELDS ---
+@router.post(
+    "/review/item/{serial_no}/request-correction",
+    tags=["Admin Operations"],
+    dependencies=[Depends(require_role(["The Chief"]))]
+)
+async def request_item_correction(
+    serial_no: int,
+    payload: ItemCorrectionRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    reason = _clean_note(payload.reason, "A reason", required=True)
+    correction_note = _clean_note(payload.correction_note, "Correction note")
+
+    fields = []
+    for field in payload.fields:
+        key = str(field).strip()
+        if key not in ITEM_CORRECTABLE_FIELDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{key}' is not a field that can be marked for correction."
+            )
+        if key not in fields:
+            fields.append(key)
+    if not fields:
+        raise HTTPException(
+            status_code=400,
+            detail="Mark at least one field that needs correction."
+        )
+
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        actor = _actor_info(current_user)
+
+        cur.execute("""
+            UPDATE public.items
+            SET availability_status = 'REJECTED',
+                is_deleted = TRUE,
+                deletion_reason = %s
+            WHERE serial_no = %s
+              AND availability_status = 'PENDING'
+              AND is_deleted = FALSE
+            RETURNING serial_no, accession_no, work_id
+        """, (reason, serial_no))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Pending Item not found.")
+
+        cur.execute("""
+            INSERT INTO public.correction_requests
+                (entity, entity_id, requested_by, requested_by_name, field_names)
+            VALUES ('ITEM', %s, %s, %s, %s)
+            RETURNING request_id
+        """, (serial_no, actor["user_id"], actor["name"], fields))
+        request_id = cur.fetchone()["request_id"]
+
+        if correction_note:
+            cur.execute("""
+                INSERT INTO public.review_notes
+                    (entity, entity_id, request_id, author_id,
+                     author_name, author_role, kind, body)
+                VALUES ('ITEM', %s, %s, %s, %s, %s, 'CHIEF_CORRECTION_NOTE', %s)
+            """, (
+                serial_no, request_id, actor["user_id"],
+                actor["name"], actor["role"], correction_note
+            ))
+
+        message = (
+            f"PROPOSAL REQUIRES CORRECTION: Item #{serial_no} was sent back "
+            f"by The Chief.\n\nReason: {reason}\n\n"
+            f"Fields to correct: {', '.join(fields)}"
+        )
+        if correction_note:
+            message += f"\n\nNote from The Chief: {correction_note}"
+        message += "\n\nAction: Correct the marked fields and RESUBMIT."
+        cur.execute("""
+            INSERT INTO public.chief_notifications (identity_id, message)
+            SELECT u.identity_id, %s
+            FROM public.items i
+            INNER JOIN public.users u ON u.user_id = i.proposed_by
+            WHERE i.serial_no = %s AND u.identity_id IS NOT NULL
+        """, (message, serial_no))
+
+        _write_audit(
+            request, current_user, conn,
+            action_type="ITEM_REJECT",
+            target_id=serial_no,
+            justification=reason,
+            diff={
+                "serial_no": serial_no,
+                "accession_no": row["accession_no"],
+                "work_id": row["work_id"],
+                "decision": "REJECT",
+                "request_id": request_id,
+                "flagged_fields": fields,
+                "correction_note": correction_note or None,
+            },
+            extra={"reason": reason, "flagged_fields": fields},
+        )
+
+        conn.commit()
+        return {
+            "message": f"Item #{serial_no} sent back for correction.",
+            "serial_no": serial_no,
+            "request_id": request_id,
+            "flagged_fields": fields,
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Item correction request failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to send the item back for correction."
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+# --- NOTES (Chief, or the Keeper who owns the item) ---
+@router.post(
+    "/review/item/{serial_no}/note",
+    tags=["Docket"],
+    dependencies=[Depends(require_role(["The Chief", "The Keeper"]))]
+)
+async def add_item_review_note(
+    serial_no: int,
+    payload: ReviewNoteCreate,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    body = _clean_note(payload.body, "A note", required=True)
+
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        actor = _actor_info(current_user)
+        _load_item_for_review(cur, serial_no, actor)
+        correction = _open_correction(cur, "ITEM", serial_no)
+        kind = "CHIEF_NOTE" if actor["is_chief"] else "KEEPER_NOTE"
+
+        cur.execute("""
+            INSERT INTO public.review_notes
+                (entity, entity_id, request_id, author_id,
+                 author_name, author_role, kind, body)
+            VALUES ('ITEM', %s, %s, %s, %s, %s, %s, %s)
+            RETURNING note_id
+        """, (
+            serial_no,
+            correction["request_id"] if correction else None,
+            actor["user_id"], actor["name"], actor["role"], kind, body
+        ))
+        note_id = cur.fetchone()["note_id"]
+
+        _write_audit(
+            request, current_user, conn,
+            action_type="REVIEW_NOTE",
+            target_id=serial_no,
+            justification=body,
+            diff={"serial_no": serial_no, "note_id": note_id, "kind": kind},
+            extra={"note_id": note_id},
+        )
+
+        conn.commit()
+        return {"note_id": note_id, "kind": kind}
+
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Item note failed: {e}")
+        raise HTTPException(status_code=500, detail="Unable to save the note.")
+    finally:
+        cur.close()
+        conn.close()
+
+# --- KEEPER: CORRECT THE MARKED FIELDS AND RESUBMIT ---
+@router.post(
+    "/review/item/{serial_no}/resubmit-corrected",
+    tags=["Keeper Operations"],
+    dependencies=[Depends(require_role(["The Keeper"]))]
+)
+async def resubmit_corrected_item(
+    serial_no: int,
+    payload: ItemCorrectionSubmit,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    note = _clean_note(payload.note, "Note")
+    requested = payload.changes or {}
+
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        actor = _actor_info(current_user)
+        item = _load_item_for_review(cur, serial_no, actor)
+
+        if str(item["availability_status"]).upper() != "REJECTED":
+            raise HTTPException(
+                status_code=409,
+                detail="Only a rejected Item can be corrected and resubmitted."
+            )
+        if str(item["work_status"]).upper() != "APPROVED":
+            raise HTTPException(
+                status_code=409,
+                detail="The parent Work is not approved and this Item cannot be resubmitted."
+            )
+
+        correction = _open_correction(cur, "ITEM", serial_no)
+        allowed = _item_editable_fields(actor, "REJECTED", correction)
+
+        blocked = [key for key in requested if key not in allowed]
+        if blocked:
+            detail = (
+                "These fields were not marked for correction and cannot be "
+                f"changed: {', '.join(blocked)}."
+            )
+            conn.rollback()
+            _log_refusal(
+                request, current_user, "ITEM_CORRECTION_REFUSED",
+                serial_no, detail, {k: requested[k] for k in blocked}
+            )
+            raise HTTPException(status_code=403, detail=detail)
+
+        new_values = {}
+        if "language_id" in requested:
+            language_value = str(requested["language_id"] or "").strip()
+            if not language_value:
+                raise HTTPException(
+                    status_code=400, detail="Language Profile cannot be empty."
+                )
+            new_values["language_id"] = language_value
+        if "work_id" in requested:
+            try:
+                new_values["work_id"] = int(str(requested["work_id"]).strip())
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Authorized Work ID must be a numeric Work ID."
+                )
+
+        field_changes = {
+            field: {"from": item.get(field), "to": value}
+            for field, value in new_values.items()
+            if _audit_norm(item.get(field)) != _audit_norm(value)
+        }
+
+        if not field_changes and not note:
+            raise HTTPException(
+                status_code=400,
+                detail="Change a marked field or add a note explaining why nothing needs changing."
+            )
+
+        accession_no = item["accession_no"]
+        call_no = item["call_no"]
+        final_work_id = item["work_id"]
+        final_language_id = new_values.get("language_id", item["language_id"])
+
+        if "work_id" in field_changes:
+            cur.execute("""
+                SELECT work_id, language, call_no, status
+                FROM public.works WHERE work_id = %s
+            """, (new_values["work_id"],))
+            new_work = cur.fetchone()
+            if not new_work:
+                raise HTTPException(
+                    status_code=404, detail="Authorized catalogued work not found."
+                )
+            if str(new_work["status"]).upper() != "APPROVED":
+                raise HTTPException(
+                    status_code=409,
+                    detail="That Work is not yet approved and cannot receive this copy."
+                )
+
+            prefix = get_language_prefix(new_work["language"])
+            cur.execute("""
+                UPDATE public.language_registry
+                SET last_number = last_number + 1
+                WHERE TRIM(prefix) = %s
+                RETURNING last_number;
+            """, (prefix,))
+            row = cur.fetchone()
+            if not row:
+                cur.execute("""
+                    INSERT INTO public.language_registry (language, prefix, last_number)
+                    VALUES (%s, %s, 1)
+                    RETURNING last_number;
+                """, (new_work["language"].strip(), prefix))
+                row = cur.fetchone()
+            counter = row[0]
+            accession_no = f"{prefix}-{counter}"
+            call_no = new_work["call_no"]
+            final_work_id = new_work["work_id"]
+            field_changes["accession_no"] = {
+                "from": item["accession_no"], "to": accession_no
+            }
+            field_changes["call_no"] = {"from": item["call_no"], "to": call_no}
+
+        cur.execute("""
+            UPDATE public.items
+            SET work_id = %s,
+                accession_no = %s,
+                call_no = %s,
+                language_id = %s,
+                availability_status = 'PENDING',
+                is_deleted = FALSE,
+                deletion_reason = NULL
+            WHERE serial_no = %s
+              AND proposed_by = %s
+              AND availability_status = 'REJECTED'
+            RETURNING serial_no
+        """, (
+            final_work_id, accession_no, call_no, final_language_id,
+            serial_no, actor["user_id"]
+        ))
+        if not cur.fetchone():
+            raise HTTPException(
+                status_code=409,
+                detail="The rejected Item changed before it could be resubmitted."
+            )
+
+        if correction:
+            cur.execute("""
+                UPDATE public.correction_requests
+                SET status = 'RESOLVED', resolved_at = now(), resolved_by = %s
+                WHERE request_id = %s AND status = 'OPEN'
+            """, (actor["user_id"], correction["request_id"]))
+
+        if note:
+            cur.execute("""
+                INSERT INTO public.review_notes
+                    (entity, entity_id, request_id, author_id,
+                     author_name, author_role, kind, body)
+                VALUES ('ITEM', %s, %s, %s, %s, %s, 'KEEPER_NOTE', %s)
+                RETURNING note_id
+            """, (
+                serial_no,
+                correction["request_id"] if correction else None,
+                actor["user_id"], actor["name"], actor["role"], note
+            ))
+            note_id = cur.fetchone()["note_id"]
+            _write_audit(
+                request, current_user, conn,
+                action_type="REVIEW_NOTE",
+                target_id=serial_no,
+                justification=note,
+                diff={"serial_no": serial_no, "note_id": note_id, "kind": "KEEPER_NOTE"},
+                extra={"note_id": note_id},
+            )
+
+        _write_audit(
+            request, current_user, conn,
+            action_type="ITEM_RESUBMIT",
+            target_id=serial_no,
+            justification=(
+                "Corrected the marked fields and resubmitted"
+                if field_changes else "Resubmitted without field changes"
+            ),
+            diff={
+                "serial_no": serial_no,
+                "accession_no": accession_no,
+                "work_id": final_work_id,
+                "status": "PENDING",
+                "changes": field_changes,
+                "request_id": correction["request_id"] if correction else None,
+            },
+            extra={"resubmission": True, "legacy_rejection": correction is None},
+        )
+
+        conn.commit()
+        return {
+            "message": f"Item #{serial_no} resubmitted for verification.",
+            "serial_no": serial_no,
+            "status": "PENDING",
+            "changed_fields": list(field_changes.keys()),
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Item correction resubmission failed: {e}")
+        raise HTTPException(
+            status_code=500, detail="Unable to resubmit the corrected Item."
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+
+# ===========================================================================
+# REVIEW & CORRECTION WORKFLOW (Works)
+# ===========================================================================
+WORK_CORRECTABLE_FIELDS = (
+    "title", "author", "category", "language", "publisher", "year", "isbn",
+    "ddc", "call_no", "translation_compilation", "genre",
+    "original_language", "notes", "proposal_reason",
+)
+
+class WorkCorrectionRequest(BaseModel):
+    fields: List[str]
+    reason: str
+    correction_note: Optional[str] = None
+
+class WorkCorrectionSubmit(BaseModel):
+    changes: dict = {}
+    note: Optional[str] = None
+
+def _work_editable_fields(actor: dict, status_value: str, correction) -> list:
+    if actor["is_chief"] or status_value != "REJECTED":
+        return []
+    if correction:
+        return [
+            f for f in correction["field_names"] if f in WORK_CORRECTABLE_FIELDS
+        ]
+    return list(WORK_CORRECTABLE_FIELDS)
+
+def _load_work_for_review(cur, work_id: int, actor: dict) -> dict:
+    cur.execute("""
+        SELECT
+            w.work_id, w.title, w.author, w.category, w.language,
+            w.publisher, w.year, w.isbn, w.ddc, w.call_no,
+            w.translation_compilation, w.genre, w.original_language,
+            w.notes, w.proposal_reason, w.status, w.approval_reason,
+            w.proposed_by, w.created_at,
+            u.name AS proposer_name,
+            (SELECT COUNT(*) FROM public.items i
+              WHERE i.work_id = w.work_id) AS item_count
+        FROM public.works w
+        LEFT JOIN public.users u ON u.user_id = w.proposed_by
+        WHERE w.work_id = %s
+        FOR UPDATE OF w
+    """, (work_id,))
+    work = cur.fetchone()
+
+    if not work or (
+        not actor["is_chief"] and work["proposed_by"] != actor["user_id"]
+    ):
+        raise HTTPException(status_code=404, detail="Work not found.")
+    return work
+
+def _clean_work_value(key: str, value):
+    if key == "year":
+        text = str(value if value is not None else "").strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Year must be a whole number.")
+    text = str(value if value is not None else "").strip()
+    if len(text) > 5000:
+        raise HTTPException(status_code=400, detail=f"'{key}' is too long.")
+    if key in ("title", "language") and not text:
+        raise HTTPException(
+            status_code=400,
+            detail="Title and language cannot be empty."
+        )
+    return text or None
+
+# --- REVIEW FORM DATA (Chief + owning Keeper) ---
+@router.get(
+    "/review/work/{work_id}",
+    tags=["Docket"],
+    dependencies=[Depends(require_role(["The Chief", "The Keeper"]))]
+)
+def get_work_review(
+    work_id: int,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        actor = _actor_info(current_user)
+        work = _load_work_for_review(cur, work_id, actor)
+        correction = _open_correction(cur, "WORK", work_id)
+        status_value = str(work["status"] or "").upper()
+
+        _write_audit(
+            request, current_user, conn,
+            action_type="WORK_REVIEW_VIEWED",
+            target_id=work_id,
+            justification="Opened the work review form",
+            diff={"work_id": work_id, "status": status_value},
+            http_method="GET",
+            target_entity="WORK",
+        )
+        conn.commit()
+
+        values = {key: work[key] for key in WORK_CORRECTABLE_FIELDS}
+        return {
+            "work_id": work["work_id"],
+            "status": status_value,
+            "values": values,
+            "rejection_reason": (
+                work["approval_reason"] if status_value == "REJECTED" else None
+            ),
+            "proposed_by": work["proposed_by"],
+            "proposer_name": work["proposer_name"],
+            "created_at": work["created_at"],
+            "item_count": work["item_count"],
+            "correctable_fields": list(WORK_CORRECTABLE_FIELDS),
+            "correction": (
+                {
+                    "request_id": correction["request_id"],
+                    "fields": list(correction["field_names"]),
+                    "requested_by": correction["requested_by_name"],
+                    "requested_at": correction["requested_at"],
+                }
+                if correction else None
+            ),
+            "legacy_rejection": status_value == "REJECTED" and correction is None,
+            "editable_fields": _work_editable_fields(actor, status_value, correction),
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Work review lookup failed: {e}")
+        raise HTTPException(status_code=500, detail="Unable to load the work review.")
+    finally:
+        cur.close()
+        conn.close()
+
+# --- CHIEF: SEND A WORK BACK WITH MARKED FIELDS ---
+@router.post(
+    "/review/work/{work_id}/request-correction",
+    tags=["Admin Operations"],
+    dependencies=[Depends(require_role(["The Chief"]))]
+)
+async def request_work_correction(
+    work_id: int,
+    payload: WorkCorrectionRequest,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    reason = _clean_note(payload.reason, "A reason", required=True)
+    correction_note = _clean_note(payload.correction_note, "Correction note")
+
+    fields = []
+    for field in payload.fields:
+        key = str(field).strip()
+        if key not in WORK_CORRECTABLE_FIELDS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{key}' is not a field that can be marked for correction."
+            )
+        if key not in fields:
+            fields.append(key)
+    if not fields:
+        raise HTTPException(
+            status_code=400,
+            detail="Mark at least one field that needs correction."
+        )
+
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        actor = _actor_info(current_user)
+
+        cur.execute("""
+            UPDATE public.works
+            SET status = 'REJECTED',
+                approved_by = %s,
+                approval_reason = %s,
+                approved_at = CURRENT_TIMESTAMP
+            WHERE work_id = %s
+              AND status = 'PENDING'
+            RETURNING title
+        """, (actor["user_id"], reason, work_id))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Pending Work not found.")
+        work_title = row["title"]
+
+        cur.execute("""
+            UPDATE public.items SET is_deleted = TRUE WHERE work_id = %s
+        """, (work_id,))
+
+        cur.execute("""
+            INSERT INTO public.correction_requests
+                (entity, entity_id, requested_by, requested_by_name, field_names)
+            VALUES ('WORK', %s, %s, %s, %s)
+            RETURNING request_id
+        """, (work_id, actor["user_id"], actor["name"], fields))
+        request_id = cur.fetchone()["request_id"]
+
+        if correction_note:
+            cur.execute("""
+                INSERT INTO public.review_notes
+                    (entity, entity_id, request_id, author_id,
+                     author_name, author_role, kind, body)
+                VALUES ('WORK', %s, %s, %s, %s, %s, 'CHIEF_CORRECTION_NOTE', %s)
+            """, (
+                work_id, request_id, actor["user_id"],
+                actor["name"], actor["role"], correction_note
+            ))
+
+        message = (
+            f"PROPOSAL REQUIRES CORRECTION: Your proposal '{work_title}' "
+            f"was sent back by The Chief.\n\nReason: {reason}\n\n"
+            f"Fields to correct: {', '.join(fields)}"
+        )
+        if correction_note:
+            message += f"\n\nNote from The Chief: {correction_note}"
+        message += "\n\nAction: Correct the marked fields and RESUBMIT."
+        cur.execute("""
+            INSERT INTO public.chief_notifications (identity_id, message)
+            SELECT u.identity_id, %s
+            FROM public.works w
+            INNER JOIN public.users u ON u.user_id = w.proposed_by
+            WHERE w.work_id = %s AND u.identity_id IS NOT NULL
+        """, (message, work_id))
+
+        _write_audit(
+            request, current_user, conn,
+            action_type="CURATOR_DECISION",
+            target_id=work_id,
+            justification=reason,
+            diff={
+                "work_id": work_id,
+                "title": work_title,
+                "decision": "REJECTED",
+                "reason": reason,
+                "request_id": request_id,
+                "flagged_fields": fields,
+                "correction_note": correction_note or None,
+            },
+            extra={"work_id": work_id, "decision": "REJECTED", "flagged_fields": fields},
+            target_entity="WORK",
+        )
+
+        conn.commit()
+        return {
+            "message": f"Work '{work_title}' sent back for correction.",
+            "work_id": work_id,
+            "request_id": request_id,
+            "flagged_fields": fields,
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Work correction request failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to send the work back for correction."
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+# --- KEEPER: CORRECT THE MARKED FIELDS AND RESUBMIT ---
+@router.post(
+    "/review/work/{work_id}/resubmit-corrected",
+    tags=["Keeper Operations"],
+    dependencies=[Depends(require_role(["The Keeper"]))]
+)
+async def resubmit_corrected_work(
+    work_id: int,
+    payload: WorkCorrectionSubmit,
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    note = _clean_note(payload.note, "Note")
+    requested = payload.changes or {}
+
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        actor = _actor_info(current_user)
+        work = _load_work_for_review(cur, work_id, actor)
+
+        if str(work["status"] or "").upper() != "REJECTED":
+            raise HTTPException(
+                status_code=409,
+                detail="Only a rejected Work can be corrected and resubmitted."
+            )
+
+        correction = _open_correction(cur, "WORK", work_id)
+        allowed = _work_editable_fields(actor, "REJECTED", correction)
+
+        blocked = [key for key in requested if key not in allowed]
+        if blocked:
+            detail = (
+                "These fields were not marked for correction and cannot be "
+                f"changed: {', '.join(blocked)}."
+            )
+            conn.rollback()
+            _log_refusal(
+                request, current_user, "WORK_CORRECTION_REFUSED",
+                work_id, detail, {k: requested[k] for k in blocked},
+                entity="WORK"
+            )
+            raise HTTPException(status_code=403, detail=detail)
+
+        new_values = {
+            key: _clean_work_value(key, value)
+            for key, value in requested.items()
+        }
+        field_changes = {
+            key: {"from": work.get(key), "to": value}
+            for key, value in new_values.items()
+            if _audit_norm(work.get(key)) != _audit_norm(value)
+        }
+
+        if not field_changes and not note:
+            raise HTTPException(
+                status_code=400,
+                detail="Change a marked field or add a note explaining why nothing needs changing."
+            )
+
+        assignments = ", ".join(f"{key} = %s" for key in field_changes)
+        params = [change["to"] for change in field_changes.values()]
+        set_sql = (assignments + ", ") if assignments else ""
+        cur.execute(f"""
+            UPDATE public.works
+            SET {set_sql}
+                status = 'PENDING',
+                approval_reason = NULL,
+                approved_by = NULL,
+                approved_at = NULL
+            WHERE work_id = %s
+              AND proposed_by = %s
+              AND status = 'REJECTED'
+            RETURNING title
+        """, (*params, work_id, actor["user_id"]))
+        updated = cur.fetchone()
+        if not updated:
+            raise HTTPException(
+                status_code=409,
+                detail="The rejected Work changed before it could be resubmitted."
+            )
+
+        cur.execute("""
+            UPDATE public.items
+            SET availability_status = 'PENDING',
+                is_deleted = FALSE,
+                deletion_reason = NULL,
+                proposed_by = COALESCE(proposed_by, %s)
+            WHERE work_id = %s
+        """, (actor["user_id"], work_id))
+
+        if correction:
+            cur.execute("""
+                UPDATE public.correction_requests
+                SET status = 'RESOLVED', resolved_at = now(), resolved_by = %s
+                WHERE request_id = %s AND status = 'OPEN'
+            """, (actor["user_id"], correction["request_id"]))
+
+        if note:
+            cur.execute("""
+                INSERT INTO public.review_notes
+                    (entity, entity_id, request_id, author_id,
+                     author_name, author_role, kind, body)
+                VALUES ('WORK', %s, %s, %s, %s, %s, 'KEEPER_NOTE', %s)
+                RETURNING note_id
+            """, (
+                work_id,
+                correction["request_id"] if correction else None,
+                actor["user_id"], actor["name"], actor["role"], note
+            ))
+            note_id = cur.fetchone()["note_id"]
+            _write_audit(
+                request, current_user, conn,
+                action_type="REVIEW_NOTE",
+                target_id=work_id,
+                justification=note,
+                diff={"work_id": work_id, "note_id": note_id, "kind": "KEEPER_NOTE"},
+                extra={"note_id": note_id},
+                target_entity="WORK",
+            )
+
+        _write_audit(
+            request, current_user, conn,
+            action_type="WORK_RESUBMIT",
+            target_id=work_id,
+            justification=(
+                "Corrected the marked fields and resubmitted"
+                if field_changes else "Resubmitted without field changes"
+            ),
+            diff={
+                "work_id": work_id,
+                "title": updated["title"],
+                "status": "PENDING",
+                "changes": field_changes,
+                "request_id": correction["request_id"] if correction else None,
+            },
+            extra={"resubmission": True, "legacy_rejection": correction is None},
+            target_entity="WORK",
+        )
+
+        conn.commit()
+        return {
+            "message": f"Work '{updated['title']}' resubmitted for verification.",
+            "work_id": work_id,
+            "status": "PENDING",
+            "changed_fields": list(field_changes.keys()),
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        print(f"Work correction resubmission failed: {e}")
+        raise HTTPException(
+            status_code=500, detail="Unable to resubmit the corrected Work."
+        )
     finally:
         cur.close()
         conn.close()
