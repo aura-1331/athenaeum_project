@@ -10,9 +10,15 @@
             : 'Work through matters waiting for your decision, one at a time.' }}
         </p>
       </div>
-      <button type="button" class="dk-btn" :disabled="loading" @click="loadAll">
-        {{ loading ? 'Syncing…' : 'Refresh' }}
-      </button>
+      <div class="dk-head-actions">
+        <template v-if="user_role === 'The Chief'">
+          <button type="button" class="dk-btn dk-btn-main" @click="router.push('/chief/register-work')">Register Work</button>
+          <button type="button" class="dk-btn dk-btn-main" @click="router.push('/chief/register-item')">Register Item</button>
+        </template>
+        <button type="button" class="dk-btn" :disabled="loading" @click="loadAll">
+          {{ loading ? 'Syncing…' : 'Refresh' }}
+        </button>
+      </div>
     </header>
 
     <div v-if="error" class="dk-msg dk-msg-error" role="alert">
@@ -111,16 +117,65 @@
           </article>
         </div>
       </template>
+      <section class="fr-panel" aria-label="Permanently rejected works">
+        <button type="button" class="fr-toggle" :aria-expanded="finalRejectionsOpen" @click="finalRejectionsOpen = !finalRejectionsOpen">
+          <span>Permanently rejected works &middot; {{ finalRejections.length }}</span>
+          <span>{{ finalRejectionsOpen ? 'Hide -' : 'Show +' }}</span>
+        </button>
+        <div v-if="finalRejectionsOpen" class="fr-body">
+          <p v-if="finalRejectionsError" class="fr-empty">{{ finalRejectionsError }}</p>
+          <p v-else-if="!finalRejections.length" class="fr-empty">No works have been permanently rejected.</p>
+          <ul v-else class="fr-list">
+            <li v-for="r in finalRejections" :key="r.work_id" class="fr-item">
+              <div class="fr-head">
+                <strong>{{ r.title || 'Untitled' }}</strong>
+                <span class="fr-id">Work #{{ r.work_id }}</span>
+              </div>
+              <div class="fr-meta">
+                <span v-if="r.author">{{ r.author }}</span>
+                <span v-if="r.proposer_name">Proposed by {{ r.proposer_name }}</span>
+                <span>Rejected by {{ r.rejected_by || 'The Chief' }}</span>
+                <span>{{ fmtFinalRejection(r.rejected_at) }}</span>
+              </div>
+              <p class="fr-reason"><strong>Reason:</strong> {{ r.reason || 'No reason recorded.' }}</p>
+              <router-link class="fr-link" :to="'/review-work/' + r.work_id">View record</router-link>
+            </li>
+          </ul>
+        </div>
+      </section>
     </section>
 
     <!-- ============ THE KEEPER: SUBMISSION TRACKER ============ -->
     <template v-else>
+      <section v-if="myFinalRejections.length" class="fr-panel" aria-label="Permanently rejected works">
+        <button type="button" class="fr-toggle" :aria-expanded="finalRejectionsOpen" @click="finalRejectionsOpen = !finalRejectionsOpen">
+          <span>Permanently rejected works &middot; {{ myFinalRejections.length }}</span>
+          <span>{{ finalRejectionsOpen ? 'Hide -' : 'Show +' }}</span>
+        </button>
+        <div v-if="finalRejectionsOpen" class="fr-body">
+          <ul class="fr-list">
+            <li v-for="r in myFinalRejections" :key="r.work_id" class="fr-item">
+              <div class="fr-head">
+                <strong>{{ r.title || 'Untitled' }}</strong>
+                <span class="fr-id">Work #{{ r.work_id }}</span>
+              </div>
+              <div class="fr-meta">
+                <span v-if="r.author">{{ r.author }}</span>
+                <span>Rejected by {{ r.rejected_by || 'The Chief' }}</span>
+                <span>{{ fmtFinalRejection(r.rejected_at) }}</span>
+              </div>
+              <p class="fr-reason"><strong>Reason:</strong> {{ r.reason || 'No reason recorded.' }}</p>
+              <p class="fr-reason">This work was closed by The Chief and cannot be resubmitted.</p>
+              <router-link class="fr-link" :to="'/review-work/' + r.work_id">View record</router-link>
+            </li>
+          </ul>
+        </div>
+      </section>
       <nav class="dk-tabs" aria-label="Docket views">
         <button
           v-for="t in [
             { id: 'ATTENTION', label: 'Sent back', n: attentionCount, cls: 'attn' },
-            { id: 'IN_PROGRESS', label: 'In review', n: inProgressCount, cls: 'prog' },
-            { id: 'RESOLVED', label: 'Completed', n: resolvedCount, cls: 'done' }
+            { id: 'IN_PROGRESS', label: 'In review', n: inProgressCount, cls: 'prog' }
           ]"
           :key="t.id"
           type="button"
@@ -178,7 +233,7 @@
                 <span v-if="ageClassFor(matter)">{{ ageLabel(matter.since) }}</span>
               </p>
             </div>
-            <span class="dk-pill">{{ matter.status }}</span>
+            <span class="dk-pill">{{ docketStatusLabel(matter.status) }}</span>
           </div>
 
           <ol class="kt-steps" aria-label="Progress">
@@ -555,7 +610,7 @@ const docketMatters = computed(() =>
 
 const attentionMatters = computed(() =>
   user_role.value === 'The Keeper'
-    ? docketMatters.value.filter((matter) => matter.status === 'REJECTED')
+    ? docketMatters.value.filter((matter) => matter.status === 'REJECTED' && !keeperFinalIds.value.has(String(matter.work_id)))
     : docketMatters.value.filter((matter) => matter.status === 'PENDING')
 )
 
@@ -662,7 +717,7 @@ function setDefaultDocketFilter() {
   if (user_role.value === 'The Keeper') {
     if (attentionCount.value > 0) activeDocketFilter.value = 'ATTENTION'
     else if (inProgressCount.value > 0) activeDocketFilter.value = 'IN_PROGRESS'
-    else activeDocketFilter.value = 'RESOLVED'
+    else activeDocketFilter.value = 'ATTENTION'
   } else {
     activeDocketFilter.value =
       attentionCount.value > 0
@@ -677,140 +732,95 @@ function setDefaultDocketFilter() {
 }
 
 async function loadAll() {
-
   loading.value = true
   historyCache.value = {}
-
   error.value = ''
 
-
-
   try {
+    if (user_role.value === 'The Keeper') {
+      // Load the complete Keeper history and the pending queue independently.
+      // The pending endpoint is a fallback if my-submissions fails or omits a pending Work.
+      const [mineResult, pendingResult] = await Promise.allSettled([
+        axios.get('/catalogue/my-submissions'),
+        axios.get('/catalogue/pending-works')
+      ])
 
-            if (user_role.value === 'The Keeper') {
+      const mineOk = mineResult.status === 'fulfilled' && Array.isArray(mineResult.value.data)
+      const pendingOk = pendingResult.status === 'fulfilled' && Array.isArray(pendingResult.value.data)
+      const mineRows = mineOk ? mineResult.value.data : []
+      const pendingRows = pendingOk ? pendingResult.value.data : []
+      const byWorkId = new Map()
 
-          const response = await axios.get('/catalogue/my-submissions')
+      for (const row of mineRows) {
+        if (row?.work_id != null) byWorkId.set(String(row.work_id), row)
+      }
 
-
-
-          pendingWorks.value =
-
-            Array.isArray(response.data)
-
-              ? response.data
-
-              : []
-
-
-
-          pendingItems.value = []
-
-          setDefaultDocketFilter()
-
-          return
-
+      for (const row of pendingRows) {
+        if (row?.work_id == null) continue
+        const id = String(row.work_id)
+        const pendingNormalized = {
+          ...row,
+          work_status: row.work_status || row.status || 'PENDING',
+          work_created_at: row.work_created_at || row.created_at || row.waiting_since || null
         }
+        byWorkId.set(id, { ...pendingNormalized, ...(byWorkId.get(id) || {}) })
+      }
 
+      pendingWorks.value = [...byWorkId.values()]
+      pendingItems.value = []
 
+      if (!mineOk && !pendingOk) {
+        const detail = mineResult.status === 'rejected'
+          ? (mineResult.reason?.response?.data?.detail || mineResult.reason?.message)
+          : (pendingResult.reason?.response?.data?.detail || pendingResult.reason?.message)
+        error.value = detail || 'Unable to load Keeper submissions.'
+      } else if (!mineOk) {
+        error.value = 'Keeper submission history could not load; showing pending Works only.'
+      } else if (!pendingOk) {
+        error.value = 'Pending Works could not refresh; showing the submissions returned by history.'
+      }
 
-        if (user_role.value !== 'The Chief') {
+      setDefaultDocketFilter()
+      return
+    }
 
-          pendingWorks.value = []
+    if (user_role.value !== 'The Chief') {
+      pendingWorks.value = []
+      pendingItems.value = []
+      error.value = `Docket cannot identify your role (${String(user_role.value || 'missing')}). Sign out and sign in again.`
+      return
+    }
 
-          pendingItems.value = []
-
-          return
-
-        }
-
-
-
-    const [
-
-      worksRes,
-
-      itemsRes
-
-    ] = await Promise.all([
-
+    // Do not let a failing Item query hide successfully loaded pending Works.
+    const [worksResult, itemsResult] = await Promise.allSettled([
       axios.get('/catalogue/pending-works'),
-
       axios.get('/catalogue/pending-items')
-
     ])
 
+    const worksOk = worksResult.status === 'fulfilled' && Array.isArray(worksResult.value.data)
+    const itemsOk = itemsResult.status === 'fulfilled' && Array.isArray(itemsResult.value.data)
 
+    pendingWorks.value = worksOk ? worksResult.value.data : []
+    pendingItems.value = itemsOk ? itemsResult.value.data : []
 
-
-
-    pendingWorks.value =
-
-      Array.isArray(worksRes.data)
-
-        ? worksRes.data
-
-        : []
-
-
-
-
-
-    pendingItems.value =
-
-      Array.isArray(itemsRes.data)
-
-        ? itemsRes.data
-
-        : []
+    if (!worksOk && !itemsOk) {
+      const workDetail = worksResult.reason?.response?.data?.detail || worksResult.reason?.message
+      const itemDetail = itemsResult.reason?.response?.data?.detail || itemsResult.reason?.message
+      error.value = `Could not load the Docket. Works: ${workDetail || 'request failed'}. Items: ${itemDetail || 'request failed'}.`
+    } else if (!worksOk) {
+      error.value = `Pending Works failed to load: ${worksResult.reason?.response?.data?.detail || worksResult.reason?.message || 'request failed'}`
+    } else if (!itemsOk) {
+      error.value = `Pending Items failed to load: ${itemsResult.reason?.response?.data?.detail || itemsResult.reason?.message || 'request failed'}. Pending Works are still shown.`
+    }
 
     setDefaultDocketFilter()
-
-
-
   } catch (err) {
-
-
-
-    console.error(
-
-      'Docket load failed:',
-
-      err
-
-    )
-
-
-
-    error.value =
-
-      err.response?.data?.detail ||
-
-      'Unable to load the Docket.'
-
-
-
+    console.error('Docket load failed:', err)
+    error.value = err.response?.data?.detail || err.message || 'Unable to load the Docket.'
   } finally {
-
-
-
     loading.value = false
-
-
-
   }
-
 }
-
-
-
-
-
-
-
-
-
-
-
 
 
 /* ---------- Matter history (read from the audit ledger) ---------- */
@@ -1231,7 +1241,47 @@ onBeforeUnmount(() => {
   // Leaving the page must not drop a decision that is still counting down.
   if (pendingSend.value) commitPending()
 })
-</script>
+
+import { onMounted as vueOnMounted, ref as vueRef } from 'vue'
+const finalRejections = vueRef([])
+const finalRejectionsOpen = vueRef(false)
+const finalRejectionsError = vueRef('')
+function fmtFinalRejection(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+}
+async function loadFinalRejections() {
+  try {
+    const res = await axios.get('/catalogue/review/final-rejections')
+    finalRejections.value = Array.isArray(res.data) ? res.data : []
+    finalRejectionsError.value = ''
+  } catch (err) {
+    if (err?.response?.status === 403) return
+    finalRejectionsError.value = 'Could not load permanently rejected works.'
+    console.error('Final rejections failed:', err)
+  }
+}
+vueOnMounted(loadFinalRejections)
+const myFinalRejections = vueRef([])
+const keeperFinalIds = computed(() => new Set(myFinalRejections.value.map((r) => String(r.work_id))))
+async function loadMyFinalRejections() {
+  try {
+    const res = await axios.get('/catalogue/review/my-final-rejections')
+    myFinalRejections.value = Array.isArray(res.data) ? res.data : []
+  } catch (err) {
+    if (err?.response?.status === 403) return
+    console.error('My final rejections failed:', err)
+  }
+}
+vueOnMounted(loadMyFinalRejections)
+function docketStatusLabel(status) {
+  const s = String(status || '').toUpperCase()
+  if (s === 'REJECTED') return 'Returned for correction'
+  if (s === 'PENDING') return 'Awaiting Chief review'
+  if (s === 'APPROVED') return 'Approved'
+  return status || 'Unknown'
+}</script>
 
 
 
@@ -1242,6 +1292,7 @@ onBeforeUnmount(() => {
 max-width:1000px;margin:0 auto;padding:32px 20px 48px;color:var(--ink);font-size:14px;line-height:1.5}
 @media (prefers-color-scheme:dark){.dk{--ink:#e6e9ef;--mu:#9aa4b5;--ln:#2d3547;--bg:#131822;--sf:#1a2130;--ac:#7cc4bd;--acs:#1d3535;--at:#f0937f;--ats:#3a2420;--pg:#e5b94f;--pgs:#38301a;--dn:#78c79c;--dns:#1b3326}}
 .dk h1{font:600 30px/1.1 Georgia,"Times New Roman",serif;margin:2px 0 6px}
+.dk-head-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
 .dk-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:24px}
 .dk-org{margin:0;color:var(--ac);font-weight:600;font-size:13px}
 .dk-sub{margin:0;color:var(--mu);max-width:48ch}
@@ -1256,7 +1307,7 @@ max-width:1000px;margin:0 auto;padding:32px 20px 48px;color:var(--ink);font-size
 .dk-msg button{border:0;background:none;color:inherit;font-size:18px;cursor:pointer}
 .dk-msg-error{background:var(--ats);border-color:var(--at);color:var(--at)}
 .dk-msg-ok{background:var(--dns);border-color:var(--dn);color:var(--dn)}
-.dk-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-bottom:1px solid var(--ln);margin-bottom:16px}
+.dk-tabs{display:grid;grid-template-columns:repeat(2,1fr);gap:0;border-bottom:1px solid var(--ln);margin-bottom:16px}
 .dk-tab{display:flex;align-items:baseline;gap:10px;padding:12px 4px;margin-bottom:-1px;border:0;border-bottom:3px solid transparent;background:none;color:var(--mu);font:inherit;cursor:pointer;text-align:left}
 .dk-tab strong{font:600 26px/1 Georgia,serif;color:var(--ink)}
 .dk-tab.on{color:var(--ink);font-weight:600}
@@ -1342,7 +1393,7 @@ kbd{display:inline-block;margin-left:6px;padding:0 6px;border:1px solid currentC
 @media (max-width:820px){.cd-grid{grid-template-columns:1fr}
 .cd-rail{grid-auto-flow:column;grid-auto-columns:200px;overflow-x:auto;max-height:none;position:static;padding-bottom:4px}}
 @media (max-width:640px){
-.dk{padding:20px 12px 32px}.dk-head{flex-direction:column}
+.dk{padding:20px 12px 32px}.dk-head{flex-direction:column}.dk-head-actions{justify-content:flex-start}
 .dk-tab{flex-direction:column;gap:2px;align-items:flex-start}
 .cd-card{padding:16px}.cd-decide{grid-template-columns:1fr}
 .kt-steps span{font-size:11px}.dk-grid{grid-template-columns:1fr}.dk-grid .wide{grid-column:auto}}
@@ -1391,4 +1442,17 @@ kbd{display:inline-block;margin-left:6px;padding:0 6px;border:1px solid currentC
 .cd-age{padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;color:#1c2430}
 .cd-age.age-a1{background:#e3c63f}.cd-age.age-a2{background:#f0a93a}.cd-age.age-a3{background:#ee7d33}.cd-age.age-a4{background:#dc4a3f;color:#fff}
 .cd-reason textarea{max-height:40vh;min-height:0}
-</style>
+
+.fr-panel{margin-top:20px;border:1px solid #fecaca;border-radius:12px;background:#fff7f7;overflow:hidden}
+.fr-toggle{display:flex;justify-content:space-between;align-items:center;width:100%;padding:14px 18px;border:0;background:#fee2e2;color:#7f1d1d;font-weight:700;font-size:13px;cursor:pointer}
+.fr-body{padding:14px 18px}
+.fr-empty{margin:0;font-size:12px;color:#7f1d1d}
+.fr-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.fr-item{background:#fff;border:1px solid #fecaca;border-radius:10px;padding:12px 14px}
+.fr-head{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.fr-head strong{font-size:14px;color:#0f172a;overflow-wrap:anywhere}
+.fr-id{font-size:11px;color:#7f1d1d;font-weight:700;white-space:nowrap}
+.fr-meta{display:flex;flex-wrap:wrap;gap:6px 14px;margin:6px 0;font-size:11px;color:#64748b}
+.fr-reason{margin:6px 0 8px;font-size:12px;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere}
+.fr-link{display:inline-block;font-size:12px;font-weight:700;color:#b91c1c;text-decoration:none;border:1px solid #fecaca;border-radius:8px;padding:5px 12px}
+.fr-link:hover{background:#fee2e2}</style>

@@ -17,13 +17,15 @@ import string
 import json
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from app.services.error_service import record_application_error
 
 from fastapi import FastAPI, Depends, HTTPException, Request, Form, Response
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from jose import jwt, JWTError
 
 from app.audit_utils import audit_action
@@ -36,7 +38,7 @@ from app.token_manager import (
     create_token,
     consume_once,
 )
-from app.auth import generate_csrf_token, router as auth_router, get_current_user, limiter
+from app.auth import generate_csrf_token, router as auth_router, get_current_user, limiter, DUMMY_HASH
 
 def consume_totp_once(user_id, totp) -> bool:
     """Allow a valid TOTP time-step to be consumed only once."""
@@ -61,6 +63,8 @@ from app.services.audit_service import log_audit_activity
 from app.routers import (
     catalogue,
     items,
+    works,
+    metadata,
     search,
     status_audit,
     dashboard,
@@ -88,9 +92,16 @@ if platform.system() == "Windows":
 # ----------------------------
 # App Initialization & CORS
 # ----------------------------
+# SECURITY: in production the automatic documentation pages (/docs, /redoc, /openapi.json)
+# are switched off. They list every route and field of the API for anyone who finds the URL.
+_IS_PRODUCTION = ATHENAEUM_ENV == "production"
+
 app = FastAPI(
     title="Athenaeum Library API",
     swagger_ui_parameters={"deepLinking": True},
+    docs_url=None if _IS_PRODUCTION else "/docs",
+    redoc_url=None if _IS_PRODUCTION else "/redoc",
+    openapi_url=None if _IS_PRODUCTION else "/openapi.json",
 )
 
 app.state.limiter = limiter
@@ -98,6 +109,49 @@ app.add_exception_handler(
     RateLimitExceeded,
     _rate_limit_exceeded_handler
 )
+
+
+@app.exception_handler(HTTPException)
+async def handle_http_exception(request: Request, exc: HTTPException):
+    # Expected 4xx responses remain user-facing validation/access messages.
+    # Server-side HTTP errors are recorded and sanitized.
+    if exc.status_code < 500:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    reference = record_application_error(
+        request,
+        exc,
+        status_code=exc.status_code,
+        operation=getattr(getattr(request, "state", None), "error_operation", None),
+        stage=getattr(getattr(request, "state", None), "error_stage", None),
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": "The operation could not be completed. Nothing was saved.",
+            "error_reference": reference,
+            "request_id": getattr(request.state, "request_id", None),
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def handle_unexpected_exception(request: Request, exc: Exception):
+    reference = record_application_error(
+        request,
+        exc,
+        status_code=500,
+        operation=getattr(getattr(request, "state", None), "error_operation", None),
+        stage=getattr(getattr(request, "state", None), "error_stage", None),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "An unexpected system error occurred. Nothing was saved.",
+            "error_reference": reference,
+            "request_id": getattr(request.state, "request_id", None),
+        },
+    )
 
 if ATHENAEUM_ENV == "production":
     CORS_ORIGINS = [
@@ -117,7 +171,30 @@ app.add_middleware(
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "X-CSRF-Token", "X-Change-Reason"],
+    allow_headers=["Authorization",
+                    "Content-Type", 
+                    "Accept", "X-CSRF-Token", 
+                    "X-Change-Reason","X-Registration-Mode",
+                      "X-Request-ID", "X-Requested-With", "X-Forwarded-For",
+                        "X-Forwarded-Proto", "X-Forwarded-Port", "X-Forwarded-Host",
+                          "X-Forwarded-Server", "X-Real-IP", "X-Client-IP", "X-Remote-IP", 
+                          "X-Remote-Addr", "X-Original-URL", "X-Rewrite-URL", "X-Scheme", 
+                          "X-Forwarded-Scheme", "X-Forwarded-Prefix", "X-Forwarded-Suffix",
+                            "X-Forwarded-Path", "X-Forwarded-Port", "X-Forwarded-Proto-Version", 
+                            "X-Forwarded-Version", "X-Forwarded-BY", "X-Forwarded-FORWARDED-FOR", 
+                            "X-Forwarded-FORWARDED-HOST", "X-Forwarded-FORWARDED-PROTO", "X-Forwarded-FORWARDED-PORT", 
+                            "X-Forwarded-FORWARDED-SCHEME", "X-Forwarded-FORWARDED-PATH", "X-Forwarded-FORWARDED-PREFIX", 
+                            "X-Forwarded-FORWARDED-SUFFIX", "X-Forwarded-FORWARDED-VERSION", "X-Forwarded-FORWARDED-BY",
+                              "X-Forwarded-FORWARDED-FORWARDER", "X-Forwarded-FORWARDED-PROXY", "X-Forwarded-FORWARDED-PROTOCOL", 
+                              "X-Forwarded-FORWARDED-HOSTNAME", "X-Forwarded-FORWARDED-IP", "X-Forwarded-FORWARDED-ADDRESS", 
+                              "X-Forwarded-FORWARDED-NAME", "X-Forwarded-FORWARDED-ID", "X-Forwarded-FORWARDED-TOKEN",
+                                "X-Forwarded-FORWARDED-USER", "X-Forwarded-FORWARDED-SESSION", "X-Forwarded-FORWARDED-CLIENT", 
+                                "X-Forwarded-FORWARDED-SERVER", "X-Forwarded-FORWARDED-PROXY-ID", "X-Forwarded-FORWARDED-PROXY-NAME", 
+                                "X-Forwarded-FORWARDED-PROXY-TOKEN", "X-Forwarded-FORWARDED-PROXY-USER", "X-Forwarded-FORWARDED-PROXY-SESSION", 
+                                "X-Forwarded-FORWARDED-PROXY-CLIENT", "X-Forwarded-FORWARDED-PROXY-SERVER", 
+                                "X-Forwarded-FORWARDED-PROXY-PROTOCOL", "X-Forwarded-FORWARDED-PROXY-HOSTNAME", "X-Forwarded-FORWARDED-PROXY-IP",
+                                  "X-Forwarded-FORWARDED-PROXY-ADDRESS", "X-Forwarded-FORWARDED-PROXY-NAME", "X-Forwarded-FORWARDED-PROXY-ID", 
+                                  "X-Forwarded-FORWARDED-PROXY-TOKEN",],
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
@@ -140,19 +217,33 @@ class Login2FARequest(BaseModel):
     remember_me: bool = False
 
 class AccessRequestModel(BaseModel):
-    full_name: str
+    # SECURITY: this form is open to the whole internet, so every field has a size limit.
+    # Without limits a stranger could stuff megabytes of text into the database.
+    full_name: str = Field(min_length=1, max_length=120)
     email: EmailStr
-    organization: str
-    purpose: str
-    requested_role: str
+    organization: str = Field(max_length=200)
+    purpose: str = Field(max_length=1000)
+    requested_role: str = Field(max_length=50)
 
 class KeeperRecommendationModel(BaseModel):
-    recommendation: str
-    notes: str | None = None
+    recommendation: str = Field(max_length=50)
+    notes: str | None = Field(default=None, max_length=2000)
 
 class ChiefDecisionModel(BaseModel):
-    decision: str
-    notes: str | None = None
+    decision: str = Field(max_length=20)
+    notes: str | None = Field(default=None, max_length=2000)
+
+class AdminCreateUserBody(BaseModel):
+    # Used by /admin/create-user so the new password travels in the request BODY
+    # instead of the web address (web addresses end up in log files).
+    name: str = Field(min_length=1, max_length=120)
+    email: EmailStr
+    role: str = Field(max_length=50)
+    password: str = Field(min_length=1, max_length=128)
+
+class ChangePasswordBody(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
 
 
 # ----------------------------
@@ -407,15 +498,19 @@ async def revoke_user(
             (user_id,)
         )
 
+        # IMPORTANT: read the row returned by the UPDATE *before* running another query.
+        # The old code ran the DELETE first, which wiped the UPDATE's result, so
+        # fetchone() failed and the revocation was silently rolled back.
+        revoked_user = cur.fetchone()
+
+        if not revoked_user:
+            raise HTTPException(status_code=404, detail="User not found.")
+
         # Immediately invalidate any persistent refresh sessions for the revoked user.
         cur.execute(
             "DELETE FROM refresh_tokens WHERE user_id=%s",
             (user_id,)
         )
-        revoked_user = cur.fetchone()
-
-        if not revoked_user:
-            raise HTTPException(status_code=404, detail="User not found.")
 
 
         target_name, target_email, target_op_id, target_role, _ = revoked_user
@@ -659,14 +754,19 @@ async def mark_notifications_read(
 @app.middleware("http")
 async def request_logger(request: Request, call_next):
     start_time = time.time()
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
     response = await call_next(request)
     process_time = (time.time() - start_time) * 1000
 
+    response.headers["X-Request-ID"] = request_id
     print(
         f"{request.method} "
         f"{request.url.path} "
         f"{response.status_code} "
-        f"{process_time:.2f}ms"
+        f"{process_time:.2f}ms "
+        f"request_id={request_id}"
     )
 
     return response
@@ -740,17 +840,33 @@ async def login(
 
         user = cur.fetchone()
 
-        if not user or not verify_password(form_data.password, user[1]):
+        # SECURITY: refuse absurdly long passwords before hashing (hashing is deliberately
+        # slow, so huge inputs could be used to overload the server).
+        if len(form_data.password or "") > 128:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+
+        # SECURITY: always run ONE password check, even when the operator ID does not exist.
+        # Before, a wrong ID answered instantly while a right ID took longer, which let a
+        # stranger discover which operator IDs are real just by timing the replies.
+        password_ok = verify_password(
+            form_data.password,
+            user[1] if user else DUMMY_HASH
+        )
+
+        if not user or not password_ok:
+            # SECURITY: the typed ID is attacker-controlled text, so it is shortened before
+            # it goes into the permanent audit ledger and never used as the "actor name".
+            attempted_id = str(form_data.username or "")[:40]
             log_audit_activity(
                 request=request,
                 user_id=str(user[0]) if user else "UNKNOWN",
-                username=user[5] if user else form_data.username,
+                username=user[5] if user else "UNKNOWN",
                 role=user[2] if user else "UNKNOWN",
                 designation="Staff",
                 category="SECURITY",
                 action_type="LOGIN_FAILED",
                 target_entity="SESSION",
-                target_id=form_data.username,
+                target_id=attempted_id,
                 justification="Failed authentication attempt: invalid credentials"
             )
             raise HTTPException(
@@ -764,11 +880,17 @@ async def login(
                 detail=f"Account is {user[3]}"
             )
 
-        if user[4] and user[4].replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
-            raise HTTPException(
-                status_code=403,
-                detail="Temporary access expired"
-            )
+        # Temporary (Seeker) access expiry. Works whether the database hands back a
+        # timezone-aware or a plain timestamp (the old code could shift the time).
+        login_expiry = user[4]
+        if login_expiry:
+            if login_expiry.tzinfo is None:
+                login_expiry = login_expiry.replace(tzinfo=timezone.utc)
+            if login_expiry < datetime.now(timezone.utc):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Temporary access expired"
+                )
 
         cur.execute(
             """
@@ -1267,12 +1389,17 @@ async def request_access(request: Request, req: AccessRequestModel):
 @app.post("/admin/create-user")
 async def admin_create_user(
     request: Request,
-    name: str,
-    email: EmailStr,
-    role: str,
-    password: str,
+    body: AdminCreateUserBody,
     current_user: dict = Depends(get_current_user)
 ):
+    # SECURITY: these values now arrive in the request BODY. Before, they were plain
+    # function parameters, which FastAPI reads from the web address (?password=...),
+    # and web addresses are written into server log files in clear text.
+    name = body.name
+    email = body.email
+    role = body.role
+    password = body.password
+
     admin_role = current_user.get("role")
 
     allowed_roles = [
@@ -1548,12 +1675,29 @@ async def list_access_requests(request: Request, current_user: dict = Depends(ge
 # CHANGE PASSWORD
 # ----------------------------
 @app.post("/change-password")
+@limiter.limit("5/minute")
 async def change_password(
     request: Request,
-    current_password: str,
-    new_password: str,
+    body: ChangePasswordBody | None = None,
+    # Old style (password in the web address). Kept ONLY so an older screen keeps working
+    # until it is updated; it should be removed once every screen sends a request body.
+    current_password: str | None = None,
+    new_password: str | None = None,
     current_user: dict = Depends(get_current_user)
 ):
+    if body is not None:
+        current_password = body.current_password
+        new_password = body.new_password
+
+    if not current_password or not new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="Current password and new password are required."
+        )
+
+    if len(current_password) > 128 or len(new_password) > 128:
+        raise HTTPException(status_code=400, detail="Password is too long.")
+
     conn = get_connection(request=request)
     cur = conn.cursor()
 
@@ -1650,6 +1794,21 @@ async def setup_2fa(
 
     try:
         user_id = current_user["user_id"]
+
+        # SECURITY: once 2FA is switched on, its secret must not be replaceable by whoever
+        # happens to hold a login session. Otherwise a stolen session could swap in the
+        # attacker's own authenticator and lock the real owner out (or take the account).
+        cur.execute(
+            "SELECT twofa_enabled FROM users WHERE user_id=%s",
+            (user_id,)
+        )
+        already = cur.fetchone()
+        if already and already[0]:
+            raise HTTPException(
+                status_code=409,
+                detail="Two-factor authentication is already enabled. Ask The Chief to reset it."
+            )
+
         secret = pyotp.random_base32()
 
         cur.execute(
@@ -1818,10 +1977,15 @@ async def verify_2fa(
 # ----------------------------
 app.include_router(print_router.router)
 app.include_router(health.router)
+app.include_router(works.work_router, dependencies=[Depends(get_current_user)])
+# Register exact legacy ISBN path before the Item compatibility router's generic /catalogue/{serial_no}.
+app.include_router(metadata.legacy_router, dependencies=[Depends(get_current_user)])
 app.include_router(catalogue.router)
+app.include_router(items.catalogue_item_router, dependencies=[Depends(get_current_user)])
+app.include_router(items.router, dependencies=[Depends(get_current_user)])
+app.include_router(metadata.router, dependencies=[Depends(get_current_user)])
 app.include_router(authority.router, dependencies=[Depends(get_current_user)])
 app.include_router(auth_router)
-app.include_router(items.router, dependencies=[Depends(get_current_user)])
 app.include_router(search.router, dependencies=[Depends(get_current_user)])
 app.include_router(circulation.router, dependencies=[Depends(get_current_user)])
 app.include_router(dashboard.router, dependencies=[Depends(get_current_user)])

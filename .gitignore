@@ -35,3 +35,13 @@ DATABASE_IDENTIFIERS_REFERENCE.md
 launcher/
 library_tauri/src/views/Dashboard.acceptance.spec.js
 library_tauri/src/views/Dashboard.mock.spec.js
+
+logs/
+# Local safety copies and one-off helper scripts
+library_tauri_backups/
+library_api_backups/
+check_*.py
+test_check.py
+test_next_id.py
+find_err.py
+*.bak*
