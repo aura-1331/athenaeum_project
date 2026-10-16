@@ -4,6 +4,9 @@ import axios from "axios"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
+import AuthorsView from '@/views/AuthorsView.vue'
+import AuthoritiesView from '@/views/AuthoritiesView.vue'
+import SubjectsView from '@/views/SubjectsView.vue'
 import BatchRegisterModal from '@/components/print/BatchRegisterModal.vue'
 import SystemStatus from './components/SystemStatus.vue'
 import {
@@ -33,6 +36,36 @@ const theme = ref("dark")
 const route = useRoute()
 const router = useRouter()
 const isMobileMenuOpen = ref(false)
+
+// Keep classification navigation working if the configured router predates
+// these pages. The global router guard still sees the roles in route meta.
+const classificationRoutes = [
+  {
+    path: "/classification/authors",
+    name: "classification-authors",
+    component: AuthorsView,
+    meta: { roles: ["The Chief"] },
+  },
+  {
+    path: "/classification/authorities",
+    name: "classification-authorities",
+    component: AuthoritiesView,
+    meta: { roles: ["The Chief"] },
+  },
+  {
+    path: "/classification/subjects",
+    name: "classification-subjects",
+    component: SubjectsView,
+    meta: { roles: ["The Chief"] },
+  },
+]
+
+for (const routeRecord of classificationRoutes) {
+  const pathAlreadyRegistered = router.getRoutes().some(
+    (registeredRoute) => registeredRoute.path === routeRecord.path,
+  )
+  if (!pathAlreadyRegistered) router.addRoute(routeRecord)
+}
 
 // --- PRINT MODAL REF & TRIGGER ---
 const batchModalRef = ref(null)
@@ -125,9 +158,8 @@ const loadNotifications = async () => {
   }
 }
 
-
-const loadDocketCount = async () => {
-  if (user_role.value !== 'The Chief') {
+ const loadDocketCount = async () => {
+  if (!authStore.accessToken || user_role.value !== 'The Chief') {
     docketCount.value = 0
     return
   }
@@ -177,18 +209,21 @@ const fetchAccurateLocation = async () => {
         if (data && data.address) {
           const city = data.address.city || data.address.town || data.address.village || data.address.state_district
           const country = data.address.country_code ? data.address.country_code.toUpperCase() : ''
-          currentPlace.value = city ? `${city}, ${country}` : 'Thiruvananthapuram, IN'
+          currentPlace.value = city ? `${city}, ${country}` : 'Location unavailable'
         } else {
-          currentPlace.value = 'Thiruvananthapuram, IN'
+          currentPlace.value = 'Location unavailable'
         }
       } catch (err) {
         console.warn("Reverse geocoding failed:", err)
-        currentPlace.value = 'Thiruvananthapuram, IN'
+        currentPlace.value = 'Location unavailable'
       }
     },
     (error) => {
-      console.warn("Geolocation permission denied:", error)
-      currentPlace.value = 'Thiruvananthapuram, IN'
+      // A denied permission is an expected privacy choice, not an app failure.
+      currentPlace.value = 'Location unavailable'
+      if (error?.code !== 1) {
+        console.warn("Geolocation lookup failed:", error)
+      }
     },
     { timeout: 10000, maximumAge: 60000 }
   )
@@ -342,14 +377,14 @@ onUnmounted(() => {
 
 
   <div
-    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    v-if="user_role === 'The Keeper'"
     class="nav-section-label"
   >
     Inventory
   </div>
 
   <RouterLink
-    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    v-if="user_role === 'The Keeper'"
     to="/create-work"
   >
     <FileText :size="18" :stroke-width="1.5" />
@@ -357,7 +392,7 @@ onUnmounted(() => {
   </RouterLink>
 
   <RouterLink
-    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+    v-if="user_role === 'The Keeper'"
     to="/create-item"
   >
     <BookOpen :size="18" :stroke-width="1.5" />

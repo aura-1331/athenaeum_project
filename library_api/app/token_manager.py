@@ -101,7 +101,17 @@ def rotate_refresh_token(token: str, role: str):
     if role not in {"The Chief", "The Keeper", "The Seeker"}:
         raise HTTPException(status_code=401, detail="Invalid user role")
 
-    revoke_refresh_token(token)
+    # SECURITY: revoke atomically. "SET ... NX" succeeds for exactly ONE caller, so if two
+    # requests present the same refresh token at the same moment, only one is accepted.
+    # (The old code checked first and revoked later, which left a small gap.)
+    consumed = redis_client.set(
+        f"revoked:{old_jti}",
+        "revoked",
+        nx=True,
+        ex=REFRESH_EXPIRE_DAYS * 86400
+    )
+    if not consumed:
+        raise HTTPException(status_code=401, detail="Token revoked")
 
     new_refresh_token = create_token(
         {"sub": user_id, "role": role},

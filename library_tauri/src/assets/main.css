@@ -1,292 +1,192 @@
-/* =====================================================
-   ATHENAEUM ORBIS
-   GLOBAL THEME TOKENS
-===================================================== */
-
+@import url('https://fonts.googleapis.com/css2?family=Dekko&family=Hi+Melody&family=Lilex:wght@400;500;600;700&display=swap');
 
 /* =====================================================
-   LIGHT THEME
-   Cool blue-green institutional palette
+   ATHENAEUM ORBIS — GLOBAL THEME TOKENS
+   Vivid green-dominant light theme + distinct forest/emerald dark theme.
+   No blue accents.
 ===================================================== */
 
-:root[data-theme="light"]{
-
-  /* ===== App Structure ===== */
-  --app-bg: #e8f0ef;
-  --sidebar-bg: #dce8e6;
-  --content-bg: #e8f0ef;
-
-  /* ===== Surfaces ===== */
-  --surface: #f8fbfa;
-  --surface-2: #ffffff;
-
-  /* ===== Table ===== */
-  --table-bg: #f8fbfa;
-  --table-alt: #eef5f3;
-  --table-header: #e2ecea;
-  --table-hover: #e3eeec;
-  --table-active: #d8e7e4;
-
-  /* ===== Inspector ===== */
-  --inspector-bg: #edf5f3;
-  --inspector-border: #c7d8d5;
-  --inspector-header: #e1ecea;
-
-  /* ===== Pagination ===== */
-  --pagination-bg: #e3eceb;
-  --pagination-active: #d4e3e0;
-
-  /* ===== Buttons ===== */
-  --button-bg: #294b4c;
+:root[data-theme="light"] {
+  /* Green-dominant light theme */
+  --app-bg: #e7f0d5;
+  --sidebar-bg: #d4e6b5;
+  --content-bg: #e9f2d9;
+  --surface: #f0f7e2;
+  --surface-2: #e4f0ce;
+  --table-bg: #f0f7e2;
+  --table-alt: #e7f2d7;
+  --table-header: #d1e5b0;
+  --table-hover: #d9edb8;
+  --table-active: #c1df8c;
+  --inspector-bg: #deebc4;
+  --inspector-border: #a7c77a;
+  --inspector-header: #d1e5b0;
+  --pagination-bg: #d4e6b5;
+  --pagination-active: #c1df8c;
+  --button-bg: #397517;
   --button-text: #ffffff;
-
-  /* ===== Text ===== */
-  --text-primary: #172a2b;
-  --text-muted: #607475;
-
-  /* ===== Accent ===== */
-  --accent: #356b68;
-
-  /* ===== States ===== */
-  --hover-bg: rgba(53,107,104,.08);
-  --active-bg: rgba(53,107,104,.14);
-
-  /* ===== Shadow ===== */
-  --shadow: 0 8px 24px rgba(30,60,60,.08);
-
-  /* ===== Borders ===== */
-  --border-main: #c9d7d5;
-
-  /* ===== Hero ===== */
+  --text-primary: #1c2e12;
+  --text-secondary: #3d5728;
+  --text-muted: #5c7645;
+  --accent: #4b871b;
+  --catalog-accent: #4b871b;
+  --catalog-accent-soft: rgba(75, 135, 27, 0.16);
+  --hover-bg: rgba(75, 135, 27, 0.10);
+  --active-bg: rgba(75, 135, 27, 0.18);
+  --shadow: 0 8px 24px rgba(42, 75, 19, 0.13);
+  --catalog-shadow: rgba(42, 75, 19, 0.15);
+  --border-main: #b8d197;
+  --catalog-card-border: rgba(75, 135, 27, 0.34);
+  --catalog-card-border-hover: rgba(60, 117, 23, 0.70);
+  --catalog-card-highlight: rgba(255, 255, 235, 0.62);
+  --catalog-shadow-rgb: 42, 75, 19;
   --hero-filter: none;
+  --surface-success: #d9efc2;
+  --text-success: #35651e;
+  --surface-warning: #fff0c7;
+  --text-warning: #805016;
+  --surface-danger: #f8dfd6;
+  --text-danger: #a33222;
+  --text-error: #a33222;
+  --border-success: #a3cc7e;
+  --border-warning: #e6c56f;
+  --border-danger: #e0a095;
+  --catalog-button-text: #ffffff;
 }
 
-
-/* =====================================================
-   DARK THEME
-   Deep blue-green / graphite palette
-===================================================== */
-
-:root[data-theme="dark"]{
-
-  /* ===== App Structure ===== */
-  --app-bg: #090e0f;
-  --sidebar-bg: #080c0d;
-  --content-bg: #090e0f;
-
-  /* ===== Surfaces ===== */
-  --surface: #111819;
-  --surface-2: #151d1e;
-
-  /* ===== Table ===== */
-  --table-bg: #101718;
-  --table-alt: #141c1d;
-  --table-header: #172021;
-  --table-hover: #1b2829;
-  --table-active: #203032;
-
-  /* ===== Inspector ===== */
-  --inspector-bg: #11191a;
-  --inspector-border: rgba(125,177,173,.18);
-  --inspector-header: #172122;
-
-  /* ===== Pagination ===== */
-  --pagination-bg: #151e1f;
-  --pagination-active: #203032;
-
-  /* ===== Buttons ===== */
-  --button-bg: #203b3c;
-  --button-text: #eef7f5;
-
-  /* ===== Text ===== */
-  --text-primary: #e8f1ef;
-  --text-muted: #96a9a8;
-
-  /* ===== Accent ===== */
-  --accent: #79aaa6;
-
-  /* ===== States ===== */
-  --hover-bg: rgba(121,170,166,.09);
-  --active-bg: rgba(121,170,166,.15);
-
-  /* ===== Shadow ===== */
-  --shadow: 0 10px 32px rgba(0,0,0,.48);
-
-  /* ===== Borders ===== */
-  --border-main: rgba(121,170,166,.15);
-
-  /* ===== Hero ===== */
+:root[data-theme="dark"] {
+  /* Distinct forest/emerald dark theme */
+  --app-bg: #04120a;
+  --sidebar-bg: #06170b;
+  --content-bg: #071a0d;
+  --surface: #0c2713;
+  --surface-2: #12371b;
+  --table-bg: #0c2713;
+  --table-alt: #102f17;
+  --table-header: #1c4022;
+  --table-hover: #214b26;
+  --table-active: #2a5d2b;
+  --inspector-bg: #102e17;
+  --inspector-border: rgba(135, 197, 74, 0.42);
+  --inspector-header: #1c4022;
+  --pagination-bg: #14391c;
+  --pagination-active: #2a5d2b;
+  --button-bg: #69a92b;
+  --button-text: #07150a;
+  --text-primary: #eff8e7;
+  --text-secondary: #c7e5b4;
+  --text-muted: #94bc83;
+  --accent: #a8e341;
+  --catalog-accent: #a8e341;
+  --catalog-accent-soft: rgba(168, 227, 65, 0.20);
+  --hover-bg: rgba(168, 227, 65, 0.12);
+  --active-bg: rgba(168, 227, 65, 0.18);
+  --shadow: 0 10px 32px rgba(0, 0, 0, 0.42);
+  --catalog-shadow: rgba(0, 0, 0, 0.38);
+  --border-main: rgba(132, 195, 83, 0.34);
+  --catalog-card-border: rgba(168, 227, 65, 0.32);
+  --catalog-card-border-hover: rgba(168, 227, 65, 0.70);
+  --catalog-card-highlight: rgba(190, 242, 122, 0.10);
+  --catalog-shadow-rgb: 0, 0, 0;
   --hero-filter: none;
+  --surface-success: #173f1e;
+  --text-success: #b8ef7a;
+  --surface-warning: #403316;
+  --text-warning: #f3cc68;
+  --surface-danger: #442019;
+  --text-danger: #ffad9b;
+  --text-error: #ffad9b;
+  --border-success: rgba(184, 239, 122, 0.55);
+  --border-warning: rgba(243, 204, 104, 0.55);
+  --border-danger: rgba(255, 173, 155, 0.52);
+  --catalog-button-text: #07150a;
 }
 
-
-/* =====================================================
-   BASE
-===================================================== */
-
+/* Base */
 html,
-body{
-  margin:0;
-  min-height:100%;
-  background:var(--app-bg);
-  color:var(--text-primary);
-  font-family:system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--app-bg);
+  color: var(--text-primary);
+  font-family: "Lilex", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }
 
-
-/* =====================================================
-   TYPOGRAPHY
-===================================================== */
-
-h1,
-h2,
-h3,
-h4,
-h5,
-h6{
-  color:var(--text-primary);
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text-primary);
 }
 
-
-/* =====================================================
-   INPUTS
-===================================================== */
-
-input,
-select,
-textarea{
-  background:var(--content-bg);
-  color:var(--text-primary);
-  border:1px solid var(--border-main);
-  padding:6px;
-  outline:none;
+/* Inputs inherit the active theme */
+input, select, textarea {
+  background: var(--content-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border-main);
+  padding: 6px;
+  outline: none;
 }
 
-input::placeholder,
-textarea::placeholder{
-  color:var(--text-muted);
-  opacity:.75;
+input::placeholder, textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 0.78;
 }
 
-input:focus,
-select:focus,
-textarea:focus{
-  border-color:var(--accent);
-  box-shadow:0 0 0 2px var(--hover-bg);
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--hover-bg);
 }
 
-
-/* =====================================================
-   BUTTONS
-===================================================== */
-
-button{
-  background:var(--button-bg);
-  color:var(--button-text);
-  border:none;
+button {
+  background: var(--button-bg);
+  color: var(--button-text);
+  border: none;
 }
 
-button:focus-visible{
-  outline:2px solid var(--accent);
-  outline-offset:2px;
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-
-/* =====================================================
-   TABLE BASE
-===================================================== */
-
-table{
-  width:100%;
-  border-collapse:collapse;
-  background:var(--table-bg);
-  color:var(--text-primary);
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--table-bg);
+  color: var(--text-primary);
 }
 
-th{
-  padding:10px;
-  text-align:left;
-  background:var(--table-header);
-  color:var(--text-primary);
+th {
+  padding: 10px;
+  text-align: left;
+  background: var(--table-header);
+  color: var(--text-primary);
 }
 
-td{
-  padding:9px;
-  border-bottom:1px solid var(--border-main);
+td {
+  padding: 9px;
+  border-bottom: 1px solid var(--border-main);
 }
 
-tbody tr:hover{
-  background:var(--table-hover);
+tbody tr:hover { background: var(--table-hover); }
+
+.sidebar {
+  background: var(--sidebar-bg);
+  color: var(--text-primary);
+  border-color: var(--border-main);
 }
 
+a { color: inherit; }
 
-/* =====================================================
-   SIDEBAR
-===================================================== */
+* { scrollbar-width: thin; scrollbar-color: var(--border-main) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--border-main); border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 
-.sidebar{
-  background:var(--sidebar-bg);
-  color:var(--text-primary);
-  border-color:var(--border-main);
-}
+::selection { background: var(--active-bg); color: var(--text-primary); }
 
-
-/* =====================================================
-   LINKS
-===================================================== */
-
-a{
-  color:inherit;
-}
-
-
-/* =====================================================
-   SCROLLBARS
-===================================================== */
-
-*{
-  scrollbar-width:thin;
-  scrollbar-color:var(--border-main) transparent;
-}
-
-*::-webkit-scrollbar{
-  width:8px;
-  height:8px;
-}
-
-*::-webkit-scrollbar-track{
-  background:transparent;
-}
-
-*::-webkit-scrollbar-thumb{
-  background:var(--border-main);
-  border-radius:8px;
-}
-
-*::-webkit-scrollbar-thumb:hover{
-  background:var(--accent);
-}
-
-
-/* =====================================================
-   SELECTION
-===================================================== */
-
-::selection{
-  background:var(--active-bg);
-  color:var(--text-primary);
-}
-
-
-/* =====================================================
-   PRINT
-===================================================== */
-
-@media print{
-
-  *{
-    -webkit-print-color-adjust:exact !important;
-    print-color-adjust:exact !important;
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
-
 }
+

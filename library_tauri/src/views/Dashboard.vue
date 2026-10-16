@@ -242,6 +242,7 @@ function can(permission) {
 }
 
 const rawCatalogue = ref([])
+const catalogueTotal = ref(null)
 const latestAccessions = ref([])
 const pendingWorks = ref([])
 const pendingItems = ref([])
@@ -330,7 +331,7 @@ async function loadDashboard() {
       ),
       withTimeout(
         (requestSignal) => axios.get("/catalogue/", {
-          params: { limit: 500 },
+          params: { limit: 100 },
           signal: requestSignal,
         }),
         8000,
@@ -414,6 +415,13 @@ const results = await Promise.allSettled(requests)
         : Array.isArray(data)
           ? data
           : []
+
+      const reportedTotal = Number(data?.total)
+      catalogueTotal.value = Number.isFinite(reportedTotal) && reportedTotal >= 0
+        ? reportedTotal
+        : Array.isArray(data)
+          ? data.length
+          : null
     }
 
     if (latestRes.status === "fulfilled") {
@@ -643,12 +651,13 @@ function numberOrZero(value) {
 const totalItems = computed(() => {
   if (summaryStats.value.total_items != null) {
     const total = Number(summaryStats.value.total_items)
-    return Number.isFinite(total) && total >= 0
-      ? total
-      : rawCatalogue.value.length
+    if (Number.isFinite(total) && total >= 0) return total
   }
 
-  return rawCatalogue.value.length
+  const catalogueCount = Number(catalogueTotal.value)
+  return Number.isFinite(catalogueCount) && catalogueCount >= 0
+    ? catalogueCount
+    : rawCatalogue.value.length
 })
 
 function aggregateRows(source, labelKey = "label", countKey = "count") {

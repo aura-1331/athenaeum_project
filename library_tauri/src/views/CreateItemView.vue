@@ -233,11 +233,13 @@
 
 <script setup>
 import { ref, watch, computed, onMounted, onUnmounted } from "vue"
+import { useRoute } from "vue-router"
 import axios from "axios"
 import { dispatchAuditTrail } from "../utils/audit"
 import { storeToRefs } from "pinia"
 import { useAuthStore } from "@/stores/auth"
 
+const route = useRoute()
 const authStore = useAuthStore()
 const { userRole: user_role } = storeToRefs(authStore)
 
@@ -328,7 +330,8 @@ async function executeConfirmedCreation() {
       },
       {
         headers: {
-          "X-Change-Reason": reason
+          "X-Change-Reason": reason,
+          "X-Registration-Mode": isChief.value ? "DIRECT_CHIEF" : "KEEPER_SUBMISSION"
         }
       }
     )
@@ -366,6 +369,12 @@ async function executeConfirmedCreation() {
 }
 
 onMounted(() => {
+  // Continue from the Work registration dossier without making the operator retype its identity.
+  const queryWorkId = Array.isArray(route.query.work_id) ? route.query.work_id[0] : route.query.work_id
+  const queryLanguageId = Array.isArray(route.query.language_id) ? route.query.language_id[0] : route.query.language_id
+  if (queryWorkId && /^\d+$/.test(String(queryWorkId))) form.value.work_id = String(queryWorkId)
+  if (queryLanguageId) form.value.language_id = String(queryLanguageId)
+
   themeObserver = new MutationObserver(() => {
     themeMode.value =
       document.documentElement.getAttribute("data-theme") || "dark"

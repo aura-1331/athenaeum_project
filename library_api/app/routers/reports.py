@@ -10,41 +10,27 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 # ACCESSIONS REPORT
 # ============================================================
 
-@audit_action("VIEW_ACCESSIONS_REPORT")
 @router.get(
     "/accessions",
-    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
+    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))],
 )
+@audit_action("VIEW_ACCESSIONS_REPORT")
 def accessions_report(
+    request: Request,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0, le=1000000),
-    request: Request = None,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
-    if limit < 1 or limit > 100:
-        raise HTTPException(
-            status_code=400,
-            detail="Limit must be between 1 and 100."
-        )
-
-    if offset < 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Offset cannot be negative."
-        )
-
     conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
-        # Total number of records
         cur.execute("""
             SELECT COUNT(*)
             FROM public.status_audit
         """)
         total = cur.fetchone()[0]
 
-        # Requested page
         cur.execute("""
             SELECT
                 accession_no,
@@ -58,25 +44,33 @@ def accessions_report(
         """, (limit, offset))
 
         rows = cur.fetchall()
-
         items = [
             {
-                "accession_no": r[0],
-                "old_status": r[1],
-                "new_status": r[2],
-                "changed_by": r[3],
-                "changed_at": r[4]
+                "accession_no": row[0],
+                "old_status": row[1],
+                "new_status": row[2],
+                "changed_by": row[3],
+                "changed_at": row[4],
             }
-            for r in rows
+            for row in rows
         ]
 
         return {
             "items": items,
             "total": total,
             "limit": limit,
-            "offset": offset
+            "offset": offset,
         }
-
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as exc:
+        conn.rollback()
+        print(f"Accessions report failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to load the accessions report.",
+        ) from exc
     finally:
         cur.close()
         conn.close()
@@ -86,41 +80,27 @@ def accessions_report(
 # ACTIVITY REPORT
 # ============================================================
 
-@audit_action("VIEW_ACTIVITY_REPORT")
 @router.get(
     "/activity",
-    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
+    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))],
 )
+@audit_action("VIEW_ACTIVITY_REPORT")
 def activity_report(
+    request: Request,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0, le=1000000),
-    request: Request = None,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
-    if limit < 1 or limit > 100:
-        raise HTTPException(
-            status_code=400,
-            detail="Limit must be between 1 and 100."
-        )
-
-    if offset < 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Offset cannot be negative."
-        )
-
     conn = get_connection(request=request)
     cur = conn.cursor()
 
     try:
-        # Total number of records
         cur.execute("""
             SELECT COUNT(*)
             FROM public.activity_log
         """)
         total = cur.fetchone()[0]
 
-        # Requested page
         cur.execute("""
             SELECT
                 log_id,
@@ -136,27 +116,35 @@ def activity_report(
         """, (limit, offset))
 
         rows = cur.fetchall()
-
         items = [
             {
-                "log_id": r[0],
-                "user_id": r[1],
-                "action": r[2],
-                "entity": r[3],
-                "entity_id": r[4],
-                "details": r[5],
-                "timestamp": r[6]
+                "log_id": row[0],
+                "user_id": row[1],
+                "action": row[2],
+                "entity": row[3],
+                "entity_id": row[4],
+                "details": row[5],
+                "timestamp": row[6],
             }
-            for r in rows
+            for row in rows
         ]
 
         return {
             "items": items,
             "total": total,
             "limit": limit,
-            "offset": offset
+            "offset": offset,
         }
-
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as exc:
+        conn.rollback()
+        print(f"Activity report failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to load the activity report.",
+        ) from exc
     finally:
         cur.close()
         conn.close()

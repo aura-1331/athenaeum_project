@@ -1,14 +1,14 @@
 # app/routers/circulation.py
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from pydantic import BaseModel
 
 from app.auth import get_current_user, require_role
 from app.database import get_connection, get_config_value
-from app.services.audit_service import log_audit_activity
 from app.audit_utils import audit_action
+from app.routers.review_utils import _audit_ledger
 
 router = APIRouter(prefix="/circulation", tags=["Circulation & Fines"])
 
@@ -21,7 +21,6 @@ class ReturnRequest(BaseModel):
 # ---------------------------------BOOK ISSUING LOGIC------------------------------------------------------------------#
 # ---------------------------------------------------------------------------------------------------------------------#
 
-@audit_action("ISSUE_BOOK")
 @router.post(
     "/issue/{serial_no}",
     status_code=201,
@@ -60,6 +59,7 @@ async def issue_book(
             SELECT availability_status, is_deleted
             FROM public.items
             WHERE serial_no = %s
+            FOR UPDATE
             """,
             (serial_no,)
         )
@@ -136,40 +136,31 @@ async def issue_book(
         )
 
 
-        # Cryptographic ledger anchor
-        audit_ok = log_audit_activity(
+        # Cryptographic ledger anchor. This shares the transaction with the loan and item updates.
+        _audit_ledger(
             request=request,
-            user_id=str(current_user.get("user_id", "UNKNOWN")),
-            username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
-            role=str(current_user.get("role", "The Keeper")),
-            designation=str(current_user.get("designation") or current_user.get("role", "The Keeper")),
-            category="CIRCULATION",
+            current_user=current_user,
+            conn=conn,
             action_type="ISSUE_BOOK",
             target_entity="LOAN",
-            target_id=str(loan_id),
-            endpoint=request.url.path,
+            target_id=loan_id,
+            category="CIRCULATION",
             http_method="POST",
             justification=f"Assigned item {serial_no} to borrower {borrower_id} for {days} days",
-            diff_payload={
+            diff={
                 "serial_no": serial_no,
                 "borrower_id": borrower_id,
                 "loan_id": loan_id,
                 "loan_days": days,
                 "due_date": due_date.isoformat(),
-                "status_transition": {"from": "AVAILABLE", "to": "IN_RESEARCH_USE"}
+                "status_transition": {"from": "AVAILABLE", "to": "IN_RESEARCH_USE"},
             },
-            extra_metadata={
+            extra={
                 "serial_no": serial_no,
                 "borrower_id": borrower_id,
-                "due_date": due_date.isoformat()
+                "due_date": due_date.isoformat(),
             },
-            conn=conn
         )
-
-        if not audit_ok:
-            raise RuntimeError(
-                "Audit record could not be written; operation rolled back"
-            )
         
         conn.commit()
 
@@ -178,9 +169,9 @@ async def issue_book(
             "due_date": due_date
         }
 
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        raise e
+        raise
 
     finally:
         cur.close()
@@ -191,7 +182,6 @@ async def issue_book(
 # -------------------------------------------------BOOK RETURNING LOGIC------------------------------------------------------------------#
 # ----------------------------------------------------------------------------------------------------------------------------------------#
 
-@audit_action("RETURN_BOOK")
 @router.post(
     "/return/{serial_no}",
     dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
@@ -212,6 +202,7 @@ async def return_book(
             FROM loans
             WHERE serial_no = %s
               AND status = 'ACTIVE'
+            FOR UPDATE
             """,
             (serial_no,)
         )
@@ -307,41 +298,33 @@ async def return_book(
                 )
 
 
-        # Cryptographic ledger anchor
-        audit_ok = log_audit_activity(
+        # Cryptographic ledger anchor. The return, status transition, fine (if any),
+        # and audit record commit or roll back together.
+        _audit_ledger(
             request=request,
-            user_id=str(current_user.get("user_id", "UNKNOWN")),
-            username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
-            role=str(current_user.get("role", "The Keeper")),
-            designation=str(current_user.get("designation") or current_user.get("role", "The Keeper")),
-            category="CIRCULATION",
+            current_user=current_user,
+            conn=conn,
             action_type="RETURN_BOOK",
             target_entity="LOAN",
-            target_id=str(loan_id),
-            endpoint=request.url.path,
+            target_id=loan_id,
+            category="CIRCULATION",
             http_method="POST",
             justification=f"Returned item {serial_no}. Notes: {return_data.notes or 'Standard return'}",
-            diff_payload={
+            diff={
                 "serial_no": serial_no,
                 "loan_id": loan_id,
                 "borrower_id": borrower_id,
                 "days_late": days_late,
                 "fine_assessed": fine_amount,
                 "notes": return_data.notes,
-                "status_transition": {"from": "IN_RESEARCH_USE", "to": "AVAILABLE"}
+                "status_transition": {"from": "IN_RESEARCH_USE", "to": "AVAILABLE"},
             },
-            extra_metadata={
+            extra={
                 "serial_no": serial_no,
                 "borrower_id": borrower_id,
-                "fine_amount": fine_amount
+                "fine_amount": fine_amount,
             },
-            conn=conn
         )
-
-        if not audit_ok:
-            raise RuntimeError(
-                "Audit record could not be written; operation rolled back"
-            )
         
         conn.commit()
 
@@ -350,9 +333,9 @@ async def return_book(
             "fine": fine_amount
         }
 
-    except Exception as e:
+    except Exception:
         conn.rollback()
-        raise e
+        raise
 
     finally:
         cur.close()
@@ -363,12 +346,12 @@ async def return_book(
 # -------------------------------------------------RETURNING OVERDUE LOGIC------------------------------------------------------------------#
 # ----------------------------------------------------------------------------------------------------------------------------------------#
 
-@audit_action("LIST_OVERDUE")
 @router.get(
     "/overdue",
     tags=["Circulation Monitoring"],
     dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
 )
+@audit_action("LIST_OVERDUE")
 async def list_overdue_books(
     request: Request, current_user: dict = Depends(get_current_user)
 ):
@@ -428,7 +411,6 @@ async def list_overdue_books(
 # -------------------------------------------------------LATE FINE LOGIC------------------------------------------------------------------#
 # ----------------------------------------------------------------------------------------------------------------------------------------#
 
-@audit_action("PAY_FINE")
 @router.post(
     "/fines/pay/{fine_id}",
     dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
@@ -472,38 +454,29 @@ async def pay_fine(
         fine_user_id = res[1]
 
 
-        # Cryptographic ledger anchor
-        audit_ok = log_audit_activity(
+        # Cryptographic ledger anchor. The payment and audit event are atomic.
+        _audit_ledger(
             request=request,
-            user_id=str(current_user.get("user_id", "UNKNOWN")),
-            username=str(current_user.get("username") or current_user.get("name") or "Archive Operator"),
-            role=str(current_user.get("role", "The Keeper")),
-            designation=str(current_user.get("designation") or current_user.get("role", "The Keeper")),
-            category="FINANCE",
+            current_user=current_user,
+            conn=conn,
             action_type="PAY_FINE",
             target_entity="FINE",
-            target_id=str(fine_id),
-            endpoint=request.url.path,
+            target_id=fine_id,
+            category="FINANCE",
             http_method="POST",
             justification=f"Received fine payment of {amount_paid} from user {fine_user_id}",
-            diff_payload={
+            diff={
                 "fine_id": fine_id,
                 "user_id": fine_user_id,
                 "amount_paid": amount_paid,
-                "status_transition": {"from": "UNPAID", "to": "PAID"}
+                "status_transition": {"from": "UNPAID", "to": "PAID"},
             },
-            extra_metadata={
+            extra={
                 "fine_id": fine_id,
                 "user_id": fine_user_id,
-                "amount": amount_paid
+                "amount": amount_paid,
             },
-            conn=conn
         )
-
-        if not audit_ok:
-            raise RuntimeError(
-                "Audit record could not be written; operation rolled back"
-            )
         
         conn.commit()
 
@@ -512,6 +485,9 @@ async def pay_fine(
             "amount": amount_paid
         }
 
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         cur.close()
         conn.close()

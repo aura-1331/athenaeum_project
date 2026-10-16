@@ -1,183 +1,240 @@
-# app/routers/incidents.py
+"""Archive incident reporting, review, history, and resolution routes."""
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel
+
 from app.auth import get_current_user, require_role
 from app.database import get_connection
 from app.audit_utils import audit_action
-from app.services.audit_service import log_audit_activity
+from app.routers.review_utils import _audit_ledger
 
 router = APIRouter(prefix="/incidents", tags=["Archive Incidents"])
 
-# -----------------------------
-# REQUEST MODELS
-# -----------------------------
+
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
 class IncidentCreate(BaseModel):
     serial_no: int
     incident_type: str
     severity: str = "MEDIUM"
     description: str
 
+
 class IncidentResolve(BaseModel):
     resolution_notes: str
 
-# -----------------------------
-# REPORT INCIDENT
-# -----------------------------
-@audit_action("REPORT_INCIDENT")
+
+# ---------------------------------------------------------------------------
+# Report incident
+# ---------------------------------------------------------------------------
 @router.post(
     "/report",
-    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
+    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))],
 )
 async def report_incident(
     payload: IncidentCreate,
     request: Request,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
+    # Validate the exact values supported by the incident UI.
+    incident_type = str(payload.incident_type or "").strip().upper()
+    severity = str(payload.severity or "").strip().upper()
+    description = str(payload.description or "").strip()
+
+    if incident_type not in {"MISSING", "DAMAGED"}:
+        raise HTTPException(status_code=400, detail="Unknown incident type.")
+    if severity not in {"LOW", "MEDIUM", "HIGH"}:
+        raise HTTPException(status_code=400, detail="Unknown severity.")
+    if not description:
+        raise HTTPException(status_code=400, detail="Description is required.")
+    if len(description) > 3000:
+        raise HTTPException(status_code=400, detail="Description is too long.")
+
     conn = get_connection(request=request)
     cur = conn.cursor()
     try:
-        # 1. Fetch item availability baseline
         cur.execute(
-            "SELECT availability_status FROM items WHERE serial_no = %s", 
-            (payload.serial_no,)
+            """
+            SELECT availability_status, is_deleted
+            FROM public.items
+            WHERE serial_no = %s
+            FOR UPDATE
+            """,
+            (payload.serial_no,),
         )
         item_row = cur.fetchone()
         if not item_row:
             raise HTTPException(status_code=404, detail="Item not found.")
-        
-        prior_status = item_row[0]
 
-        # 2. Record incident
-        cur.execute("""
-            INSERT INTO archive_incidents (serial_no, incident_type, severity, reported_by, description)
-            VALUES (%s, %s, %s, %s, %s) RETURNING incident_id
-        """, (payload.serial_no, payload.incident_type, payload.severity, current_user["user_id"], payload.description))
-        
+        prior_status, is_deleted = item_row
+        # Pending, rejected, deleted, or otherwise non-catalogued copies must not
+        # be modified through incident reporting.
+        if is_deleted or str(prior_status or "").strip().upper() in {"PENDING", "REJECTED"}:
+            raise HTTPException(
+                status_code=409,
+                detail="Incidents can only be reported on approved, active items.",
+            )
+
+        cur.execute(
+            """
+            INSERT INTO public.archive_incidents
+                (serial_no, incident_type, severity, reported_by, description)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING incident_id
+            """,
+            (
+                payload.serial_no,
+                incident_type,
+                severity,
+                current_user["user_id"],
+                description,
+            ),
+        )
         incident_id = cur.fetchone()[0]
 
-        # 3. Transition item status if applicable
-        new_status = prior_status
-        if payload.incident_type in ["MISSING", "DAMAGED"]:
-            new_status = payload.incident_type
-            cur.execute(
-                "UPDATE items SET availability_status = %s WHERE serial_no = %s", 
-                (new_status, payload.serial_no)
+        # Reporting MISSING or DAMAGED changes the holding's availability state.
+        new_status = incident_type
+        cur.execute(
+            """
+            UPDATE public.items
+            SET availability_status = %s
+            WHERE serial_no = %s
+              AND is_deleted = FALSE
+            RETURNING availability_status
+            """,
+            (new_status, payload.serial_no),
+        )
+        changed_item = cur.fetchone()
+        if not changed_item:
+            raise HTTPException(
+                status_code=409,
+                detail="The holding changed before the incident could be recorded.",
             )
+        new_status = changed_item[0]
 
-
-        # 4. Cryptographic ledger anchor
-        actor_id = str(current_user.get("user_id", "UNKNOWN"))
-        actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
-        actor_role = str(current_user.get("role", "The Keeper"))
-
-        audit_ok = log_audit_activity(
+        _audit_ledger(
             request=request,
-            user_id=actor_id,
-            username=actor_name,
-            role=actor_role,
-            designation=str(current_user.get("designation") or actor_role),
-            category="PRESERVATION_INCIDENTS",
+            current_user=current_user,
+            conn=conn,
             action_type="REPORT_INCIDENT",
             target_entity="INCIDENT",
-            target_id=str(incident_id),
-            endpoint=request.url.path,
+            target_id=incident_id,
+            category="PRESERVATION_INCIDENTS",
             http_method="POST",
-            justification=payload.description or f"Reported {payload.severity} {payload.incident_type} incident",
-            diff_payload={
+            justification=description or f"Reported {severity} {incident_type} incident",
+            diff={
                 "incident_id": incident_id,
                 "serial_no": payload.serial_no,
-                "incident_type": payload.incident_type,
-                "severity": payload.severity,
-                "description": payload.description,
+                "incident_type": incident_type,
+                "severity": severity,
+                "description": description,
                 "item_status_transition": {
                     "from": prior_status,
-                    "to": new_status
-                }
+                    "to": new_status,
+                },
             },
-            extra_metadata={
+            extra={
                 "incident_id": incident_id,
                 "serial_no": payload.serial_no,
-                "severity": payload.severity
+                "severity": severity,
             },
-            conn=conn
         )
 
-        if not audit_ok:
-            raise RuntimeError(
-                "Audit record could not be written; operation rolled back"
-            )
-        
         conn.commit()
-
-        return {"message": "Incident reported successfully", "incident_id": incident_id}
+        return {
+            "message": "Incident reported successfully",
+            "incident_id": incident_id,
+        }
     except HTTPException:
-        if conn:
-            conn.rollback()
+        conn.rollback()
         raise
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise HTTPException(status_code=500, detail="Internal server error")
+    except Exception as exc:
+        conn.rollback()
+        print(f"Incident report failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=500, detail="Unable to report incident.") from exc
     finally:
         cur.close()
         conn.close()
 
-# -----------------------------
-# VIEW OPEN INCIDENTS
-# -----------------------------
-@audit_action("VIEW_OPEN_INCIDENTS")
+
+# ---------------------------------------------------------------------------
+# View open incidents (read access is audited by the decorator)
+# ---------------------------------------------------------------------------
 @router.get(
     "/open",
-    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
+    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))],
 )
+@audit_action("VIEW_OPEN_INCIDENTS")
 def get_open_incidents(
     request: Request,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
     conn = get_connection(request=request)
     cur = conn.cursor()
     try:
-        cur.execute("""
+        cur.execute(
+            """
             SELECT incident_id, serial_no, incident_type, severity, status, reported_at
-            FROM archive_incidents WHERE status != 'RESOLVED' ORDER BY reported_at DESC
-        """)
-        return [{"incident_id": r[0], "serial_no": r[1], "incident_type": r[2], 
-                 "severity": r[3], "status": r[4], "reported_at": r[5]} for r in cur.fetchall()]
+            FROM public.archive_incidents
+            WHERE status <> 'RESOLVED'
+            ORDER BY reported_at DESC, incident_id DESC
+            """
+        )
+        return [
+            {
+                "incident_id": row[0],
+                "serial_no": row[1],
+                "incident_type": row[2],
+                "severity": row[3],
+                "status": row[4],
+                "reported_at": row[5],
+            }
+            for row in cur.fetchall()
+        ]
+    except Exception as exc:
+        conn.rollback()
+        print(f"Open incident lookup failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=500, detail="Unable to load open incidents.") from exc
     finally:
         cur.close()
         conn.close()
 
 
-# -----------------------------
-# INCIDENT HISTORY
-# -----------------------------
-@audit_action("VIEW_INCIDENT_HISTORY")
+# ---------------------------------------------------------------------------
+# Incident history
+# ---------------------------------------------------------------------------
 @router.get(
     "/history",
-    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
+    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))],
 )
+@audit_action("VIEW_INCIDENT_HISTORY")
 def get_incident_history(
     request: Request,
     current_user: dict = Depends(get_current_user),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
-    search: str | None = Query(None),
+    search: str | None = Query(None, max_length=300),
     incident_type: str | None = Query(None),
     severity: str | None = Query(None),
     date_from: str | None = Query(None),
     date_to: str | None = Query(None),
-    sort: str = Query("newest")
+    sort: str = Query("newest"),
 ):
+    if incident_type and incident_type not in {"MISSING", "DAMAGED"}:
+        raise HTTPException(status_code=400, detail="Unknown incident type filter.")
+    if severity and severity not in {"LOW", "MEDIUM", "HIGH"}:
+        raise HTTPException(status_code=400, detail="Unknown severity filter.")
+
     conn = get_connection(request=request)
     cur = conn.cursor()
-
     try:
         conditions = ["ai.status = 'RESOLVED'"]
-        params = []
+        params: list[object] = []
 
         if search:
-            conditions.append("""
+            conditions.append(
+                """
                 (
                     CAST(ai.incident_id AS TEXT) ILIKE %s
                     OR CAST(ai.serial_no AS TEXT) ILIKE %s
@@ -186,51 +243,51 @@ def get_incident_history(
                     OR COALESCE(ai.resolution_notes, '') ILIKE %s
                     OR COALESCE(reporter.name, '') ILIKE %s
                 )
-            """)
-
+                """
+            )
             search_value = f"%{search}%"
             params.extend([search_value] * 6)
 
         if incident_type:
             conditions.append("ai.incident_type = %s")
             params.append(incident_type)
-
         if severity:
             conditions.append("ai.severity = %s")
             params.append(severity)
-
         if date_from:
-            conditions.append("ai.reported_at >= %s")
+            conditions.append("ai.reported_at >= %s::date")
             params.append(date_from)
-
         if date_to:
             conditions.append("ai.reported_at < (%s::date + INTERVAL '1 day')")
             params.append(date_to)
 
         where_clause = " AND ".join(conditions)
+        order_clause = {
+            "oldest": "ai.reported_at ASC, ai.incident_id ASC",
+            "incident_id": "ai.incident_id DESC",
+            "newest": "ai.reported_at DESC, ai.incident_id DESC",
+        }.get(sort)
+        if order_clause is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Sort must be newest, oldest, or incident_id.",
+            )
 
-        if sort == "oldest":
-            order_clause = "ai.reported_at ASC"
-        elif sort == "incident_id":
-            order_clause = "ai.incident_id DESC"
-        else:
-            order_clause = "ai.reported_at DESC"
-
-        count_query = f"""
-            SELECT COUNT(*)
-            FROM archive_incidents ai
-            LEFT JOIN items i ON i.serial_no = ai.serial_no
-            LEFT JOIN users reporter ON reporter.user_id = ai.reported_by
-            LEFT JOIN users assignee ON assignee.user_id = ai.assigned_to
-            WHERE {where_clause}
+        joins = """
+            FROM public.archive_incidents ai
+            LEFT JOIN public.items i ON i.serial_no = ai.serial_no
+            LEFT JOIN public.users reporter ON reporter.user_id = ai.reported_by
+            LEFT JOIN public.users assignee ON assignee.user_id = ai.assigned_to
         """
-
-        cur.execute(count_query, params)
+        cur.execute(
+            f"SELECT COUNT(*) {joins} WHERE {where_clause}",
+            tuple(params),
+        )
         total = cur.fetchone()[0]
-
         offset = (page - 1) * page_size
 
-        history_query = f"""
+        cur.execute(
+            f"""
             SELECT
                 ai.incident_id,
                 ai.serial_no,
@@ -246,144 +303,197 @@ def get_incident_history(
                 ai.resolution_notes,
                 ai.reported_at,
                 ai.resolved_at
-            FROM archive_incidents ai
-            LEFT JOIN items i ON i.serial_no = ai.serial_no
-            LEFT JOIN users reporter ON reporter.user_id = ai.reported_by
-            LEFT JOIN users assignee ON assignee.user_id = ai.assigned_to
+            {joins}
             WHERE {where_clause}
             ORDER BY {order_clause}
             LIMIT %s OFFSET %s
-        """
-
-        cur.execute(history_query, params + [page_size, offset])
+            """,
+            tuple(params + [page_size, offset]),
+        )
         rows = cur.fetchall()
-
-        total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+        total_pages = (total + page_size - 1) // page_size if total else 0
 
         return {
             "items": [
                 {
-                    "incident_id": r[0],
-                    "serial_no": r[1],
-                    "accession_no": r[2],
-                    "incident_type": r[3],
-                    "severity": r[4],
-                    "status": r[5],
-                    "reported_by": r[6],
-                    "reported_by_name": r[7],
-                    "assigned_to": r[8],
-                    "assigned_to_name": r[9],
-                    "description": r[10],
-                    "resolution_notes": r[11],
-                    "reported_at": r[12],
-                    "resolved_at": r[13]
+                    "incident_id": row[0],
+                    "serial_no": row[1],
+                    "accession_no": row[2],
+                    "incident_type": row[3],
+                    "severity": row[4],
+                    "status": row[5],
+                    "reported_by": row[6],
+                    "reported_by_name": row[7],
+                    "assigned_to": row[8],
+                    "assigned_to_name": row[9],
+                    "description": row[10],
+                    "resolution_notes": row[11],
+                    "reported_at": row[12],
+                    "resolved_at": row[13],
                 }
-                for r in rows
+                for row in rows
             ],
             "page": page,
             "page_size": page_size,
             "total": total,
-            "total_pages": total_pages
+            "total_pages": total_pages,
         }
-
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as exc:
+        conn.rollback()
+        print(f"Incident history lookup failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=500, detail="Unable to load incident history.") from exc
     finally:
         cur.close()
         conn.close()
 
 
-# -----------------------------
-# RESOLVE INCIDENT
-# -----------------------------
-@audit_action("RESOLVE_INCIDENT")
+# ---------------------------------------------------------------------------
+# Resolve incident
+# ---------------------------------------------------------------------------
 @router.patch(
     "/resolve/{incident_id}",
-    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))]
+    dependencies=[Depends(require_role(["The Keeper", "The Chief"]))],
 )
 async def resolve_incident(
     incident_id: int,
     payload: IncidentResolve,
     request: Request,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
 ):
+    resolution_notes = str(payload.resolution_notes or "").strip()
+    if not resolution_notes:
+        raise HTTPException(status_code=400, detail="Resolution notes are required.")
+    if len(resolution_notes) > 3000:
+        raise HTTPException(status_code=400, detail="Resolution notes are too long.")
+
     conn = get_connection(request=request)
     cur = conn.cursor()
     try:
-        # 1. Fetch incident details and affected serial_no
-        cur.execute("""
-            SELECT serial_no, incident_type, severity, description 
-            FROM archive_incidents 
-            WHERE incident_id = %s AND status != 'RESOLVED'
-        """, (incident_id,))
+        # Lock the incident while resolving it so two requests cannot both resolve it.
+        cur.execute(
+            """
+            SELECT serial_no, incident_type, severity, description, status
+            FROM public.archive_incidents
+            WHERE incident_id = %s
+              AND status <> 'RESOLVED'
+            FOR UPDATE
+            """,
+            (incident_id,),
+        )
         incident = cur.fetchone()
         if not incident:
-            raise HTTPException(status_code=404, detail="Incident not found or already resolved.")
+            raise HTTPException(
+                status_code=404,
+                detail="Incident not found or already resolved.",
+            )
 
-        affected_serial_no = incident[0]
-        incident_type = incident[1]
+        affected_serial_no, incident_type, severity, description, prior_incident_status = incident
 
-        # 2. Mark incident as resolved
-        cur.execute("""
-            UPDATE archive_incidents 
-            SET status = 'RESOLVED', resolution_notes = %s, resolved_at = CURRENT_TIMESTAMP
-            WHERE incident_id = %s
-        """, (payload.resolution_notes, incident_id))
-
-        # 3. Restore holding status to AVAILABLE
         cur.execute(
-            "UPDATE items SET availability_status = 'AVAILABLE' WHERE serial_no = %s", 
-            (affected_serial_no,)
+            """
+            SELECT availability_status, is_deleted
+            FROM public.items
+            WHERE serial_no = %s
+            FOR UPDATE
+            """,
+            (affected_serial_no,),
         )
+        item_row = cur.fetchone()
+        prior_item_status = item_row[0] if item_row else None
+        item_deleted = bool(item_row[1]) if item_row else True
+        resulting_item_status = prior_item_status
 
+        cur.execute(
+            """
+            UPDATE public.archive_incidents
+            SET status = 'RESOLVED',
+                resolution_notes = %s,
+                resolved_at = CURRENT_TIMESTAMP
+            WHERE incident_id = %s
+              AND status <> 'RESOLVED'
+            RETURNING status
+            """,
+            (resolution_notes, incident_id),
+        )
+        resolved_row = cur.fetchone()
+        if not resolved_row:
+            raise HTTPException(
+                status_code=409,
+                detail="The incident changed before it could be resolved.",
+            )
 
-        # 4. Cryptographic ledger anchor
-        actor_id = str(current_user.get("user_id", "UNKNOWN"))
-        actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
-        actor_role = str(current_user.get("role", "The Keeper"))
+        # Only restore a live holding whose current state is actually MISSING or
+        # DAMAGED. Never make a pending, rejected, deleted, or loaned item available.
+        item_status_changed = False
+        if (
+            item_row
+            and not item_deleted
+            and str(prior_item_status or "").strip().upper() in {"MISSING", "DAMAGED"}
+        ):
+            cur.execute(
+                """
+                UPDATE public.items
+                SET availability_status = 'AVAILABLE'
+                WHERE serial_no = %s
+                  AND is_deleted = FALSE
+                  AND availability_status IN ('MISSING', 'DAMAGED')
+                RETURNING availability_status
+                """,
+                (affected_serial_no,),
+            )
+            updated_item = cur.fetchone()
+            if updated_item:
+                resulting_item_status = updated_item[0]
+                item_status_changed = True
 
-        audit_ok = log_audit_activity(
+        _audit_ledger(
             request=request,
-            user_id=actor_id,
-            username=actor_name,
-            role=actor_role,
-            designation=str(current_user.get("designation") or actor_role),
-            category="PRESERVATION_INCIDENTS",
+            current_user=current_user,
+            conn=conn,
             action_type="RESOLVE_INCIDENT",
             target_entity="INCIDENT",
-            target_id=str(incident_id),
-            endpoint=request.url.path,
+            target_id=incident_id,
+            category="PRESERVATION_INCIDENTS",
             http_method="PATCH",
-            justification=payload.resolution_notes or f"Resolved incident {incident_id} for holding {affected_serial_no}",
-            diff_payload={
+            justification=resolution_notes,
+            diff={
                 "incident_id": incident_id,
                 "serial_no": affected_serial_no,
                 "incident_type": incident_type,
-                "resolution_notes": payload.resolution_notes,
-                "status_transition": {"from": "OPEN", "to": "RESOLVED"},
-                "item_status_transition": {"from": incident_type, "to": "AVAILABLE"}
+                "severity": severity,
+                "description": description,
+                "resolution_notes": resolution_notes,
+                "status_transition": {
+                    "from": prior_incident_status,
+                    "to": resolved_row[0],
+                },
+                "item_status_transition": {
+                    "from": prior_item_status,
+                    "to": resulting_item_status,
+                    "changed": item_status_changed,
+                },
             },
-            extra_metadata={
+            extra={
                 "incident_id": incident_id,
-                "serial_no": affected_serial_no
+                "serial_no": affected_serial_no,
+                "item_status_changed": item_status_changed,
             },
-            conn=conn
+            before={"status": prior_incident_status},
+            after={"status": resolved_row[0]},
         )
 
-        if not audit_ok:
-            raise RuntimeError(
-                "Audit record could not be written; operation rolled back"
-            )
-        
         conn.commit()
-
         return {"message": "Incident resolved successfully"}
     except HTTPException:
-        if conn:
-            conn.rollback()
+        conn.rollback()
         raise
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        raise HTTPException(status_code=500, detail="Internal server error")
+    except Exception as exc:
+        conn.rollback()
+        print(f"Incident resolution failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=500, detail="Unable to resolve incident.") from exc
     finally:
         cur.close()
         conn.close()

@@ -107,6 +107,12 @@ def get_current_user(
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid access token")
 
+    # SECURITY: the half-finished 2FA login token ("2fa_preauth") is signed like a
+    # normal access token. It must NEVER be accepted as a real session, otherwise
+    # anyone who knows only the password could skip the 2FA code completely.
+    if payload.get("scope"):
+        raise HTTPException(status_code=401, detail="Invalid access token")
+
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid access token")

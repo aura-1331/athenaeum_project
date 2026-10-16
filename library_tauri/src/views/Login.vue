@@ -344,9 +344,11 @@ async function verifyTwoFA() {
         headers: {
           "Content-Type": "application/json",
         },
+        // The server expects the field to be called "totp_code". The old name ("token")
+        // made every 2FA login fail with a "field required" error.
         body: JSON.stringify({
           temp_token: temp2faToken.value,
-          token: tokenPin.value,
+          totp_code: tokenPin.value,
           remember_me: rememberMe.value,
         }),
       })

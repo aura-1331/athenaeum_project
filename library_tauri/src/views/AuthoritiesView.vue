@@ -416,6 +416,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 
 const API_BASE = 'http://127.0.0.1:8000'
 
@@ -483,11 +484,13 @@ const filteredAuthorities = computed(() => {
 })
 
 function getAccessToken() {
+  const authStore = useAuthStore()
+  if (authStore.accessToken) return authStore.accessToken
+  
   try {
-    const auth = JSON.parse(localStorage.getItem('auth'))
-    return auth?.accessToken || auth?.token || null
+    const auth = JSON.parse(localStorage.getItem('auth') || '{}')
+    return auth?.accessToken || auth?.token || auth?.user?.accessToken || null
   } catch (error) {
-    console.error('Auth state read error:', error)
     return null
   }
 }

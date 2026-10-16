@@ -46,6 +46,23 @@ def execute_operation(db, accession_no: str, action: str, actor: str, notes: str
 
         old_status = row["status"]
 
+        # SECURITY / WORKFLOW GUARD 1:
+        # An item that is still waiting for the Chief's approval (or was refused) must never
+        # be moved on the shelf from here. Before, "OVERRIDE" could turn a PENDING item into
+        # AVAILABLE and so skip the Chief's approval completely.
+        if str(old_status or "").upper() in {"PENDING", "REJECTED"}:
+            raise Exception(
+                "This item has not been approved by The Chief yet; its status cannot be changed here"
+            )
+
+        # SECURITY / WORKFLOW GUARD 2:
+        # OVERRIDE only means "put a lost or damaged item back on the shelf". It must not
+        # flip an item that is out on loan (the loan would still be open) or already available.
+        if action == "OVERRIDE" and str(old_status or "").upper() not in {"LOST", "DAMAGED", "MISSING"}:
+            raise Exception(
+                "OVERRIDE is only allowed for items currently marked lost, missing or damaged"
+            )
+
         # Handle allowed admin transitions
         if action == "LOST":
             new_status = "LOST"

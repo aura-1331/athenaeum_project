@@ -33,7 +33,6 @@ def health_check(request: Request):
             raise RuntimeError("Database health query returned an unexpected result")
 
         total_latency_ms = round((perf_counter() - started) * 1000, 2)
-
         return {
             "status": "ok",
             "backend": {
@@ -49,8 +48,8 @@ def health_check(request: Request):
     except Exception:
         total_latency_ms = round((perf_counter() - started) * 1000, 2)
 
-        # Keep connection details, credentials, hostnames, and driver errors
-        # out of the public response. HTTP 503 remains useful to cloud probes.
+        # Do not expose connection details, credentials, hostnames, or driver errors.
+        # HTTP 503 lets monitoring distinguish a degraded service from a healthy one.
         raise HTTPException(
             status_code=503,
             detail={

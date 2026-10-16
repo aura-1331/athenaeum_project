@@ -11,11 +11,12 @@ router = APIRouter(
 
 @router.get("/keeper-attention")
 def keeper_attention(request: Request, current_user: dict = Depends(get_current_user)):
-    """Return real rejected submissions that require Keeper action.
+    """Return rejected submissions that require action from the current Keeper.
 
-    Rejected work/item records are already persisted by the catalogue approval
-    workflow. This endpoint only exposes the current Keeper's own rejected
-    submissions; it does not create or alter any state.
+    An initial Item belongs to the Work submission that created it. If that Work
+    is rejected, its initial Item is not a separate rejected submission and must
+    not create a duplicate attention alert. Independently submitted Items can
+    only belong to an already-approved Work.
     """
     if str(current_user.get("role") or "").strip().lower() != "the keeper":
         return {"rejected_works": [], "rejected_items": []}
@@ -63,6 +64,9 @@ def keeper_attention(request: Request, current_user: dict = Depends(get_current_
             WHERE i.proposed_by = %s
               AND i.availability_status = 'REJECTED'
               AND i.is_deleted = TRUE
+              -- Only independently submitted Items on approved Works appear here.
+              -- The initial Item follows the decision made on its parent Work.
+              AND UPPER(TRIM(w.status)) = 'APPROVED'
             ORDER BY i.created_at DESC, i.serial_no DESC
         """, (user_id,))
         rejected_items = [
@@ -83,7 +87,7 @@ def keeper_attention(request: Request, current_user: dict = Depends(get_current_
         }
 
     except Exception as e:
-        print(f"❌ Keeper attention lookup failed: {e}")
+        print(f"Keeper attention lookup failed: {type(e).__name__}: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to load Keeper attention items."
@@ -104,9 +108,9 @@ def dashboard_summary(request: Request, current_user: dict = Depends(get_current
         conn = get_connection(request=request)
         cursor = conn.cursor()
 
-        # Official Dashboard totals match the accepted catalogue.
-        # Pending Works and Pending Items remain outside these totals until
-        # the Chief approves them.
+        # Official catalogue totals include approved Works only.
+        # Pending Works and their automatically created initial Items remain
+        # outside the accepted catalogue until the Chief approves the Work.
         cursor.execute("""
             SELECT COUNT(*)
             FROM public.works
@@ -121,36 +125,48 @@ def dashboard_summary(request: Request, current_user: dict = Depends(get_current
                 ON w.work_id = i.work_id
             WHERE i.is_deleted = FALSE
               AND i.availability_status = 'AVAILABLE'
-              AND w.status = 'APPROVED'
+              AND UPPER(TRIM(w.status)) = 'APPROVED'
         """)
         total_items = cursor.fetchone()[0]
 
-        # Issued / missing / damaged remain physical-item metrics.
+        # Physical-item metrics are restricted to active Items belonging to
+        # approved Works so pending/rejected Work submissions cannot leak in.
         cursor.execute("""
             SELECT COUNT(*)
-            FROM public.items
-            WHERE availability_status = 'ISSUED'
-              AND is_deleted = FALSE
+            FROM public.items i
+            INNER JOIN public.works w
+                ON w.work_id = i.work_id
+            WHERE i.availability_status = 'ISSUED'
+              AND i.is_deleted = FALSE
+              AND UPPER(TRIM(w.status)) = 'APPROVED'
         """)
         total_issued = cursor.fetchone()[0]
 
         cursor.execute("""
             SELECT COUNT(*)
-            FROM public.items
-            WHERE availability_status = 'MISSING'
-              AND is_deleted = FALSE
+            FROM public.items i
+            INNER JOIN public.works w
+                ON w.work_id = i.work_id
+            WHERE i.availability_status = 'MISSING'
+              AND i.is_deleted = FALSE
+              AND UPPER(TRIM(w.status)) = 'APPROVED'
         """)
         missing_items = cursor.fetchone()[0]
 
+        # Count physical Items, not incident rows: one damaged Item can have
+        # more than one open incident and must still count as one Item.
         cursor.execute("""
             SELECT COUNT(*)
-            FROM public.archive_incidents
-            WHERE incident_type = 'DAMAGED'
-                AND status != 'RESOLVED'
+            FROM public.items i
+            INNER JOIN public.works w
+                ON w.work_id = i.work_id
+            WHERE i.availability_status = 'DAMAGED'
+              AND i.is_deleted = FALSE
+              AND UPPER(TRIM(w.status)) = 'APPROVED'
         """)
         damaged_items = cursor.fetchone()[0]
 
-        # Language breakdown for active works.
+        # Language breakdown includes approved Works and pending proposals.
         cursor.execute("""
             SELECT
                 COALESCE(language, 'Unknown') AS language,
@@ -166,7 +182,8 @@ def dashboard_summary(request: Request, current_user: dict = Depends(get_current
             for row in language_rows
         ]
 
-        # Recent status activity.
+        # Recent status activity is supplementary; the summary remains usable
+        # if the legacy status_audit table is unavailable.
         recent_activity = []
         try:
             cursor.execute("""
@@ -196,11 +213,9 @@ def dashboard_summary(request: Request, current_user: dict = Depends(get_current
         return {
             "total_works": int(total_works),
             "total_items": int(total_items),
-
             # Backward-compatible names used by older dashboard code.
             "total_accessions": int(total_works),
             "total_books": int(total_works),
-
             "total_issued": int(total_issued),
             "missing_items": int(missing_items),
             "damaged_items": int(damaged_items),
@@ -208,7 +223,10 @@ def dashboard_summary(request: Request, current_user: dict = Depends(get_current
             "languages": languages,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
+        print(f"Dashboard summary lookup failed: {type(e).__name__}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
     finally:

@@ -393,13 +393,13 @@ async function submitProvision() {
   errorMessage.value = ''
   successMessage.value = ''
   try {
-    const res = await axios.post('/admin/create-user', null, {
-      params: {
-        name: form.value.name,
-        email: form.value.email,
-        role: form.value.role,
-        password: form.value.password
-      }
+    // SECURITY: the password goes in the request BODY. Putting it in "params" placed it in
+    // the web address, which servers write into their log files in readable form.
+    const res = await axios.post('/admin/create-user', {
+      name: form.value.name,
+      email: form.value.email,
+      role: form.value.role,
+      password: form.value.password
     })
     successMessage.value = `Operator provisioned. Assigned Operator ID: ${res.data.operator_id}`
     showModal.value = false

@@ -64,10 +64,24 @@ axios.defaults.withCredentials = true
  * The access token exists only in Pinia memory.
  * It is NOT stored in localStorage.
  */
+// SECURITY: only talk "with the key in hand" to our own back office. Without this check,
+// any request made through axios to ANOTHER website (an update server, a lookup service,
+// a typo in a URL...) would also carry the user's login token and hand it over.
+function isRequestToOurApi(config) {
+  const url = String(config.url || "")
+
+  if (/^https?:\/\//i.test(url)) {
+    return url.startsWith(API_BASE)
+  }
+
+  const base = String(config.baseURL || API_BASE)
+  return base.startsWith(API_BASE)
+}
+
 axios.interceptors.request.use((config) => {
   const token = auth.accessToken
 
-  if (token) {
+  if (token && isRequestToOurApi(config)) {
     config.headers = config.headers || {}
     config.headers.Authorization = `Bearer ${token}`
   }

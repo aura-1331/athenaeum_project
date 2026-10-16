@@ -1,3 +1,5 @@
+// src/router/index.js
+
 import { createRouter, createWebHashHistory } from "vue-router"
 import { useAuthStore } from "@/stores/auth"
 
@@ -11,293 +13,243 @@ import CreateWorkView from "@/views/CreateWorkView.vue"
 import CreateItemView from "@/views/CreateItemView.vue"
 import Operations from "@/views/Operations.vue"
 import EditItemView from "@/views/EditItemView.vue"
-
 import AuthorsView from "@/views/AuthorsView.vue"
 import AuthoritiesView from "@/views/AuthoritiesView.vue"
 import SubjectsView from "@/views/SubjectsView.vue"
 import IncidentsView from "@/views/IncidentsView.vue"
 import ReportsView from "@/views/ReportsView.vue"
 import SettingsPage from "@/views/SettingsPage.vue"
-
 import SystemSettings from "@/views/admin/SystemSettings.vue"
 import UserManagementView from "@/views/admin/UserManagementView.vue"
 import ApprovalCenterView from "@/views/admin/ApprovalCenterView.vue"
 import DocketView from "@/views/DocketView.vue"
 import ItemReviewView from "@/views/ItemReviewView.vue"
 import WorkReviewView from "@/views/WorkReviewView.vue"
+import CreateWorkChiefDirect from "@/views/CreateWorkChiefDirect.vue"
 
 const routes = [
-
   {
     path: "/login",
-    name: "login",
-    component: Login
+    name: "Login",
+    component: Login,
+    meta: { public: true },
   },
-
   {
     path: "/",
-    redirect: "/login"
+    redirect: "/dashboard",
   },
-
   {
     path: "/dashboard",
-    name: "dashboard",
+    name: "Dashboard",
     component: Dashboard,
-    meta: {
-      requiresAuth: true,
-      roles: ["The Chief", "The Keeper"]
-    }
+    meta: { requiresAuth: true },
   },
-
   {
     path: "/catalogue",
-    name: "catalogue",
+    name: "Catalogue",
     component: CatalogueView,
-    meta: {
-      requiresAuth: true
-    }
+    meta: { requiresAuth: true },
   },
-
   {
     path: "/search",
-    name: "search",
+    name: "Search",
     component: Search,
-    meta: {
-      requiresAuth: true
-    }
+    meta: { requiresAuth: true },
   },
-
   {
     path: "/audit-trail",
-    name: "audit-trail",
+    name: "AuditTrail",
     component: AuditTrailView,
-    meta: {
-      requiresAuth: true,
-      permission: "audit.view"
-    }
+    meta: { requiresAuth: true },
   },
-
   {
     path: "/details/:id",
-    name: "details",
+    name: "Details",
     component: DetailsView,
-    meta: {
-      requiresAuth: true,
-      permission: "catalogue.view"
-    }
+    meta: { requiresAuth: true },
   },
 
+  // Normal Keeper registration
   {
     path: "/create-work",
-    name: "create-work",
+    name: "CreateWork",
     component: CreateWorkView,
     meta: {
       requiresAuth: true,
-      permission: "catalogue.create"
-    }
+      permission: "catalogue.create",
+      roles: ["The Keeper"],
+    },
   },
-
   {
     path: "/create-item",
-    name: "create-item",
+    name: "CreateItem",
     component: CreateItemView,
     meta: {
       requiresAuth: true,
-      permission: "catalogue.create"
-    }
+      permission: "catalogue.create",
+      roles: ["The Keeper"],
+    },
+  },
+
+  // Chief-only direct registration
+  {
+    path: "/chief/register-work",
+    name: "ChiefRegisterWork",
+    component: CreateWorkChiefDirect,
+    meta: {
+      requiresAuth: true,
+      roles: ["The Chief"],
+    },
+  },
+  {
+    path: "/chief/register-item",
+    name: "ChiefRegisterItem",
+    component: CreateItemView,
+    meta: {
+      requiresAuth: true,
+      roles: ["The Chief"],
+    },
   },
 
   {
-    path: "/operations/:accession",
-    name: "operations",
+    path: "/operations",
+    name: "Operations",
     component: Operations,
-    meta: {
-      requiresAuth: true,
-      permission: "operations.execute"
-    }
+    meta: { requiresAuth: true },
   },
-
   {
     path: "/edit-item/:id",
-    name: "edit-item",
+    name: "EditItem",
     component: EditItemView,
-    meta: {
-      requiresAuth: true,
-      permission: "catalogue.edit"
-    }
+    meta: { requiresAuth: true },
   },
-
   {
-    path: "/admin/settings",
-    name: "admin-settings",
-    component: SystemSettings,
-    meta: {
-      requiresAuth: true,
-      roles: ["The Chief"]
-    }
+    path: "/authors",
+    name: "Authors",
+    component: AuthorsView,
+    meta: { requiresAuth: true },
   },
-
+  {
+    path: "/authorities",
+    name: "Authorities",
+    component: AuthoritiesView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/subjects",
+    name: "Subjects",
+    component: SubjectsView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/incidents",
+    name: "Incidents",
+    component: IncidentsView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/reports",
+    name: "Reports",
+    component: ReportsView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/settings",
+    name: "Settings",
+    component: SettingsPage,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/admin/system-settings",
+    name: "SystemSettings",
+    component: SystemSettings,
+    meta: { requiresAuth: true },
+  },
   {
     path: "/admin/users",
-    name: "user-management",
+    name: "UserManagement",
     component: UserManagementView,
-    meta: {
-      requiresAuth: true,
-      roles: ["The Chief", "The Keeper"]
-    }
+    meta: { requiresAuth: true },
   },
-
   {
-    path: "/admin/approvals",
-    name: "approval-center",
+    path: "/admin/approval-center",
+    name: "ApprovalCenter",
     component: ApprovalCenterView,
-    meta: {
-      requiresAuth: true,
-      roles: ["The Chief"]
-    }
+    meta: { requiresAuth: true },
   },
 
+  // Shared workflow
   {
     path: "/docket",
-    name: "docket",
+    name: "Docket",
     component: DocketView,
     meta: {
       requiresAuth: true,
-      roles: ["The Chief", "The Keeper"]
-    }
+      roles: ["The Chief", "The Keeper"],
+    },
   },
-
   {
     path: "/review-work/:id",
-    name: "review-work",
+    name: "WorkReview",
     component: WorkReviewView,
     meta: {
       requiresAuth: true,
-      roles: ["The Chief", "The Keeper"]
-    }
+      roles: ["The Chief", "The Keeper"],
+    },
   },
-
   {
     path: "/review-item/:id",
-    name: "review-item",
+    name: "ItemReview",
     component: ItemReviewView,
     meta: {
       requiresAuth: true,
-      roles: ["The Chief", "The Keeper"]
-    }
+      roles: ["The Chief", "The Keeper"],
+    },
   },
-
-  {
-    path: "/classification/authors",
-    name: "Authors",
-    component: AuthorsView,
-    meta: {
-      requiresAuth: true,
-      permission: "classification.view"
-    }
-  },
-
-  {
-    path: "/classification/authorities",
-    name: "Authorities",
-    component: AuthoritiesView,
-    meta: {
-      requiresAuth: true,
-      permission: "classification.view"
-    }
-  },
-
-  {
-    path: "/classification/subjects",
-    name: "Subjects",
-    component: SubjectsView,
-    meta: {
-      requiresAuth: true,
-      permission: "classification.view"
-    }
-  },
-
-  {
-    path: "/incidents",
-    name: "incidents",
-    component: IncidentsView,
-    meta: {
-      requiresAuth: true,
-      permission: "incidents.view"
-    }
-  },
-
-  {
-    path: "/reports",
-    name: "reports",
-    component: ReportsView,
-    meta: {
-      requiresAuth: true,
-      permission: "reports.view"
-    }
-  },
-
-  {
-    path: "/settings",
-    name: "settings",
-    component: SettingsPage,
-    meta: {
-      requiresAuth: true,
-      permission: "dashboard.view"
-    }
-  }
-
 ]
 
 const router = createRouter({
   history: createWebHashHistory(),
-  routes
+  routes,
 })
 
-router.beforeEach((to, from, next) => {
-
+router.beforeEach((to) => {
   const auth = useAuthStore()
 
-  if (
-    to.path === "/login" &&
-    auth.isAuthenticated
-  ) {
-    next("/dashboard")
-    return
+  if (to.meta.public) {
+    return true
   }
 
-  if (
-    to.meta.requiresAuth &&
-    !auth.isAuthenticated
-  ) {
-    next("/login")
-    return
+  const authenticated =
+    auth.isAuthenticated ?? Boolean(auth.token)
+
+  if (to.meta.requiresAuth && !authenticated) {
+    return { name: "Login" }
   }
 
-  const fallbackRoute =
-    auth.userRole === "The Seeker"
-      ? "/catalogue"
-      : "/dashboard"
+  const role =
+    auth.user?.role ??
+    auth.currentUser?.role ??
+    auth.role ??
+    auth.userRole
 
-  if (
-    to.meta.roles &&
-    !to.meta.roles.includes(auth.userRole)
-  ) {
-    next(fallbackRoute)
-    return
+  if (to.meta.roles && !to.meta.roles.includes(role)) {
+    return { name: "Dashboard" }
   }
 
-  if (
-    to.meta.permission &&
-    !auth.hasPermission(
-      to.meta.permission
-    )
-  ) {
-    next(fallbackRoute)
-    return
+  if (to.meta.permission) {
+    const allowed =
+      typeof auth.hasPermission === "function"
+        ? auth.hasPermission(to.meta.permission)
+        : Array.isArray(auth.permissions) &&
+          auth.permissions.includes(to.meta.permission)
+
+    if (!allowed) {
+      return { name: "Dashboard" }
+    }
   }
 
-  next()
+  return true
 })
 
 export default router
