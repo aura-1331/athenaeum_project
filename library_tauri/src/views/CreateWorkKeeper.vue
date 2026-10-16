@@ -262,13 +262,13 @@
 
                 <div class="input-group">
                   <label>Language <span class="required">*</span></label>
-                  <select v-model="form.language_id" class="select-field">
+                  <select :value="isOtherChoice('language_id', form.language_id, [...BASE_LANGS, ...extraLanguages]) ? '__other__' : form.language_id" @change="onPick('language_id', $event.target.value); form.language_id = $event.target.value === '__other__' ? '' : $event.target.value" class="select-field">
                     <option disabled value="">Select language</option>
-                    <option value="Malayalam">Malayalam</option>
-                    <option value="English">English</option>
-                    <option value="Multi -Lingual">Multilingual</option>
-                    <option v-for="lang in extraLanguages" :key="lang" :value="lang">{{ lang }}</option>
+                    <option v-for="lang in [...BASE_LANGS, ...extraLanguages]" :key="lang" :value="lang">{{ lang === 'Multi -Lingual' ? 'Multilingual' : lang }}</option>
+                    <option value="__other__">Other (type new)...</option>
                   </select>
+                  <input v-if="isOtherChoice('language_id', form.language_id, [...BASE_LANGS, ...extraLanguages])" v-model="form.language_id" @blur="form.language_id = matchLang(form.language_id, [...BASE_LANGS, ...extraLanguages])" autocomplete="off" placeholder="Type language" class="select-field" style="margin-top:8px" />
+                  <small v-if="isOtherChoice('language_id', form.language_id, [...BASE_LANGS, ...extraLanguages]) && form.language_id && ![...BASE_LANGS, ...extraLanguages].includes(matchLang(form.language_id, [...BASE_LANGS, ...extraLanguages]))">New language will be added to the registry.</small>
                 </div>
 
                 <div class="input-group">
@@ -393,7 +393,7 @@
                   <select v-model="selectedGroupCGenre" @change="syncGenreSelection" class="select-field">
                     <option value="">Community genre</option>
                     <option v-for="g in dynamicCommunityGenres" :key="g" :value="g">{{ g }}</option>
-                    <option value="CUSTOM_MANUAL_OVERRIDE">Enter manually</option>
+                    <option value="CUSTOM_MANUAL_OVERRIDE">Other (type new)...</option>
                   </select>
                 </div>
                 <input autocomplete="new-password" v-if="showCustomManualGenreField" v-model="customManualGenreText" @input="syncManualGenreInput" placeholder="Custom genres separated by /" class="custom-genre-input" />
@@ -420,13 +420,12 @@
               <div class="form-grid">
                 <div class="input-group">
                   <label>Original language</label>
-                  <select v-model="form.original_language" class="select-field">
+                  <select :value="isOtherChoice('original_language', form.original_language, [...BASE_LANGS, ...extraLanguages]) ? '__other__' : form.original_language" @change="onPick('original_language', $event.target.value); form.original_language = $event.target.value === '__other__' ? '' : $event.target.value" class="select-field">
                     <option value="" disabled>Select original language</option>
-                    <option value="Malayalam">Malayalam</option>
-                    <option value="English">English</option>
-                    <option value="Multi -Lingual">Multilingual</option>
-                    <option v-for="lang in extraLanguages" :key="lang" :value="lang">{{ lang }}</option>
+                    <option v-for="lang in [...BASE_LANGS, ...extraLanguages]" :key="lang" :value="lang">{{ lang === 'Multi -Lingual' ? 'Multilingual' : lang }}</option>
+                    <option value="__other__">Other (type new)...</option>
                   </select>
+                  <input v-if="isOtherChoice('original_language', form.original_language, [...BASE_LANGS, ...extraLanguages])" v-model="form.original_language" @blur="form.original_language = matchLang(form.original_language, [...BASE_LANGS, ...extraLanguages])" autocomplete="off" placeholder="Type original language" class="select-field" style="margin-top:8px" />
                 </div>
                 <div class="input-group">
                   <label>Translation / compilation</label>
@@ -572,6 +571,15 @@ import { ref, onMounted, onUnmounted } from "vue"
 import { useCreateWork } from "./useCreateWork.js"
 
 const showSavedDraftVersions = ref(false)
+const BASE_LANGS = ['Malayalam', 'English', 'Multi -Lingual']
+const otherChoice = ref({})
+function onPick(key, val) { otherChoice.value = { ...otherChoice.value, [key]: val === '__other__' } }
+function isOtherChoice(key, current, list) { return !!otherChoice.value[key] || (!!current && !list.includes(current)) }
+function matchLang(text, list) {
+  const norm = (x) => String(x || '').toLowerCase().replace(/[\s-]/g, '')
+  const clean = String(text || '').trim().replace(/\s+/g, ' ')
+  return list.find((x) => norm(x) === norm(clean)) || clean
+}
 const titleLookupArea = ref(null)
 const authorLookupArea = ref(null)
 const authorInputAnchor = ref(null)
