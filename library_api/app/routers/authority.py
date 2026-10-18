@@ -489,6 +489,13 @@ def _verify_editable_authority(cur, authority_id: int) -> None:
         )
 
 
+def _col(row, index: int, name: str):
+    """Read one column from a tuple row or a dictionary row."""
+    if isinstance(row, dict):
+        return row[name] if name in row else list(row.values())[index]
+    return row[index]
+
+
 def resolve_or_create_authority(
     cur,
     author_name: str,
@@ -524,7 +531,7 @@ def resolve_or_create_authority(
                 ),
             )
 
-        return row[0]
+        return _col(row, 0, "authority_id")
 
     name_key = clean_author.casefold()
 
@@ -555,7 +562,10 @@ def resolve_or_create_authority(
         )
 
     if matches:
-        authority_id, preferred_name, authority_status = matches[0]
+        _m = matches[0]
+        authority_id = _col(_m, 0, "authority_id")
+        preferred_name = _col(_m, 1, "preferred_name")
+        authority_status = _col(_m, 2, "status")
 
         if authority_status in {
             AuthorityStatus.REJECTED.value,
@@ -597,7 +607,7 @@ def resolve_or_create_authority(
         WHERE authority_code ~ '^AUT-P-[0-9]+$'
         """
     )
-    next_number = cur.fetchone()[0]
+    next_number = _col(cur.fetchone(), 0, "next_number")
     authority_code = f"AUT-P-{next_number:04d}"
 
     cur.execute(
@@ -624,7 +634,7 @@ def resolve_or_create_authority(
         ),
     )
 
-    return cur.fetchone()[0]
+    return _col(cur.fetchone(), 0, "authority_id")
 
 
 def validate_work_authority(cur, work_id: int) -> Dict[str, Any]:
