@@ -121,6 +121,18 @@
               <span>Languages</span>
               <strong>{{ totalLanguages }}</strong>
             </div>
+            <div class="collection-fact">
+              <span>Issued</span>
+              <strong>{{ numberOrZero(summaryStats.total_issued) }}</strong>
+            </div>
+            <div class="collection-fact">
+              <span>Missing</span>
+              <strong>{{ numberOrZero(summaryStats.missing_items) }}</strong>
+            </div>
+            <div class="collection-fact">
+              <span>Damaged</span>
+              <strong>{{ numberOrZero(summaryStats.damaged_items) }}</strong>
+            </div>
           </div>
         </div>
       </section>
@@ -144,7 +156,7 @@
             <span class="distribution-total">{{ section.totalLabel }}</span>
           </div>
 
-          <div class="distribution-list">
+          <div v-if="section.rows.length" class="distribution-list">
             <div
               v-for="row in section.rows"
               :key="row.label"
@@ -164,6 +176,10 @@
               </div>
             </div>
           </div>
+          <p v-else class="distribution-empty">
+            No {{ section.title.toLowerCase() }} data was returned by the summary or catalogue records.
+            Check the catalogue field names and the dashboard summary endpoint.
+          </p>
 
           <div v-if="section.hasMore" class="distribution-footer">
             Showing the {{ section.rows.length }} largest groups.
@@ -211,6 +227,26 @@
         </div>
       </section>
 
+      <!-- RECENT ACTIVITY: SHOW THE SECTION EVEN WHEN THE FEED IS EMPTY -->
+      <section v-if="!loading" class="recent-section activity-section" aria-labelledby="recent-activity-title">
+        <div class="section-heading recent-heading">
+          <div>
+            <div class="section-kicker">HISTORY</div>
+            <h2 id="recent-activity-title">Recent Activity</h2>
+          </div>
+        </div>
+        <div v-if="recentActivity.length" class="activity-list">
+          <div v-for="(activity, index) in recentActivity" :key="activity.id || activity.id_no || `${activity.created_at || 'activity'}-${index}`" class="activity-row">
+            <div class="activity-copy">
+              <strong>{{ activity.title || activity.action || activity.event || activity.description || 'Archive activity' }}</strong>
+              <span v-if="activity.description && activity.description !== (activity.title || activity.action || activity.event)">{{ activity.description }}</span>
+              <small>{{ activity.user_name || activity.username || activity.user || 'System' }}<template v-if="activity.created_at || activity.timestamp"> · {{ activity.created_at || activity.timestamp }}</template></small>
+            </div>
+          </div>
+        </div>
+        <p v-else class="empty-state">No recent activity was returned by the server.</p>
+      </section>
+
   </div>
 </template>
 
@@ -244,6 +280,7 @@ function can(permission) {
 const rawCatalogue = ref([])
 const catalogueTotal = ref(null)
 const latestAccessions = ref([])
+const recentActivity = ref([])
 const pendingWorks = ref([])
 const pendingItems = ref([])
 const keeperAttention = ref({
@@ -292,6 +329,17 @@ function withTimeout(requestFactory, ms = 8000, parentSignal = null) {
   })
 }
 
+
+
+async function fetchCatalogueRecords(signal) {
+  const response = await axios.get("/catalogue/", {
+    params: { limit: 100 },
+    signal,
+  })
+
+  return response
+}
+
 async function loadDashboard() {
   const generation = ++loadGeneration
 
@@ -330,11 +378,8 @@ async function loadDashboard() {
         signal,
       ),
       withTimeout(
-        (requestSignal) => axios.get("/catalogue/", {
-          params: { limit: 100 },
-          signal: requestSignal,
-        }),
-        8000,
+        (requestSignal) => fetchCatalogueRecords(requestSignal),
+        15000,
         signal,
       ),
       withTimeout(
@@ -405,6 +450,9 @@ const results = await Promise.allSettled(requests)
           ...summaryStats.value,
           ...data,
         }
+        recentActivity.value = Array.isArray(data.recent_activity)
+          ? data.recent_activity
+          : []
       }
     }
 
@@ -693,30 +741,75 @@ function rowsFromEntries(entries, limit) {
   }
 }
 
+function firstNonEmptyValue(record, keys) {
+  for (const key of keys) {
+    const value = record?.[key]
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return value
+    }
+  }
+  return null
+}
+
+function labelsFromValue(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (item && typeof item === "object") {
+          return String(
+            item.name ?? item.label ?? item.title ?? item.category_name ?? item.genre_name ?? ""
+          ).trim()
+        }
+        return String(item ?? "").trim()
+      })
+      .filter(Boolean)
+  }
+
+  if (value && typeof value === "object") {
+    const label = value.name ?? value.label ?? value.title ?? value.category_name ?? value.genre_name
+    return label == null || String(label).trim() === "" ? [] : [String(label).trim()]
+  }
+
+  return String(value ?? "")
+    .split(/[/,;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function aggregateCatalogueField(keys, splitMultiple = false) {
+  const stats = {}
+
+  rawCatalogue.value.forEach((record) => {
+    const rawValue = firstNonEmptyValue(record, keys)
+    let labels = labelsFromValue(rawValue)
+
+    if (splitMultiple && labels.length === 1) {
+      labels = labels[0].split(/[/,;]+/).map((item) => item.trim()).filter(Boolean)
+    }
+
+    if (!labels.length) labels = ["Uncategorised"]
+
+    labels.forEach((label) => {
+      stats[label] = (stats[label] || 0) + 1
+    })
+  })
+
+  return Object.entries(stats).sort((a, b) => b[1] - a[1])
+}
+
 const categoryEntries = computed(() => {
-  // Prefer complete server-side aggregates.
   const serverRows = aggregateRows(summaryStats.value.categories)
   if (serverRows.length) return serverRows
 
-  // Only aggregate the catalogue locally when it is demonstrably complete.
-  const total = Number(summaryStats.value.total_items)
-  if (
-    !requestErrors.value.summary &&
-    Number.isFinite(total) &&
-    total > 0 &&
-    total <= rawCatalogue.value.length
-  ) {
-    const stats = {}
-
-    rawCatalogue.value.forEach((record) => {
-      const category = String(record?.category || "").trim() || "Uncategorised"
-      stats[category] = (stats[category] || 0) + 1
-    })
-
-    return Object.entries(stats).sort((a, b) => b[1] - a[1])
+  // The summary endpoint currently may omit category totals. Derive what is
+  // available from catalogue records, even if the API returns a partial page.
+  if (rawCatalogue.value.length) {
+    return aggregateCatalogueField([
+      "category", "category_name", "category_label", "category_title",
+      "categoryName", "categoryLabel", "categories",
+    ])
   }
 
-  // Do not display misleading partial statistics.
   return []
 })
 
@@ -726,28 +819,11 @@ const genreEntries = computed(() => {
   const serverRows = aggregateRows(summaryStats.value.genres)
   if (serverRows.length) return serverRows
 
-  const total = Number(summaryStats.value.total_items)
-  if (
-    !requestErrors.value.summary &&
-    Number.isFinite(total) &&
-    total > 0 &&
-    total <= rawCatalogue.value.length
-  ) {
-    const stats = {}
-
-    rawCatalogue.value.forEach((record) => {
-      const genreValue = String(record?.genre || "").trim() || "Uncategorised"
-
-      genreValue
-        .split(/[/,]+/)
-        .map((value) => value.trim())
-        .filter(Boolean)
-        .forEach((genre) => {
-          stats[genre] = (stats[genre] || 0) + 1
-        })
-    })
-
-    return Object.entries(stats).sort((a, b) => b[1] - a[1])
+  if (rawCatalogue.value.length) {
+    return aggregateCatalogueField([
+      "genre", "genre_name", "genre_label", "genre_title",
+      "genreName", "genreLabel", "genres",
+    ], true)
   }
 
   return []
@@ -777,25 +853,21 @@ const languageRows = computed(() => rowsFromEntries(languageEntries.value, 5))
 const distributionSections = computed(() => {
   const sections = []
 
-  if (categoryRows.value.rows.length) {
-    sections.push({
-      key: "categories",
-      kicker: "COMPOSITION",
-      title: "Categories",
-      totalLabel: `${totalCategories.value} categories`,
-      ...categoryRows.value,
-    })
-  }
+  sections.push({
+    key: "categories",
+    kicker: "COMPOSITION",
+    title: "Categories",
+    totalLabel: `${totalCategories.value} categories`,
+    ...categoryRows.value,
+  })
 
-  if (genreRows.value.rows.length) {
-    sections.push({
-      key: "genres",
-      kicker: "COMPOSITION",
-      title: "Genres",
-      totalLabel: `${totalGenres.value} genres`,
-      ...genreRows.value,
-    })
-  }
+  sections.push({
+    key: "genres",
+    kicker: "COMPOSITION",
+    title: "Genres",
+    totalLabel: `${totalGenres.value} genres`,
+    ...genreRows.value,
+  })
 
   if (languageRows.value.rows.length) {
     sections.push({
@@ -1131,7 +1203,7 @@ onUnmounted(() => {
 
 .collection-facts {
   display: grid;
-  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
   flex: 1;
   border-left: 1px solid var(--dash-border);
   background: color-mix(in srgb, var(--dash-surface-2) 55%, var(--dash-surface));
@@ -1249,6 +1321,57 @@ onUnmounted(() => {
   margin-top: 15px;
   color: var(--dash-muted);
   font-size: 10px;
+}
+
+.distribution-empty {
+  margin: 0;
+  color: var(--dash-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Recent activity */
+.activity-list {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-row {
+  padding: 12px 14px;
+  border: 1px solid var(--dash-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--dash-surface-2) 55%, var(--dash-surface));
+}
+
+.activity-copy strong,
+.activity-copy span,
+.activity-copy small {
+  display: block;
+}
+
+.activity-copy strong {
+  font-size: 12px;
+}
+
+.activity-copy span {
+  margin-top: 4px;
+  color: var(--dash-muted);
+  font-size: 11px;
+}
+
+.activity-copy small {
+  margin-top: 5px;
+  color: var(--dash-muted);
+  font-size: 10px;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 14px;
+  border: 1px dashed var(--dash-border);
+  border-radius: 10px;
+  color: var(--dash-muted);
+  font-size: 12px;
 }
 
 /* Latest accessions */

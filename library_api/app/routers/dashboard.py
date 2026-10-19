@@ -37,7 +37,7 @@ def keeper_attention(request: Request, current_user: dict = Depends(get_current_
                 w.approval_reason
             FROM public.works w
             WHERE w.proposed_by = %s
-              AND w.status = 'REJECTED'
+              AND w.status = 'NEEDS_CORRECTION'
             ORDER BY w.created_at DESC, w.work_id DESC
         """, (user_id,))
         rejected_works = [
@@ -99,135 +99,137 @@ def keeper_attention(request: Request, current_user: dict = Depends(get_current_
             conn.close()
 
 
+
+
 @router.get("/summary")
-def dashboard_summary(request: Request, current_user: dict = Depends(get_current_user)):
+def dashboard_summary(request: Request):
     conn = None
     cursor = None
 
     try:
+        # Use the database connection already used by this project
         conn = get_connection(request=request)
         cursor = conn.cursor()
 
-        # Official catalogue totals include approved Works only.
-        # Pending Works and their automatically created initial Items remain
-        # outside the accepted catalogue until the Chief approves the Work.
+        # Total approved works
         cursor.execute("""
             SELECT COUNT(*)
             FROM public.works
-            WHERE status = 'APPROVED'
+            WHERE UPPER(TRIM(status)) = 'APPROVED'
         """)
-        total_works = cursor.fetchone()[0]
+        total_works = cursor.fetchone()[0] or 0
 
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM public.items i
-            INNER JOIN public.works w
-                ON w.work_id = i.work_id
-            WHERE i.is_deleted = FALSE
-              AND i.availability_status = 'AVAILABLE'
-              AND UPPER(TRIM(w.status)) = 'APPROVED'
-        """)
-        total_items = cursor.fetchone()[0]
-
-        # Physical-item metrics are restricted to active Items belonging to
-        # approved Works so pending/rejected Work submissions cannot leak in.
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM public.items i
-            INNER JOIN public.works w
-                ON w.work_id = i.work_id
-            WHERE i.availability_status = 'ISSUED'
-              AND i.is_deleted = FALSE
-              AND UPPER(TRIM(w.status)) = 'APPROVED'
-        """)
-        total_issued = cursor.fetchone()[0]
-
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM public.items i
-            INNER JOIN public.works w
-                ON w.work_id = i.work_id
-            WHERE i.availability_status = 'MISSING'
-              AND i.is_deleted = FALSE
-              AND UPPER(TRIM(w.status)) = 'APPROVED'
-        """)
-        missing_items = cursor.fetchone()[0]
-
-        # Count physical Items, not incident rows: one damaged Item can have
-        # more than one open incident and must still count as one Item.
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM public.items i
-            INNER JOIN public.works w
-                ON w.work_id = i.work_id
-            WHERE i.availability_status = 'DAMAGED'
-              AND i.is_deleted = FALSE
-              AND UPPER(TRIM(w.status)) = 'APPROVED'
-        """)
-        damaged_items = cursor.fetchone()[0]
-
-        # Language breakdown includes approved Works and pending proposals.
+        
+        # Item and accession metrics
         cursor.execute("""
             SELECT
-                COALESCE(language, 'Unknown') AS language,
-                COUNT(*) AS count
-            FROM public.works
-            WHERE status IN ('APPROVED', 'PENDING')
-            GROUP BY language
-            ORDER BY count DESC
+                COUNT(*),
+                COUNT(accession_no),
+                COUNT(*) FILTER (
+                    WHERE UPPER(TRIM(COALESCE(availability_status, ''))) = 'ISSUED'
+                ),
+                COUNT(*) FILTER (
+                    WHERE UPPER(TRIM(COALESCE(availability_status, ''))) = 'MISSING'
+                ),
+                COUNT(*) FILTER (
+                    WHERE UPPER(TRIM(COALESCE(availability_status, ''))) = 'DAMAGED'
+                )
+            FROM public.items
         """)
-        language_rows = cursor.fetchall()
+        item_row = cursor.fetchone()
+
+        total_items = item_row[0] or 0
+        total_accessions = item_row[1] or 0
+        total_issued = item_row[2] or 0
+        missing_items = item_row[3] or 0
+        damaged_items = item_row[4] or 0
+
+
+        total_books = total_works
+
+        # Language breakdown
+        cursor.execute("""
+            SELECT
+                COALESCE(NULLIF(TRIM(language), ''), 'Unspecified'),
+                COUNT(*)
+            FROM public.works
+            WHERE UPPER(TRIM(status)) IN ('APPROVED', 'PENDING')
+            GROUP BY COALESCE(NULLIF(TRIM(language), ''), 'Unspecified')
+            ORDER BY COUNT(*) DESC
+        """)
         languages = [
-            {"language": row[0], "count": row[1]}
-            for row in language_rows
+            {"language": row[0], "count": int(row[1])}
+            for row in cursor.fetchall()
         ]
 
-        # Recent status activity is supplementary; the summary remains usable
-        # if the legacy status_audit table is unavailable.
+        # Category breakdown
+        cursor.execute("""
+            SELECT
+                COALESCE(NULLIF(TRIM(category), ''), 'Uncategorised'),
+                COUNT(*)
+            FROM public.works
+            WHERE UPPER(TRIM(status)) IN ('APPROVED', 'PENDING')
+            GROUP BY COALESCE(NULLIF(TRIM(category), ''), 'Uncategorised')
+            ORDER BY COUNT(*) DESC
+        """)
+        categories = [
+            {"category": row[0], "count": int(row[1])}
+            for row in cursor.fetchall()
+        ]
+
+        # Genre breakdown
+        cursor.execute("""
+            SELECT
+                COALESCE(NULLIF(TRIM(genre), ''), 'Unspecified'),
+                COUNT(*)
+            FROM public.works
+            WHERE UPPER(TRIM(status)) IN ('APPROVED', 'PENDING')
+            GROUP BY COALESCE(NULLIF(TRIM(genre), ''), 'Unspecified')
+            ORDER BY COUNT(*) DESC
+        """)
+        genres = [
+            {"genre": row[0], "count": int(row[1])}
+            for row in cursor.fetchall()
+        ]
+
+        # Recent activity
         recent_activity = []
         try:
             cursor.execute("""
-                SELECT id, accession_no, old_status, new_status, changed_at
+                SELECT *
                 FROM public.status_audit
-                ORDER BY changed_at DESC
+                ORDER BY 1 DESC
                 LIMIT 5
             """)
-            rows = cursor.fetchall()
-
-            for row in rows:
-                dt = row[4]
-                recent_activity.append({
-                    "id": row[0],
-                    "accession_no": row[1],
-                    "old_status": row[2],
-                    "new_status": row[3],
-                    "changed_at": (
-                        dt.isoformat()
-                        if hasattr(dt, "isoformat")
-                        else str(dt)
-                    ),
-                })
-        except Exception:
-            recent_activity = []
+            recent_activity = cursor.fetchall()
+        except Exception as e:
+            print(f"Recent activity lookup failed: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
         return {
-            "total_works": int(total_works),
-            "total_items": int(total_items),
-            # Backward-compatible names used by older dashboard code.
-            "total_accessions": int(total_works),
-            "total_books": int(total_works),
-            "total_issued": int(total_issued),
-            "missing_items": int(missing_items),
-            "damaged_items": int(damaged_items),
+            "total_works": total_works,
+            "total_items": total_items,
+            "total_accessions": total_accessions,
+            "total_books": total_books,
+            "total_issued": total_issued,
+            "missing_items": missing_items,
+            "damaged_items": damaged_items,
             "recent_activity": recent_activity,
             "languages": languages,
+            "categories": categories,
+            "genres": genres,
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"Dashboard summary lookup failed: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+        status_code=500,
+        detail="Unable to load dashboard summary."
+    )
 
     finally:
         if cursor:

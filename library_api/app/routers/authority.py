@@ -1,4 +1,3 @@
-
 # app/routers/authority.py
 
 from enum import Enum
@@ -6,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import logging
 import re
 import time
+import unicodedata
 
 import httpx
 from fastapi import (
@@ -69,6 +69,18 @@ class AuthorityStatus(str, Enum):
 # NAME VALIDATION
 # ============================================================
 
+def _format_initials(name: str) -> str:
+    """Write initials as 'O. N. V.' (capital letter, dot, space)."""
+    spaced = re.sub(r"(?<=[A-Za-z])\.(?=[A-Za-z])", ". ", name)
+    out = []
+    for token in spaced.split():
+        if re.fullmatch(r"[A-Za-z]\.?", token):
+            out.append(token[0].upper() + ".")
+        else:
+            out.append(token)
+    return " ".join(out)
+
+
 def standardize_name(name: str) -> str:
     """
     Perform conservative name normalization.
@@ -79,7 +91,7 @@ def standardize_name(name: str) -> str:
     if not isinstance(name, str):
         return ""
 
-    return " ".join(name.strip().split())
+    return _format_initials(" ".join(name.strip().split()))
 
 
 def run_safety_blocks(value: str) -> None:
@@ -161,6 +173,7 @@ class UpdateAuthorityPayload(BaseModel):
     preferred_name: Optional[str] = Field(
         None, min_length=1, max_length=255
     )
+    full_name: Optional[str] = Field(None, max_length=255)
     authority_type: Optional[str] = Field(
         None, min_length=1, max_length=50
     )
@@ -168,19 +181,83 @@ class UpdateAuthorityPayload(BaseModel):
         None, min_length=1, max_length=50
     )
     notes: Optional[str] = Field(None, max_length=2000)
+    original_name: Optional[str] = Field(None, max_length=255)
+    malayalam_name: Optional[str] = Field(None, max_length=255)
     reason: str = Field(..., min_length=3, max_length=1000)
+
+    @field_validator("original_name", mode="before")
+    @classmethod
+    def clean_original_name(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Original name must be text.")
+
+        cleaned = " ".join(value.strip().split())
+        if cleaned:
+            run_safety_blocks(cleaned)
+
+        return cleaned
+
+    @field_validator("full_name", mode="before")
+    @classmethod
+    def clean_full_name(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Full name must be text.")
+
+        cleaned = " ".join(value.strip().split())
+        if cleaned:
+            run_safety_blocks(cleaned)
+
+        return cleaned
+
+    @field_validator("malayalam_name", mode="before")
+    @classmethod
+    def clean_malayalam_name(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Malayalam name must be text.")
+
+        cleaned = " ".join(value.strip().split())
+
+        if not cleaned:
+            return ""
+
+        run_safety_blocks(cleaned)
+
+        for char in cleaned:
+            if char.isalpha():
+                script = unicodedata.name(char, "")
+                if "MALAYALAM" not in script:
+                    raise ValueError(
+                        "Malayalam name must use Malayalam script only."
+                    )
+
+        return cleaned
 
     @field_validator("preferred_name", mode="before")
     @classmethod
     def clean_preferred_name(cls, value: Any) -> Optional[str]:
         if value is None:
             return None
-
         if not isinstance(value, str):
             raise ValueError("Preferred name must be text.")
 
-        run_safety_blocks(value)
-        return standardize_name(value)
+        cleaned = " ".join(value.strip().split())
+        run_safety_blocks(cleaned)
+
+        for char in cleaned:
+            if char.isalpha():
+                script = unicodedata.name(char, "")
+                if "LATIN" not in script:
+                    raise ValueError(
+                        "English preferred name must use Latin letters only."
+                    )
+
+        return standardize_name(cleaned).upper()
 
     @field_validator("authority_type", mode="before")
     @classmethod
@@ -232,11 +309,7 @@ class UpdateAuthorityPayload(BaseModel):
 
 class VariantCreatePayload(BaseModel):
     variant_name: str = Field(..., min_length=1, max_length=255)
-
-    # OTHER is a valid database enum value and avoids inserting NULL
-    # when existing clients omit this optional field.
     variant_type: str = Field(default="OTHER", max_length=50)
-
     notes: Optional[str] = Field(None, max_length=2000)
     reason: str = Field(..., min_length=3, max_length=1000)
 
@@ -327,8 +400,6 @@ def _transition_authority_status(
     cur,
     authority_id: int,
     target_status: AuthorityStatus,
-    disallowed_current_status: AuthorityStatus,
-    conflict_detail: str,
     note_tag: str,
     user_id: Any,
     reason: str,
@@ -545,10 +616,12 @@ def resolve_or_create_authority(
         SELECT authority_id, preferred_name, status
         FROM public.authority_records
         WHERE lower(btrim(preferred_name)) = lower(btrim(%s))
+           OR lower(btrim(COALESCE(original_name, ''))) = lower(btrim(%s))
+           OR lower(btrim(COALESCE(malayalam_name, ''))) = lower(btrim(%s))
         ORDER BY authority_id
         FOR SHARE
         """,
-        (clean_author,),
+        (clean_author, clean_author, clean_author),
     )
     matches = cur.fetchall()
 
@@ -590,25 +663,43 @@ def resolve_or_create_authority(
 
         return authority_id
 
-    # This lock coordinates generated authority-code allocation among
-    # concurrent requests using this function.
     cur.execute(
         "SELECT pg_advisory_xact_lock(hashtext(%s))",
         ("authority-code-allocation",),
     )
 
-    cur.execute(
-        """
-        SELECT COALESCE(
-            MAX(SUBSTRING(authority_code FROM 7)::INTEGER),
-            0
-        ) + 1
-        FROM public.authority_records
-        WHERE authority_code ~ '^AUT-P-[0-9]+$'
-        """
-    )
-    next_number = _col(cur.fetchone(), 0, "next_number")
-    authority_code = f"AUT-P-{next_number:04d}"
+    cur.execute("SELECT to_regclass('public.authority_code_p_seq')")
+    has_sequence = _col(cur.fetchone(), 0, "to_regclass")
+
+    if has_sequence:
+        while True:
+            cur.execute("SELECT nextval('public.authority_code_p_seq')")
+            next_number = _col(cur.fetchone(), 0, "nextval")
+            authority_code = f"AUT-P-{next_number:04d}"
+
+            cur.execute(
+                """
+                SELECT 1
+                FROM public.authority_records
+                WHERE authority_code = %s
+                """,
+                (authority_code,),
+            )
+            if not cur.fetchone():
+                break
+    else:
+        cur.execute(
+            """
+            SELECT COALESCE(
+                MAX(SUBSTRING(authority_code FROM 7)::INTEGER),
+                0
+            ) + 1
+            FROM public.authority_records
+            WHERE authority_code ~ '^AUT-P-[0-9]+$'
+            """
+        )
+        next_number = _col(cur.fetchone(), 0, "next_number")
+        authority_code = f"AUT-P-{next_number:04d}"
 
     cur.execute(
         """
@@ -748,6 +839,7 @@ def list_authorities(
             authority_id,
             authority_code,
             preferred_name,
+            full_name,
             authority_type,
             status,
             notes,
@@ -756,7 +848,9 @@ def list_authorities(
             created_by,
             updated_by,
             verified_at,
-            verified_by
+            verified_by,
+            original_name,
+            malayalam_name
         FROM public.authority_records
         {where_clause}
         ORDER BY authority_id
@@ -792,16 +886,18 @@ def search_authority_records(
 
     pattern = f"%{term}%"
     status_clause = ""
-    params: List[Any] = [pattern, pattern, pattern, pattern]
+    status_params: List[Any] = []
 
     if usable_only:
         status_clause = "AND ar.status IN (%s, %s)"
-        params.extend([
+        status_params = [
             AuthorityStatus.PROVISIONAL.value,
             AuthorityStatus.VERIFIED.value,
-        ])
+        ]
 
-    params.append(limit)
+    params: List[Any] = (
+        [pattern] * 6 + status_params + [pattern, limit]
+    )
 
     cur.execute(
         f"""
@@ -809,8 +905,11 @@ def search_authority_records(
             ar.authority_id,
             ar.authority_code,
             ar.preferred_name,
+            ar.full_name,
             ar.authority_type,
             ar.status,
+            ar.original_name,
+            ar.malayalam_name,
             FALSE AS is_deleted,
             CASE
                 WHEN ar.preferred_name ILIKE %s THEN 'PREFERRED_NAME'
@@ -819,6 +918,9 @@ def search_authority_records(
         FROM public.authority_records ar
         WHERE (
             ar.preferred_name ILIKE %s
+            OR ar.full_name ILIKE %s
+            OR ar.original_name ILIKE %s
+            OR ar.malayalam_name ILIKE %s
             OR EXISTS (
                 SELECT 1
                 FROM public.authority_variants av
@@ -852,9 +954,17 @@ def search_authorities(
     current_user: dict = Depends(get_current_user),
 ):
     conn, cur = db
+    
+    cleaned_q = q.strip()
+    if not cleaned_q:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Search query cannot be blank or whitespace only.",
+        )
+
     return search_authority_records(
         cur,
-        q,
+        cleaned_q,
         limit=limit,
         usable_only=usable_only,
     )
@@ -1042,7 +1152,14 @@ async def external_search_authorities(
 ):
     """Return external suggestions without creating or merging local records."""
 
-    results = await _external_authority_search(q, limit=limit)
+    cleaned_q = q.strip()
+    if not cleaned_q:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Search query cannot be blank or whitespace only.",
+        )
+
+    results = await _external_authority_search(cleaned_q, limit=limit)
 
     return {
         "source": "Open Library",
@@ -1074,6 +1191,7 @@ def get_authority(
             authority_id,
             authority_code,
             preferred_name,
+            full_name,
             authority_type,
             status,
             notes,
@@ -1082,7 +1200,9 @@ def get_authority(
             created_by,
             updated_by,
             verified_at,
-            verified_by
+            verified_by,
+            original_name,
+            malayalam_name
         FROM public.authority_records
         WHERE authority_id = %s
         """,
@@ -1170,7 +1290,8 @@ def update_authority_details(
 
     cur.execute(
         """
-        SELECT preferred_name, authority_type, authority_code, notes
+        SELECT preferred_name, authority_type, authority_code, notes,
+               original_name, malayalam_name, full_name
         FROM public.authority_records
         WHERE authority_id = %s
         FOR UPDATE
@@ -1190,6 +1311,9 @@ def update_authority_details(
         "authority_type": row[1],
         "authority_code": row[2],
         "notes": row[3],
+        "original_name": row[4],
+        "malayalam_name": row[5],
+        "full_name": row[6],
     }
 
     updated_name = (
@@ -1208,8 +1332,19 @@ def update_authority_details(
         else row[2]
     )
 
-    # Authority codes are identifiers. Do not permit changing an existing
-    # code through the ordinary details endpoint.
+    updated_original = (
+        row[4] if payload.original_name is None
+        else (payload.original_name or None)
+    )
+    updated_malayalam = (
+        row[5] if payload.malayalam_name is None
+        else (payload.malayalam_name or None)
+    )
+    updated_full_name = (
+        row[6] if payload.full_name is None
+        else (payload.full_name or None)
+    )
+
     if updated_code != row[2]:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1242,8 +1377,6 @@ def update_authority_details(
             ),
         )
 
-    # None means "leave notes unchanged"; an explicitly supplied empty
-    # string means "clear the existing notes".
     base_notes = (
         payload.notes
         if payload.notes is not None
@@ -1261,8 +1394,11 @@ def update_authority_details(
         UPDATE public.authority_records
         SET
             preferred_name = %s,
+            full_name = %s,
             authority_type = %s,
             notes = %s,
+            original_name = %s,
+            malayalam_name = %s,
             updated_at = CURRENT_TIMESTAMP,
             updated_by = %s::integer
         WHERE authority_id = %s
@@ -1270,6 +1406,7 @@ def update_authority_details(
             authority_id,
             authority_code,
             preferred_name,
+            full_name,
             authority_type,
             status,
             notes,
@@ -1278,12 +1415,17 @@ def update_authority_details(
             created_by,
             updated_by,
             verified_at,
-            verified_by
+            verified_by,
+            original_name,
+            malayalam_name
         """,
         (
             updated_name,
+            updated_full_name,
             updated_type,
             final_notes,
+            updated_original,
+            updated_malayalam,
             int(current_user["user_id"]),
             authority_id,
         ),
@@ -1305,9 +1447,12 @@ def update_authority_details(
             "previous": old_state,
             "updated": {
                 "preferred_name": updated_name,
+                "full_name": updated_full_name,
                 "authority_type": updated_type,
                 "authority_code": updated_code,
                 "notes": final_notes,
+                "original_name": updated_original,
+                "malayalam_name": updated_malayalam,
             },
         },
         extra={
@@ -1320,9 +1465,12 @@ def update_authority_details(
         before=old_state,
         after={
             "preferred_name": updated_name,
+            "full_name": updated_full_name,
             "authority_type": updated_type,
             "authority_code": updated_code,
             "notes": final_notes,
+            "original_name": updated_original,
+            "malayalam_name": updated_malayalam,
         },
     )
 
@@ -1356,8 +1504,6 @@ def verify_authority(
         cur=cur,
         authority_id=authority_id,
         target_status=AuthorityStatus.VERIFIED,
-        disallowed_current_status=AuthorityStatus.VERIFIED,
-        conflict_detail="Authority is already verified.",
         note_tag="VERIFIED",
         user_id=current_user["user_id"],
         reason=payload.reason,
@@ -1414,8 +1560,6 @@ def reject_authority(
 ):
     conn, cur = db
 
-    # Do not reject an authority that is still linked to works. Reassignment
-    # or an explicit reviewed workflow must happen before rejection.
     cur.execute(
         """
         SELECT work_id
@@ -1441,8 +1585,6 @@ def reject_authority(
         cur=cur,
         authority_id=authority_id,
         target_status=AuthorityStatus.REJECTED,
-        disallowed_current_status=AuthorityStatus.REJECTED,
-        conflict_detail="Authority is already rejected.",
         note_tag="REJECTED",
         user_id=current_user["user_id"],
         reason=payload.reason,
@@ -1503,8 +1645,6 @@ def reopen_authority(
         cur=cur,
         authority_id=authority_id,
         target_status=AuthorityStatus.PROVISIONAL,
-        disallowed_current_status=AuthorityStatus.PROVISIONAL,
-        conflict_detail="Authority is already provisional.",
         note_tag="REOPENED FOR REVIEW",
         user_id=current_user["user_id"],
         reason=payload.reason,
@@ -1733,8 +1873,6 @@ def update_variant(
             detail="Another variant with this name already exists.",
         )
 
-    # Preserve existing notes when omitted; allow an explicit empty string
-    # to clear notes before appending the mandatory audit reason.
     base_notes = (
         payload.notes
         if payload.notes is not None
