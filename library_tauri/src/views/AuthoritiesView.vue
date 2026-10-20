@@ -127,21 +127,10 @@ const rejectedCount = computed(() =>
   ).length
 )
 
-const typeOptions = computed(() => {
-  const set = new Set(
-    authorities.value
-      .map(authority =>
-        String(authority.authority_type || '').trim()
-      )
-      .filter(Boolean)
-  )
-
-  if (editForm.authority_type) {
-    set.add(editForm.authority_type)
-  }
-
-  return Array.from(set).sort()
-})
+const typeOptions = computed(() => [
+  'PERSON', 'HISTORICAL', 'TRADITIONAL', 'CORPORATE',
+  'FAMILY', 'UNKNOWN', 'ANONYMOUS', 'UNCONTROLLED'
+])
 
 const filteredAuthorities = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
@@ -229,7 +218,8 @@ const dlg = reactive({
 const dlgTitle = computed(() => ({
   VERIFY: 'Verify this authority?',
   REJECT: 'Reject this authority?',
-  REOPEN: 'Reopen for provisional review?'
+  REOPEN: 'Reopen for provisional review?',
+  DELVARIANT: 'Delete this variant?'
 }[dlg.type]))
 
 const dlgText = computed(() => ({
@@ -238,13 +228,15 @@ const dlgText = computed(() => ({
   REJECT:
     'A rejected authority cannot be linked to new works. The action is recorded in the audit trail permanently.',
   REOPEN:
-    'The record returns to PROVISIONAL so it can be edited again. The earlier action stays in the audit trail.'
+    'The record returns to PROVISIONAL so it can be edited again. The earlier action stays in the audit trail.',
+  DELVARIANT: 'The variant name is removed from this authority. The deletion is recorded in the audit trail.'
 }[dlg.type]))
 
 const dlgConfirm = computed(() => ({
   VERIFY: 'Verify',
   REJECT: 'Reject',
-  REOPEN: 'Reopen'
+  REOPEN: 'Reopen',
+  DELVARIANT: 'Delete'
 }[dlg.type]))
 
 function askAction(type) {
@@ -269,7 +261,9 @@ async function submitDialog() {
   const type = dlg.type
   dlg.open = false
 
-  if (type === 'VERIFY') {
+  if (type === 'DELVARIANT') {
+    await deleteVariant(dlg.variantId, reason)
+  } else if (type === 'VERIFY') {
     await verifyAuthority(reason)
   } else if (type === 'REJECT') {
     await rejectAuthority(reason)
@@ -902,10 +896,10 @@ async function addVariant() {
   }
 }
 
-async function deleteVariant(variantId, variantName) {
+function askVariantDelete(variantId, variantName) {
   const authority = selectedAuthority.value
 
-  if (!authority) return
+  if (!authority || actionLoading.value) return
 
   if (authority.status !== 'PROVISIONAL') {
     actionFailed.value = true
@@ -916,26 +910,17 @@ async function deleteVariant(variantId, variantName) {
     return
   }
 
-  if (
-    !window.confirm(
-      `Delete variant "${variantName}"?`
-    )
-  ) {
-    return
-  }
+  dlg.type = 'DELVARIANT'
+  dlg.variantId = variantId
+  dlg.variantName = variantName
+  dlg.reason = ''
+  dlg.open = true
+}
 
-  const reason = window.prompt(
-    'Enter the reason for deleting this variant (at least 3 characters):'
-  )?.trim()
+async function deleteVariant(variantId, reason) {
+  const authority = selectedAuthority.value
 
-  if (!reason || reason.length < 3) {
-    actionFailed.value = true
-    actionMessage.value =
-      'Deletion cancelled. A reason of at least 3 characters is required.'
-
-    showToast(actionMessage.value, 'error')
-    return
-  }
+  if (!authority) return
 
   const authorityId = authority.authority_id
 
@@ -1166,7 +1151,7 @@ onBeforeUnmount(() => {
               {{ normalizeEnglishName(authority.preferred_name) }}
             </div>
             <div v-if="authority.full_name" class="authority-name-full">
-              Full: {{ authority.full_name }}
+              {{ authority.full_name }}
             </div>
             <div
               v-if="authority.malayalam_name"
@@ -1435,7 +1420,7 @@ onBeforeUnmount(() => {
                     class="variant-delete-btn"
                     :disabled="actionLoading"
                     title="Delete variant"
-                    @click.stop="deleteVariant(variant.variant_id, variant.variant_name)"
+                    @click.stop="askVariantDelete(variant.variant_id, variant.variant_name)"
                   >
                     REMOVE
                   </button>

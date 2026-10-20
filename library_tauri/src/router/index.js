@@ -1,4 +1,3 @@
-// src/router/index.js
 
 import { createRouter, createWebHashHistory } from "vue-router"
 import { useAuthStore } from "@/stores/auth"
@@ -69,7 +68,7 @@ const routes = [
     meta: { requiresAuth: true },
   },
 
-  // Normal Keeper registration
+  // Keeper registration
   {
     path: "/create-work",
     name: "CreateWork",
@@ -91,7 +90,7 @@ const routes = [
     },
   },
 
-  // Chief-only direct registration
+  // Chief registration
   {
     path: "/chief/register-work",
     name: "ChiefRegisterWork",
@@ -123,24 +122,36 @@ const routes = [
     component: EditItemView,
     meta: { requiresAuth: true },
   },
+
+  // Classification pages: accessible to Chief and Keeper
   {
-    path: "/authors",
-    name: "Authors",
+    path: "/classification/authors",
+    name: "classification-authors",
     component: AuthorsView,
-    meta: { requiresAuth: true },
+    meta: {
+      requiresAuth: true,
+      roles: ["The Chief", "The Keeper"],
+    },
   },
   {
-    path: "/authorities",
-    name: "Authorities",
+    path: "/classification/authorities",
+    name: "classification-authorities",
     component: AuthoritiesView,
-    meta: { requiresAuth: true },
+    meta: {
+      requiresAuth: true,
+      roles: ["The Chief", "The Keeper"],
+    },
   },
   {
-    path: "/subjects",
-    name: "Subjects",
+    path: "/classification/subjects",
+    name: "classification-subjects",
     component: SubjectsView,
-    meta: { requiresAuth: true },
+    meta: {
+      requiresAuth: true,
+      roles: ["The Chief", "The Keeper"],
+    },
   },
+
   {
     path: "/incidents",
     name: "Incidents",

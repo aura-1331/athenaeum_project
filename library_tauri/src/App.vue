@@ -4,11 +4,10 @@ import axios from "axios"
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
-import AuthorsView from '@/views/AuthorsView.vue'
-import AuthoritiesView from '@/views/AuthoritiesView.vue'
-import SubjectsView from '@/views/SubjectsView.vue'
+
 import BatchRegisterModal from '@/components/print/BatchRegisterModal.vue'
 import SystemStatus from './components/SystemStatus.vue'
+
 import {
   LayoutDashboard,
   Library,
@@ -37,35 +36,6 @@ const route = useRoute()
 const router = useRouter()
 const isMobileMenuOpen = ref(false)
 
-// Keep classification navigation working if the configured router predates
-// these pages. The global router guard still sees the roles in route meta.
-const classificationRoutes = [
-  {
-    path: "/classification/authors",
-    name: "classification-authors",
-    component: AuthorsView,
-    meta: { roles: ["The Chief"] },
-  },
-  {
-    path: "/classification/authorities",
-    name: "classification-authorities",
-    component: AuthoritiesView,
-    meta: { roles: ["The Chief"] },
-  },
-  {
-    path: "/classification/subjects",
-    name: "classification-subjects",
-    component: SubjectsView,
-    meta: { roles: ["The Chief"] },
-  },
-]
-
-for (const routeRecord of classificationRoutes) {
-  const pathAlreadyRegistered = router.getRoutes().some(
-    (registeredRoute) => registeredRoute.path === routeRecord.path,
-  )
-  if (!pathAlreadyRegistered) router.addRoute(routeRecord)
-}
 
 // --- PRINT MODAL REF & TRIGGER ---
 const batchModalRef = ref(null)
@@ -408,14 +378,14 @@ onUnmounted(() => {
   </RouterLink>
 
   <div
-    v-if="user_role === 'The Chief'"
-    class="nav-section-label"
+  v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
+  class="nav-section-label"
   >
-    Classification
+  Classification
   </div>
 
   <RouterLink
-    v-if="user_role === 'The Chief'"
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
     to="/classification/authors"
   >
     <Users :size="18" :stroke-width="1.5" />
@@ -423,7 +393,7 @@ onUnmounted(() => {
   </RouterLink>
 
   <RouterLink
-    v-if="user_role === 'The Chief'"
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
     to="/classification/authorities"
   >
     <ClipboardCheck :size="18" :stroke-width="1.5" />
@@ -431,7 +401,7 @@ onUnmounted(() => {
   </RouterLink>
 
   <RouterLink
-    v-if="user_role === 'The Chief'"
+    v-if="user_role === 'The Chief' || user_role === 'The Keeper'"
     to="/classification/subjects"
   >
     <Tag :size="18" :stroke-width="1.5" />
