@@ -1262,7 +1262,11 @@ async function loadFinalRejections() {
     console.error('Final rejections failed:', err)
   }
 }
-vueOnMounted(loadFinalRejections)
+vueOnMounted(() => {
+  if (user_role.value === 'The Chief') {
+    loadFinalRejections()
+  }
+})
 const myFinalRejections = vueRef([])
 const keeperFinalIds = computed(() => new Set(myFinalRejections.value.map((r) => String(r.work_id))))
 async function loadMyFinalRejections() {
@@ -1274,7 +1278,11 @@ async function loadMyFinalRejections() {
     console.error('My final rejections failed:', err)
   }
 }
-vueOnMounted(loadMyFinalRejections)
+vueOnMounted(() => {
+  if (user_role.value === 'The Keeper') {
+    loadMyFinalRejections()
+  }
+})
 function docketStatusLabel(status) {
   const s = String(status || '').toUpperCase()
   if (s === 'REJECTED') return 'Returned for correction'

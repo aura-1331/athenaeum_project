@@ -1,23 +1,32 @@
+```vue
 <template>
   <div class="classification-layout">
     <!-- LEFT PANEL: STRUCTURAL METRICS -->
     <aside class="metric-sidebar">
       <router-link to="/dashboard" class="escape-matrix-link">
-        <span class="escape-icon">←</span> RETURN_TO_SYSTEM_CORE
+        <span class="escape-icon">←</span>
+        RETURN_TO_SYSTEM_CORE
       </router-link>
 
       <div class="panel-badge">CLASSIFICATION // TAXONOMY</div>
+
       <div class="hero-identity-block">
         <span class="meta-label">INDEX_TYPE</span>
         <h1 class="display-title">SUBJECTS</h1>
-        <p class="display-summary">System taxonomic index mapping category frequencies and call signature footprints.</p>
+        <p class="display-summary">
+          System taxonomic index mapping category frequencies and call
+          signature footprints.
+        </p>
       </div>
 
       <div class="system-status-matrix">
         <div class="status-node">
           <span>ACTIVE_SUBJECTS</span>
-          <strong class="font-mono text-magenta">{{ aggregatedSubjectsList.length }}</strong>
+          <strong class="font-mono text-magenta">
+            {{ aggregatedSubjectsList.length }}
+          </strong>
         </div>
+
         <div class="status-node">
           <span>CATALOGUED_ITEMS</span>
           <strong class="font-mono">{{ totalAssetCount }}</strong>
@@ -25,35 +34,40 @@
       </div>
     </aside>
 
-    <!-- RIGHT PANEL: SUBJECT GRID LIST / DRILL DOWN FEED -->
+    <!-- RIGHT PANEL -->
     <main class="registry-feed-column">
       <div class="feed-scroll-wrapper">
-        
-        <!-- HEADER MODE A: TAXONOMY BROWSING -->
+        <!-- SUBJECT SEARCH -->
         <header v-if="!selectedSubject" class="feed-header">
           <div class="search-box-wrapper">
             <span class="search-icon">⌕</span>
-            <input 
-              type="text" 
-              v-model="searchQuery" 
-              placeholder="FILTER_BY_SUBJECT_OR_GENRE_NAME..." 
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="FILTER_BY_SUBJECT_OR_GENRE_NAME..."
               class="search-input"
             />
           </div>
         </header>
 
-        <!-- HEADER MODE B: ACTIVE FILTRATION RESET -->
+        <!-- SELECTED SUBJECT HEADER -->
         <header v-else class="feed-header-isolated">
           <div class="filter-breadcrumb-badge">
-            FILTER_ACTIVE // TAXONOMY: <span class="highlight">{{ selectedSubject.toUpperCase() }}</span>
+            FILTER_ACTIVE // TAXONOMY:
+            <span class="highlight">{{ selectedSubject }}</span>
           </div>
-          <button @click="clearSubjectSelection" class="clear-filter-btn">
+
+          <button
+            type="button"
+            class="clear-filter-btn"
+            @click="clearSubjectSelection"
+          >
             [X] RESET_REGISTRY_VIEW
           </button>
         </header>
 
         <div class="table-container">
-          <!-- VIEW GRID A: PRIMARY SUBJECT AGGREGATIONS -->
+          <!-- PRIMARY SUBJECT TABLE -->
           <table v-if="!selectedSubject" class="vault-table">
             <thead>
               <tr>
@@ -62,26 +76,54 @@
                 <th class="text-right">DENSITY_COUNT</th>
               </tr>
             </thead>
+
             <tbody>
               <tr v-if="loading">
-                <td colspan="3" class="text-center py-8 text-muted font-mono">PARSING_TAXONOMY_NODES...</td>
+                <td colspan="3" class="text-center py-8 text-muted font-mono">
+                  PARSING_TAXONOMY_NODES...
+                </td>
               </tr>
+
+              <tr v-else-if="errorMessage">
+                <td colspan="3" class="text-center py-8 error-message">
+                  {{ errorMessage }}
+                </td>
+              </tr>
+
               <tr v-else-if="filteredSubjects.length === 0">
-                <td colspan="3" class="text-center py-8 text-muted font-mono">NO_TAXONOMY_MATCHES_FOUND</td>
+                <td colspan="3" class="text-center py-8 text-muted font-mono">
+                  NO_TAXONOMY_MATCHES_FOUND
+                </td>
               </tr>
-              <tr v-else v-for="subj in filteredSubjects" :key="subj.tag" class="data-row">
+
+              <tr
+                v-else
+                v-for="subj in filteredSubjects"
+                :key="subj.tag"
+                class="data-row"
+              >
                 <td class="text-left">
-                  <button @click="selectSubject(subj.tag)" class="interactive-identity-trigger">
+                  <button
+                    type="button"
+                    class="interactive-identity-trigger"
+                    @click="selectSubject(subj.tag)"
+                  >
                     {{ subj.tag || 'UNASSIGNED' }}
                   </button>
                 </td>
-                <td class="text-center font-mono text-magenta size-small">{{ subj.category }}</td>
-                <td class="text-right font-mono text-blue bold">{{ subj.count }}</td>
+
+                <td class="text-center font-mono text-magenta size-small">
+                  {{ subj.category }}
+                </td>
+
+                <td class="text-right font-mono text-blue bold">
+                  {{ subj.count }}
+                </td>
               </tr>
             </tbody>
           </table>
 
-          <!-- VIEW GRID B: ISOLATED SUBJECT ASSETS LINKED TO DETAILS VIEW -->
+          <!-- BOOKS UNDER SELECTED SUBJECT -->
           <table v-else class="vault-table">
             <thead>
               <tr>
@@ -91,21 +133,56 @@
                 <th class="text-right">CATALOGUE_TRACK</th>
               </tr>
             </thead>
+
             <tbody>
-              <tr v-for="book in targetedSubjectBooks" :key="extractId(book)" class="data-row">
-                <td class="font-mono size-small text-muted text-left">#{{ book.accession_no || extractId(book) }}</td>
+              <tr v-if="loading">
+                <td colspan="4" class="text-center py-8 text-muted font-mono">
+                  LOADING_SUBJECT_ASSETS...
+                </td>
+              </tr>
+
+              <tr v-else-if="errorMessage">
+                <td colspan="4" class="text-center py-8 error-message">
+                  {{ errorMessage }}
+                </td>
+              </tr>
+
+              <tr v-else-if="targetedSubjectBooks.length === 0">
+                <td colspan="4" class="text-center py-8 text-muted font-mono">
+                  NO_ASSETS_FOUND_FOR_THIS_SUBJECT
+                </td>
+              </tr>
+
+              <tr
+                v-else
+                v-for="book in targetedSubjectBooks"
+                :key="extractId(book)"
+                class="data-row"
+              >
+                <td class="font-mono size-small text-muted text-left">
+                  #{{ book.accession_no ?? extractId(book) }}
+                </td>
+
                 <td class="text-left">
-                  <router-link :to="'/details/' + extractId(book)" class="interactive-book-trigger">
+                  <router-link
+                    :to="`/details/${extractId(book)}`"
+                    class="interactive-book-trigger"
+                  >
                     {{ book.title || 'UNTITLED_ASSET_RECORD' }}
                   </router-link>
                 </td>
-                <td class="text-left size-small font-bold text-white">{{ book.author || 'UNKNOWN AUTHOR' }}</td>
-                <td class="text-right font-mono size-small text-blue">{{ book.call_number || book.call_no || 'UNASSIGNED' }}</td>
+
+                <td class="text-left size-small font-bold text-white">
+                  {{ book.author || 'UNKNOWN AUTHOR' }}
+                </td>
+
+                <td class="text-right font-mono size-small text-blue">
+                  {{ book.call_number || book.call_no || 'UNASSIGNED' }}
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
-
       </div>
     </main>
   </div>
@@ -115,98 +192,285 @@
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 
+interface CatalogueItem {
+  serial_no?: string | number
+  id?: string | number
+  item_id?: string | number
+  accession?: string | number
+  accession_no?: string | number
+  title?: string
+  author?: string
+  genre?: string
+  category?: string
+  call_number?: string
+  call_no?: string
+  [key: string]: unknown
+}
+
 interface SubjectAggregate {
   tag: string
   count: number
   category: string
 }
 
+interface CatalogueResponse {
+  data?: CatalogueItem[]
+  total?: number
+}
+
 const loading = ref(true)
 const searchQuery = ref('')
 const selectedSubject = ref<string | null>(null)
+const errorMessage = ref('')
 
-const masterCatalogueData = ref<any[]>([])
+const masterCatalogueData = ref<CatalogueItem[]>([])
 const aggregatedSubjectsList = ref<SubjectAggregate[]>([])
 const totalAssetCount = ref(0)
 
-function extractId(book: any): string | number {
-  if (!book) return 'undefined'
-  const targetId = book.serial_no ?? book.id ?? book.item_id ?? book.accession
-  return targetId !== undefined ? targetId : 'undefined'
+/**
+ * Return the identifier used by the catalogue and details route.
+ * Confirm which identifier your backend's details endpoint expects.
+ */
+function extractId(book: CatalogueItem): string | number {
+  return (
+    book.serial_no ??
+    book.id ??
+    book.item_id ??
+    book.accession_no ??
+    book.accession ??
+    'undefined'
+  )
 }
 
-async function compileSubjectsRegistry() {
-  loading.value = true
-  try {
-    const response = await axios.get('/catalogue?limit=1000')
-    const items = response.data?.data || []
-    masterCatalogueData.value = items
-    totalAssetCount.value = items.length
+/**
+ * Split multi-subject genre strings and normalize their casing.
+ * Example: "Science / History" -> ["SCIENCE", "HISTORY"]
+ */
+function normalizeGenre(value: unknown): string[] {
+  if (typeof value !== 'string' || !value.trim()) {
+    return ['UNCLASSIFIED']
+  }
 
-    const mapping: Record<string, { count: number; category: string }> = {}
+  const genres = value
+    .split('/')
+    .map(part => part.trim().replace(/\s+/g, ' ').toUpperCase())
+    .filter(Boolean)
 
-    items.forEach((item: any) => {
-      const rawGenre = item.genre ? item.genre.trim() : 'UNCLASSIFIED'
-      const category = item.category || 'General'
-      
-      // Split genres by slash, trim whitespace from each split token, and run aggregations on each individual part
-      const subGenres = rawGenre.split('/').map((g: string) => g.trim()).filter((g: string) => g.length > 0)
+  return genres.length ? [...new Set(genres)] : ['UNCLASSIFIED']
+}
 
-      subGenres.forEach((genreTag: string) => {
-        // Enforce UPPERCASE formatting for grouping stability across listings
-        const standardizedTag = genreTag.toUpperCase()
-        
-        if (!mapping[standardizedTag]) {
-          mapping[standardizedTag] = { count: 0, category: category }
+/**
+ * Build subject counts from the catalogue records.
+ * Each record counts once per distinct subject it contains.
+ */
+function buildSubjectsRegistry(items: CatalogueItem[]): void {
+  const mapping = new Map<
+    string,
+    {
+      count: number
+      categories: Map<string, number>
+    }
+  >()
+
+  for (const item of items) {
+    const genres = normalizeGenre(item.genre)
+
+    const category =
+      typeof item.category === 'string' && item.category.trim()
+        ? item.category.trim()
+        : 'General'
+
+    for (const tag of genres) {
+      let entry = mapping.get(tag)
+
+      if (!entry) {
+        entry = {
+          count: 0,
+          categories: new Map<string, number>()
         }
-        mapping[standardizedTag].count++
-      })
+
+        mapping.set(tag, entry)
+      }
+
+      entry.count += 1
+
+      entry.categories.set(
+        category,
+        (entry.categories.get(category) ?? 0) + 1
+      )
+    }
+  }
+
+  aggregatedSubjectsList.value = Array.from(mapping.entries())
+    .map(([tag, entry]) => {
+      let category = 'General'
+      let highestCount = 0
+
+      for (const [name, count] of entry.categories) {
+        if (count > highestCount) {
+          category = name
+          highestCount = count
+        }
+      }
+
+      return {
+        tag,
+        count: entry.count,
+        category
+      }
     })
+    .sort((a, b) => a.tag.localeCompare(b.tag))
+}
 
-    aggregatedSubjectsList.value = Object.keys(mapping).map(tag => ({
-      tag,
-      count: mapping[tag].count,
-      category: mapping[tag].category
-    })).sort((a, b) => a.tag.localeCompare(b.tag))
+/**
+ * Fetch the catalogue and then build the subject registry.
+ *
+ * Assumes the API accepts page + limit and returns:
+ * { data: CatalogueItem[], total: number }
+ *
+ * If your backend uses skip + limit or returns a plain array,
+ * adjust the request and response parsing accordingly.
+ */
+async function compileSubjectsRegistry(): Promise<void> {
+  loading.value = true
+  errorMessage.value = ''
 
-  } catch (err) {
-    console.error("Failed to parse taxonomy structural footprints:", err)
+  try {
+    const allItems: CatalogueItem[] = []
+    const limit = 100
+    let page = 1
+    let expectedTotal: number | null = null
+
+    const seenPageSignatures = new Set<string>()
+
+    while (true) {
+      const response = await axios.get<CatalogueResponse>(
+        '/catalogue/',
+        {
+          params: {
+            page,
+            limit
+          }
+        }
+      )
+
+      const payload = response.data
+
+      const batch = Array.isArray(payload?.data)
+        ? payload.data
+        : []
+
+      if (
+        typeof payload?.total === 'number' &&
+        Number.isFinite(payload.total)
+      ) {
+        expectedTotal = payload.total
+      }
+
+      if (batch.length === 0) {
+        break
+      }
+
+      // Prevent an infinite loop if the server repeats a page.
+      const signature = batch
+        .map(item => String(extractId(item)))
+        .join('|')
+
+      if (seenPageSignatures.has(signature)) {
+        throw new Error(
+          'Catalogue pagination returned a repeated page. ' +
+          'Check the backend pagination parameters.'
+        )
+      }
+
+      seenPageSignatures.add(signature)
+      allItems.push(...batch)
+
+      if (
+        expectedTotal !== null &&
+        allItems.length >= expectedTotal
+      ) {
+        break
+      }
+
+      if (batch.length < limit) {
+        break
+      }
+
+      page += 1
+    }
+
+    masterCatalogueData.value = allItems
+
+    totalAssetCount.value =
+      expectedTotal ?? allItems.length
+
+    buildSubjectsRegistry(allItems)
+  } catch (error: unknown) {
+    console.error('Failed to load subjects registry:', error)
+
+    if (axios.isAxiosError(error)) {
+      const detail = error.response?.data?.detail
+
+      errorMessage.value =
+        typeof detail === 'string'
+          ? detail
+          : error.message || 'Unable to load the catalogue.'
+    } else if (error instanceof Error) {
+      errorMessage.value = error.message
+    } else {
+      errorMessage.value = 'Unable to load the catalogue.'
+    }
+
+    masterCatalogueData.value = []
+    aggregatedSubjectsList.value = []
+    totalAssetCount.value = 0
   } finally {
     loading.value = false
   }
 }
 
+/**
+ * Filter the subject table using the search field.
+ */
 const filteredSubjects = computed(() => {
-  if (!searchQuery.value) return aggregatedSubjectsList.value
-  const query = searchQuery.value.toLowerCase().trim()
-  return aggregatedSubjectsList.value.filter(s => s.tag.toLowerCase().includes(query))
+  const query = searchQuery.value.trim().toLocaleLowerCase()
+
+  if (!query) {
+    return aggregatedSubjectsList.value
+  }
+
+  return aggregatedSubjectsList.value.filter(subject =>
+    subject.tag.toLocaleLowerCase().includes(query) ||
+    subject.category.toLocaleLowerCase().includes(query)
+  )
 })
 
+/**
+ * Return all catalogue records belonging to the selected subject.
+ */
 const targetedSubjectBooks = computed(() => {
-  if (!selectedSubject.value) return []
-  const target = selectedSubject.value.toUpperCase()
-  
-  return masterCatalogueData.value.filter((item: any) => {
-    if (!item.genre) return target === 'UNCLASSIFIED'
-    
-    // Split item's subgenres array to match cross-referenced keys accurately
-    const currentSubGenres = item.genre.split('/').map((g: string) => g.trim().toUpperCase())
-    return currentSubGenres.includes(target)
-  })
+  const selected = selectedSubject.value
+
+  if (!selected) {
+    return []
+  }
+
+  return masterCatalogueData.value.filter(item =>
+    normalizeGenre(item.genre).includes(selected)
+  )
 })
 
-function selectSubject(tag: string) {
+function selectSubject(tag: string): void {
   selectedSubject.value = tag
 }
 
-function clearSubjectSelection() {
+function clearSubjectSelection(): void {
   selectedSubject.value = null
 }
 
 onMounted(() => {
-  setTimeout(() => {
-    compileSubjectsRegistry()
-  }, 150)
+  void compileSubjectsRegistry()
 })
 </script>
 
@@ -217,17 +481,26 @@ onMounted(() => {
   background-color: #111216;
   color: #e2e4e9;
   position: fixed !important;
-  top: 0; left: 0; width: 100vw; height: 100vh;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
   z-index: 9999 !important;
-  display: flex; overflow: hidden;
+  display: flex;
+  overflow: hidden;
   font-family: 'JetBrains Mono', monospace;
   -webkit-font-smoothing: antialiased;
 }
 
 .metric-sidebar {
-  width: 420px; background-color: #0a0b0d !important;
+  width: 420px;
+  background-color: #0a0b0d !important;
   border-right: 1px solid #1c1f26 !important;
-  padding: 48px; display: flex; flex-direction: column; box-sizing: border-box; flex-shrink: 0;
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .escape-matrix-link {
@@ -246,75 +519,319 @@ onMounted(() => {
   background: rgba(245, 158, 11, 0.03);
   transition: all 0.2s ease;
 }
+
 .escape-matrix-link:hover {
   color: #ffffff;
   background: #f59e0b;
   border-color: #f59e0b;
 }
-.escape-icon { font-size: 14px; }
 
-.panel-badge { font-size: 10px; font-weight: bold; color: #525966; letter-spacing: 2px; margin-bottom: 40px; }
-.hero-identity-block { margin-bottom: auto; }
-.meta-label { font-size: 9px; color: #626a7a; letter-spacing: 1px; display: block; margin-bottom: 8px; }
-.display-title { font-size: 32px; font-weight: 800; color: #ffffff; margin: 0 0 16px 0; letter-spacing: 1px; }
-.display-summary { font-size: 12px; line-height: 1.6; color: #626a7a; margin: 0; }
+.escape-icon {
+  font-size: 14px;
+}
+
+.panel-badge {
+  font-size: 10px;
+  font-weight: bold;
+  color: #525966;
+  letter-spacing: 2px;
+  margin-bottom: 40px;
+}
+
+.hero-identity-block {
+  margin-bottom: auto;
+}
+
+.meta-label {
+  font-size: 9px;
+  color: #626a7a;
+  letter-spacing: 1px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.display-title {
+  font-size: 32px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0 0 16px;
+  letter-spacing: 1px;
+}
+
+.display-summary {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #626a7a;
+  margin: 0;
+}
 
 .system-status-matrix {
-  background-color: #111216; border: 1px solid #1c1f26; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px;
+  background-color: #111216;
+  border: 1px solid #1c1f26;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.status-node { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
-.status-node span { color: #525966; font-weight: bold; }
 
-.registry-feed-column { flex-grow: 1; height: 100%; overflow-y: auto; background-color: #111216; }
-.feed-scroll-wrapper { padding: 48px 64px; max-width: 1000px; box-sizing: border-box; }
+.status-node {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
 
-.feed-header { margin-bottom: 32px; }
+.status-node span {
+  color: #525966;
+  font-weight: bold;
+}
+
+.registry-feed-column {
+  flex-grow: 1;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  background-color: #111216;
+}
+
+.feed-scroll-wrapper {
+  padding: 48px 64px;
+  max-width: 1000px;
+  box-sizing: border-box;
+}
+
+.feed-header {
+  margin-bottom: 32px;
+}
+
 .feed-header-isolated {
-  display: flex; justify-content: space-between; align-items: center;
-  background-color: #16181f; border: 1px solid #22252e; border-radius: 6px;
-  padding: 14px 20px; margin-bottom: 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  border-radius: 6px;
+  padding: 14px 20px;
+  margin-bottom: 32px;
 }
-.filter-breadcrumb-badge { font-size: 11px; font-weight: bold; color: #525966; letter-spacing: 1px; }
-.filter-breadcrumb-badge .highlight { color: #f59e0b; font-weight: 800; }
+
+.filter-breadcrumb-badge {
+  font-size: 11px;
+  font-weight: bold;
+  color: #525966;
+  letter-spacing: 1px;
+}
+
+.filter-breadcrumb-badge .highlight {
+  color: #f59e0b;
+  font-weight: 800;
+}
 
 .clear-filter-btn {
-  background: transparent; border: none; color: #f87171; font-family: inherit;
-  font-size: 11px; font-weight: bold; cursor: pointer; letter-spacing: 1px;
+  background: transparent;
+  border: none;
+  color: #f87171;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 1px;
 }
-.clear-filter-btn:hover { color: #ef4444; text-decoration: underline; }
+
+.clear-filter-btn:hover {
+  color: #ef4444;
+  text-decoration: underline;
+}
 
 .search-box-wrapper {
-  background-color: #16181f; border: 1px solid #22252e; border-radius: 6px; padding: 12px 16px; display: flex; align-items: center; gap: 12px;
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-.search-icon { color: #525966; font-size: 16px; }
-.search-input { background: transparent; border: none; color: #ffffff; font-family: inherit; font-size: 13px; width: 100%; }
-.search-input:focus { outline: none; }
 
-.table-container { background-color: #16181f; border: 1px solid #22252e; border-radius: 8px; overflow: hidden; }
-.vault-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
-.vault-table th { background-color: #12141a; color: #525966; font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 16px 24px; border-bottom: 1px solid #22252e; text-transform: uppercase; }
-.vault-table td { padding: 16px 24px; border-bottom: 1px solid #1c1f26; color: #a3a8b4; vertical-align: middle; }
-.data-row:hover { background-color: rgba(255,255,255,0.01); }
+.search-icon {
+  color: #525966;
+  font-size: 16px;
+}
+
+.search-input {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  width: 100%;
+  min-width: 0;
+}
+
+.search-input:focus {
+  outline: none;
+}
+
+.table-container {
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.vault-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.vault-table th {
+  background-color: #12141a;
+  color: #525966;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 16px 24px;
+  border-bottom: 1px solid #22252e;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.vault-table td {
+  padding: 16px 24px;
+  border-bottom: 1px solid #1c1f26;
+  color: #a3a8b4;
+  vertical-align: middle;
+}
+
+.data-row:hover {
+  background-color: rgba(255, 255, 255, 0.01);
+}
 
 .interactive-identity-trigger {
-  background: transparent; border: none; color: #ffffff; font-family: inherit;
-  font-size: 13px; font-weight: bold; cursor: pointer; padding: 0; text-align: left;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
   text-transform: uppercase;
 }
-.interactive-identity-trigger:hover { color: #ec4899; text-decoration: underline; }
+
+.interactive-identity-trigger:hover {
+  color: #ec4899;
+  text-decoration: underline;
+}
 
 .interactive-book-trigger {
-  color: #ffffff; text-decoration: none; font-weight: bold; transition: color 0.2s ease;
+  color: #ffffff;
+  text-decoration: none;
+  font-weight: bold;
+  transition: color 0.2s ease;
 }
-.interactive-book-trigger:hover { color: #3b82f6; text-decoration: underline; }
 
-.text-left { text-align: left; }
-.text-center { text-align: center; }
-.text-right { text-align: right; }
-.text-blue { color: #3b82f6; }
-.text-magenta { color: #ec4899; }
-.text-muted { color: #525966; }
-.bold { font-weight: bold; }
-.size-small { font-size: 11px; }
-.py-8 { padding-top: 32px; padding-bottom: 32px; }
+.interactive-book-trigger:hover {
+  color: #3b82f6;
+  text-decoration: underline;
+}
+
+.error-message {
+  color: #f87171;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.text-blue {
+  color: #3b82f6;
+}
+
+.text-magenta {
+  color: #ec4899;
+}
+
+.text-muted {
+  color: #525966;
+}
+
+.bold {
+  font-weight: bold;
+}
+
+.size-small {
+  font-size: 11px;
+}
+
+.py-8 {
+  padding-top: 32px;
+  padding-bottom: 32px;
+}
+
+@media (max-width: 900px) {
+  .classification-layout {
+    position: relative !important;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .metric-sidebar {
+    width: 100%;
+    padding: 24px;
+    gap: 20px;
+  }
+
+  .hero-identity-block {
+    margin-bottom: 0;
+  }
+
+  .panel-badge {
+    margin-bottom: 12px;
+  }
+
+  .registry-feed-column {
+    height: auto;
+    overflow: visible;
+  }
+
+  .feed-scroll-wrapper {
+    padding: 24px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .feed-scroll-wrapper {
+    padding: 16px;
+  }
+
+  .feed-header-isolated {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .vault-table th,
+  .vault-table td {
+    padding: 12px;
+  }
+}
 </style>
+```

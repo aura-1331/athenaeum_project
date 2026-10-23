@@ -104,17 +104,95 @@ const selectedCategory = ref('')
 const selectedGenre = ref('')
 const selectedLanguage = ref('')
 
+
 async function fetchAllHoldings() {
+  if (loading.value) return
+
   loading.value = true
+
   try {
-    const res = await axios.get('/catalogue/', { params: { limit: 1000 } })
-    rawBooks.value = res.data?.data || []
+    const limit = 100
+    let page = 1
+    let total = Infinity
+    const allBooks: any[] = []
+    const seenIds = new Set<string>()
+
+    while (allBooks.length < total) {
+      const res = await axios.get('/catalogue/', {
+        params: { page, limit }
+      })
+
+      const response = res.data
+      const pageBooks: any[] = Array.isArray(response?.data)
+        ? response.data
+        : Array.isArray(response)
+          ? response
+          : []
+
+      // Read the total number of records from the first response.
+      if (page === 1) {
+        if (
+          response?.total !== null &&
+          response?.total !== undefined &&
+          Number.isFinite(Number(response.total))
+        ) {
+          total = Number(response.total)
+        } else {
+          total = pageBooks.length < limit
+            ? pageBooks.length
+            : Infinity
+        }
+      }
+
+      if (pageBooks.length === 0) break
+
+      let addedThisPage = 0
+
+      for (const book of pageBooks) {
+        // Deduplicate records when a stable ID is available.
+        const rawId =
+          book?.serial_no ??
+          book?.id ??
+          book?.item_id ??
+          book?.accession_no ??
+          book?.accession
+
+        if (rawId !== null && rawId !== undefined) {
+          const id = String(rawId)
+
+          if (seenIds.has(id)) continue
+          seenIds.add(id)
+        }
+
+        allBooks.push(book)
+        addedThisPage++
+      }
+
+      if (allBooks.length >= total) break
+      if (pageBooks.length < limit || addedThisPage === 0) break
+
+      page++
+
+      if (page > 10000) {
+        throw new Error('Catalogue pagination exceeded the safety limit.')
+      }
+    }
+
+    rawBooks.value = allBooks
+
+    if (Number.isFinite(total) && allBooks.length < total) {
+      console.warn(
+        `Print catalogue loaded ${allBooks.length} of ${total} records.`
+      )
+    }
   } catch (err) {
     console.error('Failed to sync catalogue for batch print:', err)
+    rawBooks.value = []
   } finally {
     loading.value = false
   }
 }
+
 
 //onMounted(() => {
 // fetchAllHoldings()

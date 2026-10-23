@@ -1,207 +1,83 @@
-<template>
-  <div class="athenaeum-vault">
-    <div v-if="loading" class="vault-loader">
-      <div class="minimal-spinner"></div>
-      <span class="loading-label">SYNCING_NODE_REGISTRY</span>
-    </div>
-
-    <div v-else-if="error" class="error-fallback-terminal">
-      <div class="terminal-card-alert">
-        <div class="alert-status-badge">ERROR // DATABASE_ACCESS_REJECTED</div>
-        <h2 class="alert-title">RECORD_NOT_FOUND</h2>
-        <p class="alert-summary">
-          The requested system node sequence ID (#{{ $route.params.id }}) could not be mapped to an active asset matrix ledger footprint.
-        </p>
-        <button class="fallback-return-btn" @click="returnToAuthorsRegistry">
-          ← RETURN_TO_CLASSIFICATION_REGISTRY
-        </button>
-      </div>
-    </div>
-
-    <div v-else-if="book" class="editorial-scroll-frame">
-      <header class="master-header">
-        <div class="breadcrumb-trail" @click="returnToCatalogue">
-          CENTRAL_INDEX <span class="divider">/</span> {{ book.category }} <span class="divider">/</span> 
-          <span class="inline-badge-stack">
-            <span v-for="tag in splitGenres" :key="tag" class="breadcrumb-genre-badge">
-              {{ tag }}
-            </span>
-          </span>
-        </div>
-        <div class="action-buttons-group">
-          <button class="action-trigger text-link" @click="returnToCatalogue">← BACK_TO_INDEX</button>
-          <button class="action-trigger outline" @click="editRecord">EDIT_FILE</button>
-          
-          <button class="action-trigger filled" @click="triggerPrint('public_leaf')">PRINT_LEAF</button>
-          <button class="action-trigger filled" @click="triggerPrint('standard_card')">PRINT_CARD</button>
-          
-          <button 
-            v-if="auditData.userRole === 'The Chief' || auditData.userRole === 'The Keeper'" 
-            class="action-trigger filled" 
-            @click="triggerPrint('location_slip')"
-          >
-            PRINT_SLIP
-          </button>
-          <button 
-            v-if="auditData.userRole === 'The Chief' || auditData.userRole === 'The Keeper'" 
-            class="action-trigger filled" 
-            @click="triggerPrint('tech_manifest')"
-          >
-            PRINT_MANIFEST
-          </button>
-        </div>
-      </header>
-
-      <main class="asymmetric-cards-grid">
-        <section class="grid-card dynamic-hero-card">
-          <div class="system-tag">01 // CORE_ASSET_PROFILE</div>
-          <h1 class="book-title">{{ book.title }}</h1>
-          <div class="creator-stamp">
-            <span class="prefix">CREATOR_ORIGIN:</span>
-            <span class="value">{{ book.author || 'UNKNOWN AUTHOR' }}</span>
-          </div>
-          <div class="nav-arrows-strip">
-            <button class="nav-arrow" @click="goToRecord('prev')">← PREV_NODE</button>
-            <span class="divider">|</span>
-            <button class="nav-arrow" @click="goToRecord('next')">NEXT_NODE →</button>
-          </div>
-        </section>
-
-        <section 
-          v-if="auditData.userRole === 'The Chief' || auditData.userRole === 'The Keeper'" 
-          class="grid-card identifier-spec-card"
-        >
-          <div class="system-tag">02 // REGISTRY_SIGNATURE_SIGN</div>
-          <div class="badge-row label-emerald">
-            <span class="lbl">RECORD IDENTIFIER</span>
-            <span class="val font-mono">{{ book.record_id }}</span>
-          </div>
-          <div class="badge-row label-amber">
-            <span class="lbl">WORK INDEX ID</span>
-            <span class="val font-mono">#{{ book.work_id }}</span>
-          </div>
-          <div class="badge-row label-blue">
-            <span class="lbl">ACCESSION SEQUENCE</span>
-            <span class="val font-mono">{{ book.accession_no }}</span>
-          </div>
-          <div class="badge-row label-magenta">
-            <span class="lbl">SERIAL SEQUENCE</span>
-            <span class="val font-mono">#{{ book.serial_no }}</span>
-          </div>
-        </section>
-
-        <section 
-          v-if="auditData.userRole === 'The Chief' || auditData.userRole === 'The Keeper'" 
-          class="grid-card coordinates-telemetry-card"
-        >
-          <div class="system-tag">03 // LOCATION_VECTORS_AND_METADATA</div>
-          <div class="vectors-sub-grid">
-            <div class="vector-box">
-              <span class="box-lbl">SHELF_LOCATION</span>
-              <span class="box-val">{{ book.shelf || '---' }}</span>
-            </div>
-            <div class="vector-box">
-              <span class="box-lbl">CALL_SIGNATURE</span>
-              <span class="box-val">{{ book.call_no || '---' }}</span>
-            </div>
-          </div>
-          <div class="telemetry-rows-stack">
-            <div class="telemetry-node"><span>TEXT LANGUAGE</span><strong>{{ book.language }}</strong></div>
-            <div class="telemetry-node"><span>SOURCE LANGUAGE</span><strong>{{ book.original_language || '---' }}</strong></div>
-            <div class="telemetry-node">
-              <span>CLASSIFICATION</span>
-              <div class="inline-badge-stack justify-end">
-                <span v-for="tag in splitGenres" :key="tag" class="metadata-genre-badge">
-                  {{ tag }}
-                </span>
-              </div>
-            </div>
-            <div class="telemetry-node"><span>IMPRINT PUBLISHER</span><strong>{{ book.publisher }}</strong></div>
-            <div class="telemetry-node"><span>TEMPORAL EPOCH</span><strong>{{ book.year }}</strong></div>
-            <div class="telemetry-node"><span>ISBN IDENTIFIER</span><strong>{{ book.isbn || 'N/A' }}</strong></div>
-            <div class="telemetry-node"><span>DDC EXTENSION</span><strong>{{ book.ddc || '---' }}</strong></div>
-          </div>
-        </section>
-
-        <section class="grid-card full-width-notes-card">
-          <div class="system-tag">04 // CURATORIAL_NOTATIONS_LOG</div>
-          <div class="log-text-area">
-            {{ book.notes || 'This asset ledger entry is currently verified clear of exceptional administrative annotations.' }}
-          </div>
-        </section>
-      </main>
-    </div>
-  </div>
-
-  <div v-if="isPrinting" class="print-mount-point">
-    <PrintPublicLeaf 
-      v-if="selectedPrintLayout === 'public_leaf'" 
-      :book="book" 
-      :authData="auditData" 
-      @printed="finishPrinting" 
-    />
-    <PrintStandardCard 
-      v-if="selectedPrintLayout === 'standard_card'" 
-      :book="book" 
-      :authData="auditData" 
-      @printed="finishPrinting" 
-    />
-    <PrintLocationSlip 
-      v-if="selectedPrintLayout === 'location_slip'" 
-      :book="book" 
-      :authData="auditData" 
-      @printed="finishPrinting" 
-    />
-    <PrintTechnicalManifest 
-      v-if="selectedPrintLayout === 'tech_manifest'" 
-      :book="book" 
-      :authData="auditData" 
-      @printed="finishPrinting" 
-    />
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from "vue"
+import { ref, onMounted, onUnmounted, watch, computed } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import axios from "axios"
 
-import PrintPublicLeaf from "@/components/print/PrintPublicLeaf.vue"
-import PrintStandardCard from "@/components/print/PrintStandardCard.vue"
-import PrintLocationSlip from "@/components/print/PrintLocationSlip.vue"
-import PrintTechnicalManifest from "@/components/print/PrintTechnicalManifest.vue"
+interface BookRecord {
+  serial_no?: number
+  record_id?: string
+  genre?: string | string[]
+  work_nature?: string | string[]
+  categories?: string | string[]
+  category?: string
+  shelf?: string
+  call_no?: string
+  original_language?: string
+  notes?: string
+  ddc?: string
+  // New role-based & archival fields
+  original_author?: string
+  translator?: string
+  compiler_editor?: string
+  edition_statement?: string
+  series_title?: string
+  series_volume?: string
+  lccn?: string
+  oclc_no?: string
+  physical_condition?: string
+  binding_type?: string
+  provenance_source?: string
+  artifactual_notes?: string
+  access_restrictions?: string
+  [key: string]: any
+}
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(true)
 const error = ref(false)
-const book = ref<any>(null)
+const book = ref<BookRecord | null>(null)
+const copyButtonText = ref("Copy ID")
 
-const isPrinting = ref(false)
-const selectedPrintLayout = ref<string>("") 
-
-const auditData = ref({
-  deviceID: "EDITORIAL-CARDS-STATION-01",
-  ip: "192.168.1.105", 
-  userName: "System Archivist",
-  userRole: "The Chief"
+const currentId = computed(() => {
+  const idParam = route.params.id
+  const rawId = Array.isArray(idParam) ? idParam[0] : idParam
+  return rawId || '1'
 })
 
 const splitGenres = computed(() => {
-  const raw = book.value?.genre || book.value?.work_nature
+  const raw = book.value?.genre || book.value?.work_nature || book.value?.categories
   if (!raw) return ['GENERAL']
+  if (Array.isArray(raw)) return raw.map((g: string) => g.toUpperCase())
   return raw.split('/').map((g: string) => g.trim().toUpperCase()).filter((g: string) => g.length > 0)
 })
 
-function triggerPrint(layoutName: string) {
-  selectedPrintLayout.value = layoutName
-  isPrinting.value = true
-}
+// Cleanly managed keys to avoid duplicating in system metadata section
+const renderedKeys = [
+  'title', 'name', 'author', 'creator', 'publisher', 
+  'genre', 'work_nature', 'categories', 'category', 
+  'isbn', 'ISSN', 'publication_year', 'year', 
+  'language', 'shelf_location', 'call_number', 'shelf', 'call_no',
+  'description', 'abstract', 
+  'original_language', 'notes', 'ddc',
+  'original_author', 'translator', 'compiler_editor',
+  'edition_statement', 'series_title', 'series_volume',
+  'lccn', 'oclc_no', 'physical_condition', 'binding_type',
+  'provenance_source', 'artifactual_notes', 'access_restrictions',
+  'record_id', 'work_id', 'workId', 'work_code', 
+  'serial_no', 'id', '_id', 'uuid', 'accession_no'
+]
 
-function finishPrinting() {
-  isPrinting.value = false
-  selectedPrintLayout.value = ""
-}
+const dynamicExtraFields = computed(() => {
+  if (!book.value) return {}
+  const extras: Record<string, any> = {}
+  for (const [key, value] of Object.entries(book.value)) {
+    if (!renderedKeys.includes(key) && value !== null && value !== undefined && value !== '') {
+      extras[key] = value
+    }
+  }
+  return extras
+})
 
 function generateRecordId(serialNo: number) {
   const currentYear = new Date().getFullYear()
@@ -211,16 +87,19 @@ function generateRecordId(serialNo: number) {
 async function fetchBookDetails() {
   loading.value = true
   error.value = false
-  const id = route.params.id
+  const id = currentId.value
   try {
     const response = await axios.get(`/catalogue/${id}`)
     const data = response.data
     
-    if (data && data.serial_no && !data.record_id) {
-      data.record_id = generateRecordId(data.serial_no)
+    if (data) {
+      if (data.serial_no && !data.record_id) {
+        data.record_id = generateRecordId(data.serial_no)
+      }
+      book.value = data
+    } else {
+      error.value = true
     }
-    
-    book.value = data
   } catch (err) {
     console.error("Pipeline breakdown:", err)
     error.value = true
@@ -229,530 +108,561 @@ async function fetchBookDetails() {
   }
 }
 
+function refreshRecord() {
+  fetchBookDetails()
+}
+
+async function copyRecordId() {
+  const idToCopy = book.value?.record_id || currentId.value
+  try {
+    await navigator.clipboard.writeText(String(idToCopy))
+    copyButtonText.value = "Copied!"
+    setTimeout(() => {
+      copyButtonText.value = "Copy ID"
+    }, 2000)
+  } catch (err) {
+    console.error("Failed to copy record ID:", err)
+  }
+}
+
 watch(() => route.params.id, () => {
   fetchBookDetails()
 })
 
 function goToRecord(direction: 'next' | 'prev') {
-  const currentId = parseInt(route.params.id as string)
-  const newId = direction === 'next' ? currentId + 1 : currentId - 1
+  const parsedId = parseInt(currentId.value, 10)
+  if (isNaN(parsedId)) {
+    router.push("/catalogue")
+    return
+  }
+  const newId = direction === 'next' ? parsedId + 1 : parsedId - 1
   if (newId > 0) {
     router.push(`/details/${newId}`)
   }
 }
 
-function editRecord() {
-  if (book.value?.serial_no) {
-    router.push({ 
-      name: 'edit-item', 
-      params: { id: book.value.serial_no } 
-    })
+function handleKeydown(event: KeyboardEvent) {
+  const targetTag = (event.target as HTMLElement)?.tagName
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(targetTag)) return
+
+  if (event.key === 'ArrowLeft') {
+    goToRecord('prev')
+  } else if (event.key === 'ArrowRight') {
+    goToRecord('next')
+  } else if (event.key === 'e' || event.key === 'E') {
+    editRecord()
+  } else if (event.key === 'Backspace') {
+    returnToCatalogue()
   }
+}
+
+function editRecord() {
+  const sNo = book.value?.serial_no || currentId.value
+  router.push({
+    name: 'EditItem',
+    params: { id: sNo }
+  })
 }
 
 function returnToCatalogue() {
   router.push("/catalogue")
 }
 
-function returnToAuthorsRegistry() {
-  router.push("/classification/authors")
-}
+onMounted(() => {
+  fetchBookDetails()
+  window.addEventListener('keydown', handleKeydown)
+})
 
-onMounted(() => fetchBookDetails())
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 </script>
 
+<template>
+  <div class="saas-container">
+    <!-- Top Action Toolbar -->
+    <header class="saas-header">
+      <div class="nav-cluster">
+        <button class="btn btn-subtle" @click="returnToCatalogue" title="Shortcut: Backspace">
+          <span>←</span> Back to Catalogue
+        </button>
+      </div>
+
+      <div class="action-cluster">
+        <button class="btn btn-action" @click="refreshRecord" title="Refresh Data">
+          Refresh
+        </button>
+        <button class="btn btn-action" @click="editRecord" title="Shortcut: E">
+          Edit Record
+        </button>
+        <button class="btn btn-primary" @click="copyRecordId" :title="copyButtonText">
+          {{ copyButtonText }}
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="saas-main">
+      <div v-if="loading" class="state-box">
+        <div class="spinner"></div>
+        <p>Loading archival record...</p>
+      </div>
+
+      <div v-else-if="error" class="state-box">
+        <div class="error-icon">⚠️</div>
+        <h3>Record Not Found</h3>
+        <p>Could not retrieve record identifier [{{ currentId }}].</p>
+        <button class="btn btn-primary" @click="refreshRecord">Retry</button>
+      </div>
+
+      <div v-else-if="book" class="workspace-grid-layout">
+        
+        <!-- Identifiers Bar -->
+        <div class="saas-id-bar">
+          <div class="id-item">
+            <span class="field-label">Primary ID</span>
+            <span class="field-val mono accent-blue">{{ book.record_id || 'PENDING' }}</span>
+          </div>
+          <div class="id-item">
+            <span class="field-label">Work ID</span>
+            <span class="field-val mono">{{ book.work_id || 'N/A' }}</span>
+          </div>
+          <div class="id-item">
+            <span class="field-label">Serial No.</span>
+            <span class="field-val mono">#{{ book.serial_no || currentId }}</span>
+          </div>
+          <div class="id-item">
+            <span class="field-label">Database ID</span>
+            <span class="field-val mono text-muted">{{ book.id || 'N/A' }}</span>
+          </div>
+          <div class="id-item">
+            <span class="field-label">Accession No.</span>
+            <span class="field-val mono accent-purple">{{ book.accession_no || 'N/A' }}</span>
+          </div>
+        </div>
+
+        <!-- Main Content Split Grid -->
+        <div class="content-split-grid">
+          
+          <!-- Left Column: Bibliographic & Role-Based Attribution -->
+          <div class="column-stack">
+            <section class="saas-card">
+              <h3 class="card-title">Publication Overview</h3>
+              
+              <div class="field-row-stack">
+                <span class="field-label">Title / Name</span>
+                <div class="title-value">{{ book.title || 'Untitled Work' }}</div>
+              </div>
+
+              <!-- Role-Based Attribution Hierarchy -->
+              <div class="field-row-stack" v-if="book.work_nature">
+                <span class="field-label">Work Nature</span>
+                <div class="field-val accent-blue font-medium">{{ book.work_nature }}</div>
+              </div>
+
+              <div class="field-row-stack">
+                <span class="field-label">Author / Creator</span>
+                <div class="field-val">{{ book.author || 'Unknown Author' }}</div>
+              </div>
+
+              <div class="field-row-stack" v-if="book.original_author">
+                <span class="field-label">Original Author</span>
+                <div class="field-val">{{ book.original_author }}</div>
+              </div>
+
+              <div class="field-row-stack" v-if="book.translator">
+                <span class="field-label">Translator</span>
+                <div class="field-val">{{ book.translator }}</div>
+              </div>
+
+              <div class="field-row-stack" v-if="book.compiler_editor">
+                <span class="field-label">Compiler / Editor</span>
+                <div class="field-val">{{ book.compiler_editor }}</div>
+              </div>
+
+              <div class="field-row-stack" v-if="book.publisher">
+                <span class="field-label">Publisher</span>
+                <div class="field-val">{{ book.publisher }}</div>
+              </div>
+
+              <div class="fields-inline-group" style="margin-top: 1rem;">
+                <div class="field-row-stack" style="flex: 2;">
+                  <span class="field-label">Genres & Classifications</span>
+                  <div class="tags-wrapper">
+                    <span v-for="genre in splitGenres" :key="genre" class="saas-tag">{{ genre }}</span>
+                  </div>
+                </div>
+
+                <div class="field-row-stack" style="flex: 1;" v-if="book.category">
+                  <span class="field-label">Category</span>
+                  <div class="field-val">{{ book.category }}</div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Editorial & Notes Card -->
+            <section class="saas-card" v-if="book.original_language || book.notes">
+              <h3 class="card-title">Editorial & Notes</h3>
+              
+              <div class="field-row-stack" v-if="book.original_language">
+                <span class="field-label">Original Language</span>
+                <div class="field-val">{{ book.original_language }}</div>
+              </div>
+
+              <div class="field-row-stack" v-if="book.notes">
+                <span class="field-label">Notes</span>
+                <div class="field-val notes-val">{{ book.notes }}</div>
+              </div>
+            </section>
+          </div>
+
+          <!-- Right Column: Specifications, Identifiers & Physical Artifact Details -->
+          <div class="column-stack">
+            <section class="saas-card">
+              <h3 class="card-title">Specifications & Standards</h3>
+              
+              <div class="spec-table-row" v-if="book.isbn">
+                <span class="field-label">ISBN</span>
+                <span class="spec-val mono">{{ book.isbn }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.lccn">
+                <span class="field-label">LCCN</span>
+                <span class="spec-val mono">{{ book.lccn }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.oclc_no">
+                <span class="field-label">OCLC No.</span>
+                <span class="spec-val mono">{{ book.oclc_no }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.publication_year || book.year">
+                <span class="field-label">Publication Year</span>
+                <span class="spec-val mono">{{ book.publication_year || book.year }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.edition_statement">
+                <span class="field-label">Edition</span>
+                <span class="spec-val mono">{{ book.edition_statement }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.series_title">
+                <span class="field-label">Series & Volume</span>
+                <span class="spec-val mono">{{ book.series_title }} <span v-if="book.series_volume">({{ book.series_volume }})</span></span>
+              </div>
+
+              <div class="spec-table-row">
+                <span class="field-label">Language</span>
+                <span class="spec-val mono">{{ book.language || 'English' }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.ddc">
+                <span class="field-label">DDC Code</span>
+                <span class="spec-val mono">{{ book.ddc }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.shelf || book.call_no">
+                <span class="field-label">Shelf / Call No.</span>
+                <span class="spec-val mono">{{ book.shelf || book.call_no }}</span>
+              </div>
+            </section>
+
+            <!-- Artifact & Rare-Book History Card -->
+            <section class="saas-card" v-if="book.physical_condition || book.binding_type || book.provenance_source || book.artifactual_notes || book.access_restrictions">
+              <h3 class="card-title">Artifact & Preservation History</h3>
+              
+              <div class="spec-table-row" v-if="book.physical_condition">
+                <span class="field-label">Condition</span>
+                <span class="field-val">{{ book.physical_condition }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.binding_type">
+                <span class="field-label">Binding Type</span>
+                <span class="field-val">{{ book.binding_type }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.provenance_source">
+                <span class="field-label">Provenance / Source</span>
+                <span class="field-val">{{ book.provenance_source }}</span>
+              </div>
+
+              <div class="spec-table-row" v-if="book.access_restrictions">
+                <span class="field-label">Access Restrictions</span>
+                <span class="field-val accent-purple">{{ book.access_restrictions }}</span>
+              </div>
+
+              <div class="field-row-stack" style="margin-top: 1rem;" v-if="book.artifactual_notes">
+                <span class="field-label">Artifact Markers (Marginalia / Bookplates)</span>
+                <div class="field-val notes-val">{{ book.artifactual_notes }}</div>
+              </div>
+            </section>
+
+            <!-- Abstract Card -->
+            <section class="saas-card" v-if="book.description || book.abstract">
+              <h3 class="card-title">Abstract</h3>
+              <p class="abstract-content">{{ book.description || book.abstract }}</p>
+            </section>
+          </div>
+
+        </div>
+
+        <!-- System Metadata Section -->
+        <section class="saas-card" v-if="Object.keys(dynamicExtraFields).length > 0">
+          <h3 class="card-title">System & Archival Metadata</h3>
+          <div class="meta-grid">
+            <div class="spec-table-row" v-for="(val, key) in dynamicExtraFields" :key="key">
+              <span class="field-label">{{ key }}</span>
+              <span class="field-val mono">{{ typeof val === 'object' ? JSON.stringify(val) : val }}</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Navigation Footer -->
+        <footer class="saas-footer">
+          <button class="btn btn-subtle" @click="goToRecord('prev')" title="Previous Record (Left Arrow)">
+            ← Previous Record
+          </button>
+          <button class="btn btn-subtle" @click="goToRecord('next')" title="Next Record (Right Arrow)">
+            Next Record →
+          </button>
+        </footer>
+
+      </div>
+    </main>
+  </div>
+</template>
+
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=JetBrains+Mono:wght@400;700&display=swap');
-
-.athenaeum-vault {
-  background-color: #111216;
-  color: #e2e4e9;
-  height: 100vh;
-  width: 100vw;
-  display: flex;
-  overflow: hidden !important;
-  font-family: 'JetBrains Mono', monospace;
-  -webkit-font-smoothing: antialiased;
+.saas-container {
+  min-height: 100vh;
+  background-color: #090d16;
+  color: #e2e8f0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  padding: 1.5rem 2rem;
 }
 
-.error-fallback-terminal {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: #111216;
-  padding: 32px;
-  box-sizing: border-box;
-}
-
-.terminal-card-alert {
-  background-color: #16181f;
-  border: 1px solid #ef4444;
-  padding: 48px;
-  border-radius: 12px;
-  max-width: 600px;
-  width: 100%;
-  box-shadow: 0 4px 32px rgba(239, 68, 68, 0.05);
-  text-align: left;
-}
-
-.alert-status-badge {
-  font-size: 10px;
-  font-weight: bold;
-  color: #f87171;
-  letter-spacing: 1.5px;
-  margin-bottom: 24px;
-}
-
-.alert-title {
-  font-size: 28px;
-  font-weight: 800;
-  color: #ffffff;
-  margin: 0 0 16px 0;
-  letter-spacing: -0.5px;
-}
-
-.alert-summary {
-  font-size: 13px;
-  line-height: 1.6;
-  color: #a3a8b4;
-  margin: 0 0 32px 0;
-}
-
-.fallback-return-btn {
-  background: rgba(245, 158, 11, 0.04);
-  border: 1px solid rgba(245, 158, 11, 0.3);
-  color: #f59e0b;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: bold;
-  letter-spacing: 0.5px;
-  padding: 12px 24px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.fallback-return-btn:hover {
-  background-color: #f59e0b;
-  color: #ffffff;
-  border-color: #f59e0b;
-}
-
-.editorial-scroll-frame {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
-.editorial-scroll-frame::-webkit-scrollbar {
-  display: none !important;
-}
-
-.master-header {
+.saas-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 40px 64px 24px 64px;
-  background-color: #111216;
+  background-color: #111827;
+  padding: 0.75rem 1.25rem;
+  border-radius: 6px;
+  border: 1px solid #1f2937;
+  margin-bottom: 1.5rem;
 }
 
-.breadcrumb-trail {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: #626a7a;
-  text-transform: uppercase;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.breadcrumb-trail .divider {
-  color: #e2e4e9;
-  margin: 0 4px;
-}
-
-.inline-badge-stack {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.justify-end {
-  justify-content: flex-end;
-}
-
-.breadcrumb-genre-badge {
-  font-size: 10px;
-  font-weight: bold;
-  background-color: #16181f;
-  border: 1px solid #22252e;
-  color: #ffffff;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-.metadata-genre-badge {
-  font-size: 10px;
-  font-weight: bold;
-  background-color: rgba(236, 72, 153, 0.08);
-  border: 1px solid rgba(236, 72, 153, 0.2);
-  color: #ec4899;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-.action-buttons-group {
+.nav-cluster, .action-cluster {
   display: flex;
-  align-items: center;
-  gap: 16px;
+  gap: 0.5rem;
 }
 
-.action-trigger {
-  background: none;
-  border: none;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  padding: 10px 20px;
+.btn {
+  padding: 0.45rem 0.85rem;
+  border-radius: 5px;
+  font-size: 0.85rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.text-link {
-  color: #626a7a;
-  padding-left: 0;
+.btn-subtle {
+  background-color: #1f2937;
+  color: #cbd5e1;
+  border-color: #374151;
+}
+.btn-subtle:hover {
+  background-color: #374151;
+  color: #fff;
 }
 
-.text-link:hover {
+.btn-action {
+  background-color: #111827;
+  color: #94a3b8;
+  border-color: #374151;
+}
+.btn-action:hover {
+  background-color: #1f2937;
+  color: #e2e8f0;
+}
+
+.btn-primary {
+  background-color: #2563eb;
   color: #ffffff;
 }
-
-.outline {
-  border: 1px solid #2e333d;
-  color: #e2e4e9;
+.btn-primary:hover {
+  background-color: #1d4ed8;
 }
 
-.outline:hover {
-  background-color: #e2e4e9;
-  color: #111216;
-  border-color: #e2e4e9;
-}
-
-.filled {
-  background-color: #e2e4e9;
-  color: #111216;
-}
-
-.filled:hover {
-  background-color: #cdd1da;
-}
-
-.asymmetric-cards-grid {
+.saas-id-bar {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  gap: 24px;
-  padding: 0 64px 64px 64px;
-  max-width: 1400px;
-  width: 100%;
-  box-sizing: border-box;
-  margin: 0 auto;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1rem;
+  background-color: #111827;
+  padding: 1rem 1.25rem;
+  border-radius: 6px;
+  border: 1px solid #1f2937;
 }
 
-.grid-card {
-  background-color: #16181f;
-  border: 1px solid #22252e;
-  padding: 32px;
-  border-radius: 12px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.15);
+.id-item {
   display: flex;
   flex-direction: column;
+  gap: 0.2rem;
 }
 
-.system-tag {
-  font-size: 10px;
-  font-weight: bold;
-  color: #525966;
-  letter-spacing: 1px;
-  margin-bottom: 24px;
-}
-
-.dynamic-hero-card {
-  grid-column: span 7;
-  min-height: 320px;
-}
-
-.identifier-spec-card {
-  grid-column: span 5;
-}
-
-.coordinates-telemetry-card {
-  grid-column: span 8;
-}
-
-.full-width-notes-card {
-  grid-column: span 4;
-}
-
-.book-title {
-  font-family: 'Cinzel', serif;
-  font-size: 36px;
-  font-weight: 800;
-  line-height: 1.2;
-  letter-spacing: -0.5px;
-  margin: 0 0 24px 0;
-  color: #ffffff;
-}
-
-.creator-stamp {
-  font-size: 12px;
-  margin-bottom: auto;
-}
-
-.creator-stamp .prefix {
-  font-size: 10px;
-  font-weight: 700;
-  color: #626a7a;
-  margin-right: 8px;
-}
-
-.creator-stamp .value {
-  font-weight: bold;
-  color: #e2e4e9;
-}
-
-.nav-arrows-strip {
+.workspace-grid-layout {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 11px;
-  font-weight: 700;
-  margin-top: 32px;
+  flex-direction: column;
+  gap: 1.25rem;
 }
 
-.nav-arrow {
-  background: none;
-  border: none;
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  color: #626a7a;
-  cursor: pointer;
-  padding: 0;
+.content-split-grid {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 1.25rem;
 }
 
-.nav-arrow:hover {
+.column-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.saas-card {
+  background-color: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 6px;
+  padding: 1.25rem;
+}
+
+.card-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  margin-top: 0;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #1f2937;
+}
+
+.field-row-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 1rem;
+}
+.field-row-stack:last-child {
+  margin-bottom: 0;
+}
+
+.fields-inline-group {
+  display: flex;
+  gap: 1rem;
+}
+
+.field-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.field-val {
+  font-size: 0.95rem;
+  color: #f8fafc;
+}
+
+.title-value {
+  font-size: 1.2rem;
+  font-weight: 600;
   color: #ffffff;
+  line-height: 1.4;
 }
 
-.badge-row {
+.notes-val {
+  font-size: 0.9rem;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.tags-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.saas-tag {
+  background-color: #1e3a8a;
+  color: #93c5fd;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+}
+
+.spec-table-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 14px;
-  border-bottom: 1px solid #1c1f26;
-  border-radius: 4px;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #1f2937;
+  font-size: 0.875rem;
 }
-
-.badge-row:nth-child(even) {
-  background-color: #12141a;
-}
-
-.badge-row:last-child {
+.spec-table-row:last-child {
   border-bottom: none;
 }
 
-.badge-row .lbl {
-  font-size: 11px;
-  font-weight: 700;
-  color: #626a7a;
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
 }
 
-.badge-row .val {
-  font-size: 13px;
-  font-weight: 700;
+.accent-blue { color: #38bdf8; }
+.accent-purple { color: #c084fc; }
+.text-muted { color: #64748b; }
+.font-medium { font-weight: 500; }
+
+.abstract-content {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: #94a3b8;
+  margin: 0;
 }
 
-.label-emerald .val { color: #10b981; }
-.label-amber .val { color: #f59e0b; }
-.label-blue .val { color: #3b82f6; }
-.label-magenta .val { color: #ec4899; }
-
-.vectors-sub-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 32px;
-}
-
-.vector-box {
-  background-color: #12141a;
-  border: 1px solid #1c1f26;
-  padding: 16px;
-  border-radius: 6px;
-}
-
-.box-lbl {
-  font-size: 9px;
-  font-weight: 700;
-  color: #626a7a;
-  display: block;
-  margin-bottom: 4px;
-}
-
-.box-val {
-  font-size: 15px;
-  font-weight: bold;
-  color: #ffffff;
-}
-
-.telemetry-rows-stack {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px 32px;
-}
-
-.telemetry-node {
+.saas-footer {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  font-size: 12px;
-  border-bottom: 1px solid #1c1f26;
-  padding: 10px 12px;
-  border-radius: 4px;
+  padding-top: 0.5rem;
 }
 
-.telemetry-rows-stack .telemetry-node:nth-child(4n+1),
-.telemetry-rows-stack .telemetry-node:nth-child(4n+2) {
-  background-color: #12141a;
-}
-
-.telemetry-rows-stack .telemetry-node:nth-child(4n+3),
-.telemetry-rows-stack .telemetry-node:nth-child(4n) {
-  background-color: transparent;
-}
-
-.telemetry-node span {
-  font-size: 10px;
-  font-weight: 700;
-  color: #626a7a;
-}
-
-.log-text-area {
-  font-size: 13px;
-  line-height: 1.6;
-  color: #a3a8b4;
-}
-
-.vault-loader {
-  width: 100%;
-  height: 100%;
+.state-box {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  background-color: #111216;
+  padding: 4rem;
+  background-color: #111827;
+  border-radius: 6px;
+  border: 1px solid #1f2937;
+  color: #94a3b8;
 }
 
-.minimal-spinner {
-  width: 16px;
-  height: 16px;
-  border: 1px solid rgba(226, 228, 233, 0.1);
-  border-top-color: #e2e4e9;
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid #1f2937;
+  border-top-color: #2563eb;
   border-radius: 50%;
-  animation: spin 0.7s infinite linear;
+  animation: spin 0.7s linear infinite;
+  margin-bottom: 1rem;
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
-
-.loading-label {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: #626a7a;
-}
-
-.print-mount-point {
-  display: none;
-}
-
-/* =====================================================
-   📱 MOBILE RESPONSIVENESS FIXES
-===================================================== */
-@media (max-width: 768px) {
-  .master-header {
-    padding: 20px 16px;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 20px;
-  }
-
-  .action-buttons-group {
-    flex-wrap: wrap;
-    width: 100%;
-    justify-content: flex-start;
-    gap: 10px;
-  }
-
-  .action-trigger {
-    padding: 8px 12px;
-    font-size: 10px;
-  }
-
-  .asymmetric-cards-grid {
-    display: flex;
-    flex-direction: column;
-    padding: 0 16px 32px 16px;
-    gap: 16px;
-  }
-
-  .grid-card {
-    padding: 24px;
-    width: 100%;
-  }
-
-  .book-title {
-    font-size: 26px;
-  }
-
-  .telemetry-rows-stack {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-
-  .vectors-sub-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media print {
-  .athenaeum-vault,
-  .editorial-scroll-frame,
-  .master-header,
-  .asymmetric-cards-grid,
-  .grid-card {
-    display: none !important;
-  }
-  .print-mount-point {
-    display: block !important;
-    background-color: #ffffff !important;
-    width: 100% !important;
-    height: auto !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-  }
-}
-</style>\n
+</style>

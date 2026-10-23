@@ -405,19 +405,20 @@
             </div>
           </section>
 
-          <!-- Section 04: Context -->
+          <!-- Section 04: Context & Archival Pedigree -->
           <section id="context" class="form-section">
             <div class="section-badge">04</div>
             <div class="section-body">
               <div class="section-header-row">
                 <div>
-                  <span class="card-tag">BIBLIOGRAPHIC CONTEXT</span>
-                  <h2>Series & description</h2>
-                  <p>Record translation context, series relationships, and reviewer notes.</p>
+                  <span class="card-tag">BIBLIOGRAPHIC & ARCHIVAL PEDIGREE</span>
+                  <h2>Context, Translation & Rights</h2>
+                  <p>Record translation lineages, role attributions, subject headings, and copyright status.</p>
                 </div>
               </div>
 
-              <div class="form-grid">
+              <!-- Translation Lineage -->
+              <div class="form-grid" style="margin-bottom: 20px;">
                 <div class="input-group">
                   <label>Original language</label>
                   <select :value="isOtherChoice('original_language', form.original_language, [...BASE_LANGS, ...extraLanguages]) ? '__other__' : form.original_language" @change="onPick('original_language', $event.target.value); form.original_language = $event.target.value === '__other__' ? '' : $event.target.value" class="select-field">
@@ -428,33 +429,74 @@
                   <input v-if="isOtherChoice('original_language', form.original_language, [...BASE_LANGS, ...extraLanguages])" v-model="form.original_language" @blur="form.original_language = matchLang(form.original_language, [...BASE_LANGS, ...extraLanguages])" autocomplete="off" placeholder="Type original language" class="select-field" style="margin-top:8px" />
                 </div>
                 <div class="input-group">
-                  <label>Translation / compilation</label>
-                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.translation_compilation" placeholder="Translator or compiler" /></div>
+                  <label>Original title</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.original_title" placeholder="Root title (e.g. O Alquimista)" /></div>
                 </div>
                 <div class="input-group">
-                  <label>Series name</label>
-                  <div class="input-wrapper"><input autocomplete="new-password" v-model="seriesName" placeholder="Series / collection name" /></div>
+                  <label>Original author</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.original_author" placeholder="Root creator name" /></div>
                 </div>
                 <div class="input-group">
-                  <label>Series number</label>
-                  <div class="input-wrapper"><input autocomplete="new-password" v-model="seriesNumber" placeholder="e.g. 2" /></div>
+                  <label>Translator</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.translator" placeholder="Credited translator" /></div>
                 </div>
                 <div class="input-group">
-                  <label>Volume number</label>
-                  <div class="input-wrapper"><input autocomplete="new-password" v-model="volumeNumber" inputmode="numeric" placeholder="e.g. 2" /></div>
+                  <label>Compiler / Editor</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.compiler_editor" placeholder="Compiler or editor" /></div>
                 </div>
                 <div class="input-group">
-                  <label>Related Work ID</label>
-                  <div class="input-wrapper"><input autocomplete="new-password" v-model="relatedWorkId" inputmode="numeric" placeholder="Optional existing Work ID" /></div>
+                  <label>Work nature</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.work_nature" placeholder="Nature or genre type" /></div>
+                </div>
+              </div>
+
+              <!-- Edition, Series & Identifiers -->
+              <div class="form-grid" style="margin-bottom: 20px; border-top: 1px solid var(--border-main); padding-top: 20px;">
+                <div class="input-group">
+                  <label>Edition statement</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.edition_statement" placeholder="e.g. 1st Edition, Revised" /></div>
+                </div>
+                <div class="input-group">
+                  <label>Series title</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.series_title" placeholder="Academic series name" /></div>
+                </div>
+                <div class="input-group">
+                  <label>Series volume / number</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.series_volume" placeholder="Series volume" /></div>
+                </div>
+                <div class="input-group">
+                  <label>LCCN</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.lccn" placeholder="Library of Congress Control No." /></div>
+                </div>
+                <div class="input-group">
+                  <label>OCLC No.</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.oclc_no" placeholder="OCLC control number" /></div>
+                </div>
+              </div>
+
+              <!-- Subjects & Rights -->
+              <div class="form-grid" style="border-top: 1px solid var(--border-main); padding-top: 20px;">
+                <div class="input-group">
+                  <label>Subject headings / Keywords</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.subject_headings" placeholder="Standardized tags / keywords" /></div>
+                </div>
+                <div class="input-group">
+                  <label>Target audience / Era</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.target_audience_era" placeholder="e.g. 19th Century, Academic" /></div>
+                </div>
+                <div class="input-group">
+                  <label>Copyright status</label>
+                  <div class="input-wrapper"><input autocomplete="new-password" v-model="form.copyright_status" placeholder="e.g. Public Domain, In Copyright" /></div>
                 </div>
                 <div class="input-group full-width">
                   <label>Bibliographic notes</label>
                   <textarea autocomplete="off" v-model="form.notes" rows="4" placeholder="Anything the next reviewer should know about this record" class="textarea-field"></textarea>
                 </div>
               </div>
+
             </div>
           </section>
-
+          
           <!-- Section 05: Verification -->
           <section id="verification" class="form-section">
             <div class="section-badge">05</div>

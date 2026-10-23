@@ -330,8 +330,8 @@ def get_catalogue(
         offset = (page - 1) * limit
         filters = [
             "i.is_deleted = FALSE",
-            "w.status = 'APPROVED'",
-            "COALESCE(i.availability_status, '') NOT IN ('PENDING', 'REJECTED')",
+            "UPPER(BTRIM(COALESCE(w.status, ''))) = 'APPROVED'",
+            "UPPER(BTRIM(COALESCE(i.availability_status, ''))) NOT IN ('PENDING', 'REJECTED')",
         ]
         params = []
 
@@ -516,7 +516,7 @@ def check_duplicate(request: Request, payload: DuplicateCheckRequest, current_us
         cur.close()
         conn.close()
 
-@router.get("/{serial_no}")
+@router.get("/{serial_no:int}")
 def get_catalogue_item_detail(
     serial_no: int,
     request: Request,
@@ -542,7 +542,10 @@ def get_catalogue_item_detail(
                 i.digital_scan_available, i.ocr_status
             FROM public.items i
             INNER JOIN public.works w ON i.work_id = w.work_id
-            WHERE i.serial_no = %s AND i.is_deleted = FALSE
+            WHERE i.serial_no = %s
+              AND COALESCE(i.is_deleted, FALSE) = FALSE
+              AND UPPER(BTRIM(COALESCE(w.status, ''))) = 'APPROVED'
+              AND UPPER(BTRIM(COALESCE(i.availability_status, ''))) NOT IN ('PENDING', 'REJECTED')
         """, (serial_no,))
         
         item = cur.fetchone()

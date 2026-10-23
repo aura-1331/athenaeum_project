@@ -331,14 +331,52 @@ function withTimeout(requestFactory, ms = 8000, parentSignal = null) {
 
 
 
-async function fetchCatalogueRecords(signal) {
-  const response = await axios.get("/catalogue/", {
-    params: { limit: 100 },
-    signal,
-  })
 
-  return response
+
+
+async function fetchCatalogueRecords(signal) {
+  const limit = 100
+  let page = 1
+  let total = Infinity
+  const allRecords = []
+
+  while (allRecords.length < total) {
+    const res = await axios.get('/catalogue/', {
+      params: {
+        page,
+        limit,
+      },
+      signal,
+    })
+
+    const body = res.data
+    const records = Array.isArray(body)
+      ? body
+      : Array.isArray(body?.data)
+        ? body.data
+        : []
+
+    allRecords.push(...records)
+
+    if (Array.isArray(body)) {
+      break
+    }
+
+    total = Number(body?.total ?? allRecords.length)
+
+    if (records.length === 0 || allRecords.length >= total) {
+      break
+    }
+
+    page += 1
+  }
+
+  return {
+    data: allRecords,
+    total: allRecords.length,
+  }
 }
+
 
 async function loadDashboard() {
   const generation = ++loadGeneration

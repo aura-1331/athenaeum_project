@@ -8,7 +8,7 @@ compatibility is preserved while Work responsibility moves out of catalogue.py.
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import get_connection
 from app.auth import get_current_user, require_role
@@ -48,12 +48,38 @@ class WorkCreate(BaseModel):
     translation_compilation: Optional[str] = None
     genre: Optional[str] = None
     original_language: Optional[str] = None
+    original_title: Optional[str] = None
+    original_author: Optional[str] = None
+    translator: Optional[str] = None
+    compiler_editor: Optional[str] = None
+    work_nature: Optional[str] = None
+    edition_statement: Optional[str] = None
+    series_title: Optional[str] = None
+    series_volume: Optional[str] = None
+    lccn: Optional[str] = None
+    oclc_no: Optional[str] = None
+    subject_headings: Optional[str] = None
+    target_audience_era: Optional[str] = None
+    copyright_status: Optional[str] = None
     notes: Optional[str] = None
     shelf: Optional[str] = None
     series_name: Optional[str] = None
     series_number: Optional[str] = None
     volume_number: Optional[str] = None
     related_work_id: Optional[int] = None
+    
+    # --- Incoming form fields for the initial physical copy ---
+    extent_page_count: Optional[str] = None
+    physical_dimensions: Optional[str] = None
+    date_acquired: Optional[str] = None
+    collection_fonds: Optional[str] = None
+    physical_condition: Optional[str] = None
+    binding_type: Optional[str] = None
+    provenance_source: Optional[str] = None
+    artifactual_notes: Optional[str] = None
+    access_restrictions: Optional[str] = None
+    digital_scan_available: Optional[bool] = False
+    ocr_status: Optional[str] = "Unindexed"
 
 
 class WorkDraftAuditPayload(BaseModel):
@@ -138,6 +164,12 @@ def create_work_transaction(
         if payload.category and (not final_call_no or final_call_no.endswith("-")):
             cat_code = get_category_code(payload.category)
             lang_initial = lang_prefix if len(lang_prefix) == 2 else payload.language[0].upper()
+            # Serialize call-number allocation for this language/category pair.
+            # Every allocator must take this transaction-scoped lock before counting.
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"call_no:{clean_lang.casefold()}:{payload.category.casefold()}",)
+            )
             cur.execute("""
                 SELECT COUNT(*) + 1
                 FROM public.works
@@ -151,19 +183,34 @@ def create_work_transaction(
         work_id = cur.fetchone()[0]
 
         request.state.error_stage = "CREATE_WORK_RECORD"
-        safe_year = int(payload.year) if payload.year else None
+        raw_year = str(payload.year or "").strip()
+        if raw_year:
+            try:
+                safe_year = int(raw_year)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Year must be a whole number or blank."
+                )
+        else:
+            safe_year = None
         work_status = "APPROVED" if real_role.strip().lower() == "the chief" else "PENDING"
 
         cur.execute("""
             INSERT INTO public.works (
                 work_id,
                 title, language, category, genre, author, publisher,
-                original_language, ddc, notes, translation_compilation,
+                original_language, original_title, original_author, translator,
+                compiler_editor, work_nature, edition_statement, series_title,
+                series_volume, lccn, oclc_no, subject_headings, target_audience_era,
+                copyright_status, ddc, notes, translation_compilation,
                 year, isbn, call_no, status, proposed_by, proposal_reason,
                 created_at, updated_at
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                NOW(), NOW()
             )
             RETURNING work_id
         """, (
@@ -175,6 +222,19 @@ def create_work_transaction(
             payload.author if (payload.author and payload.author.strip() != "") else "Unknown",
             payload.publisher or None,
             payload.original_language or None,
+            payload.original_title or None,
+            payload.original_author or None,
+            payload.translator or None,
+            payload.compiler_editor or None,
+            payload.work_nature or None,
+            payload.edition_statement or None,
+            payload.series_title or None,
+            payload.series_volume or None,
+            payload.lccn or None,
+            payload.oclc_no or None,
+            payload.subject_headings or None,
+            payload.target_audience_era or None,
+            payload.copyright_status or None,
             payload.ddc or None,
             payload.notes or None,
             payload.translation_compilation or None,
@@ -327,13 +387,26 @@ def create_work_transaction(
 
         request.state.error_stage = "CREATE_INITIAL_ITEM"
         initial_item_status = "AVAILABLE" if real_role.strip().lower() == "the chief" else "PENDING"
+        
         cur.execute("""
             INSERT INTO public.items (
-                serial_no,
-                work_id, accession_no, call_no, shelf, availability_status, is_deleted, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, 'f', NOW())
-        """, (created_serial_no, work_id, final_accession_no, final_call_no, payload.shelf or None, initial_item_status))
-
+                serial_no, work_id, accession_no, call_no, shelf, 
+                extent_page_count, physical_dimensions, date_acquired, collection_fonds,
+                physical_condition, binding_type, provenance_source, artifactual_notes,
+                access_restrictions, digital_scan_available, ocr_status,
+                availability_status, is_deleted, created_at, proposed_by
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'f', NOW(), %s
+            )
+        """, (
+            created_serial_no, work_id, final_accession_no, final_call_no, payload.shelf or None,
+            payload.extent_page_count or None, payload.physical_dimensions or None,
+            payload.date_acquired or None, payload.collection_fonds or None,
+            payload.physical_condition or None, payload.binding_type or None,
+            payload.provenance_source or None, payload.artifactual_notes or None,
+            payload.access_restrictions or None, payload.digital_scan_available or False,
+            payload.ocr_status or "Unindexed", initial_item_status, token_user_id
+        ))
         request.state.error_stage = "WRITE_AUDIT"
         registration_mode = (
             "DIRECT_CHIEF"
@@ -648,10 +721,16 @@ async def resubmit_work(
                 detail="Rejected submission not found."
             )
 
-        if str(work["status"]).upper() != "REJECTED":
+        if str(work["status"] or "").strip().upper() != "REJECTED":
             raise HTTPException(
                 status_code=409,
                 detail="Only a rejected Work can be corrected and resubmitted."
+            )
+
+        if _is_finally_rejected_work(cur, work_id):
+            raise HTTPException(
+                status_code=409,
+                detail="This Work was finally rejected and cannot be resubmitted."
             )
 
         if _open_correction(cur, "WORK", work_id):
@@ -669,13 +748,22 @@ async def resubmit_work(
                 detail="Title and language are required."
             )
 
+        raw_year = str(payload.get("year") or "").strip()
+        if raw_year:
+            try:
+                safe_year = int(raw_year)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Year must be a whole number or blank.")
+        else:
+            safe_year = None
+
         new_values = {
             "title": title,
             "author": payload.get("author"),
             "category": payload.get("category"),
             "language": language,
             "publisher": payload.get("publisher"),
-            "year": payload.get("year"),
+            "year": safe_year,
             "isbn": payload.get("isbn"),
             "ddc": payload.get("ddc"),
             "call_no": payload.get("call_no"),
@@ -724,7 +812,7 @@ async def resubmit_work(
             payload.get("category"),
             language,
             payload.get("publisher"),
-            payload.get("year"),
+            safe_year,
             payload.get("isbn"),
             payload.get("ddc"),
             payload.get("call_no"),
@@ -1144,7 +1232,7 @@ class WorkCorrectionRequest(BaseModel):
     correction_note: Optional[str] = None
 
 class WorkCorrectionSubmit(BaseModel):
-    changes: dict = {}
+    changes: dict = Field(default_factory=dict)
     note: Optional[str] = None
 
 def _is_finally_rejected_work(cur, work_id: int) -> bool:
@@ -1359,6 +1447,11 @@ async def request_work_correction(
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         actor = _actor_info(current_user)
+        if _open_correction(cur, "WORK", work_id):
+            raise HTTPException(
+                status_code=409,
+                detail="This Work already has an open correction request."
+            )
 
         cur.execute("""
             UPDATE public.works

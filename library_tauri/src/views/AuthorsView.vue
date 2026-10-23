@@ -1,22 +1,32 @@
+```vue
 <template>
   <div class="classification-layout">
+    <!-- LEFT PANEL: STRUCTURAL METRICS -->
     <aside class="metric-sidebar">
       <router-link to="/dashboard" class="escape-matrix-link">
-        <span class="escape-icon">←</span> RETURN_TO_SYSTEM_CORE
+        <span class="escape-icon">←</span>
+        RETURN_TO_SYSTEM_CORE
       </router-link>
 
       <div class="panel-badge">CLASSIFICATION // REGISTRY</div>
+
       <div class="hero-identity-block">
         <span class="meta-label">INDEX_TYPE</span>
         <h1 class="display-title">AUTHORS</h1>
-        <p class="display-summary">Master log of unique creators and contribution metrics across the active matrix database.</p>
+        <p class="display-summary">
+          Master log of unique creators and contribution metrics across the
+          active matrix database.
+        </p>
       </div>
 
       <div class="system-status-matrix">
         <div class="status-node">
           <span>UNIQUE_CREATORS</span>
-          <strong class="font-mono text-emerald">{{ aggregatedAuthorsList.length }}</strong>
+          <strong class="font-mono text-emerald">
+            {{ aggregatedAuthorsList.length }}
+          </strong>
         </div>
+
         <div class="status-node">
           <span>TOTAL_DATABASE_ITEMS</span>
           <strong class="font-mono">{{ totalAssetCount }}</strong>
@@ -24,31 +34,41 @@
       </div>
     </aside>
 
+    <!-- RIGHT PANEL: AUTHORS REGISTRY -->
     <main class="registry-feed-column">
       <div class="feed-scroll-wrapper">
-        
+        <!-- AUTHOR SEARCH -->
         <header v-if="!selectedAuthor" class="feed-header">
           <div class="search-box-wrapper">
             <span class="search-icon">⌕</span>
-            <input 
-              type="text" 
-              v-model="searchQuery" 
-              placeholder="FILTER_BY_CREATOR_NAME..." 
+
+            <input
+              v-model="searchQuery"
+              type="text"
+              placeholder="FILTER_BY_CREATOR_NAME..."
               class="search-input"
             />
           </div>
         </header>
 
+        <!-- SELECTED AUTHOR HEADER -->
         <header v-else class="feed-header-isolated">
           <div class="filter-breadcrumb-badge">
-            FILTER_ACTIVE // CREATOR: <span class="highlight">{{ selectedAuthor.toUpperCase() }}</span>
+            FILTER_ACTIVE // CREATOR:
+            <span class="highlight">{{ selectedAuthor }}</span>
           </div>
-          <button @click="clearAuthorSelection" class="clear-filter-btn">
+
+          <button
+            type="button"
+            class="clear-filter-btn"
+            @click="clearAuthorSelection"
+          >
             [X] RESET_REGISTRY_VIEW
           </button>
         </header>
 
         <div class="table-container">
+          <!-- PRIMARY AUTHORS TABLE -->
           <table v-if="!selectedAuthor" class="vault-table">
             <thead>
               <tr>
@@ -57,25 +77,54 @@
                 <th class="text-right">REGISTERED_WORKS</th>
               </tr>
             </thead>
+
             <tbody>
               <tr v-if="loading">
-                <td colspan="3" class="text-center py-8 text-muted font-mono">RETRIEVING_CREATOR_MATRICES...</td>
+                <td colspan="3" class="text-center py-8 text-muted font-mono">
+                  RETRIEVING_CREATOR_MATRICES...
+                </td>
               </tr>
+
+              <tr v-else-if="errorMessage">
+                <td colspan="3" class="text-center py-8 error-message">
+                  {{ errorMessage }}
+                </td>
+              </tr>
+
               <tr v-else-if="filteredAuthors.length === 0">
-                <td colspan="3" class="text-center py-8 text-muted font-mono">NO_MATCHING_RECORDS_FOUND</td>
+                <td colspan="3" class="text-center py-8 text-muted font-mono">
+                  NO_MATCHING_RECORDS_FOUND
+                </td>
               </tr>
-              <tr v-else v-for="author in filteredAuthors" :key="author.name" class="data-row">
+
+              <tr
+                v-else
+                v-for="author in filteredAuthors"
+                :key="author.name"
+                class="data-row"
+              >
                 <td class="text-left">
-                  <button @click="selectAuthor(author.name)" class="interactive-identity-trigger">
+                  <button
+                    type="button"
+                    class="interactive-identity-trigger"
+                    @click="selectAuthor(author.name)"
+                  >
                     {{ author.name || 'UNKNOWN_CREATOR' }}
                   </button>
                 </td>
-                <td class="text-center font-mono text-blue size-small">{{ author.primaryLanguage }}</td>
-                <td class="text-right font-mono text-amber bold">{{ author.count }}</td>
+
+                <td class="text-center font-mono text-blue size-small">
+                  {{ author.primaryLanguage }}
+                </td>
+
+                <td class="text-right font-mono text-amber bold">
+                  {{ author.count }}
+                </td>
               </tr>
             </tbody>
           </table>
 
+          <!-- SELECTED AUTHOR'S BOOKS -->
           <table v-else class="vault-table">
             <thead>
               <tr>
@@ -85,21 +134,56 @@
                 <th class="text-right">CATALOGUE_TRACK</th>
               </tr>
             </thead>
+
             <tbody>
-              <tr v-for="book in targetedAuthorBooks" :key="extractId(book)" class="data-row">
-                <td class="font-mono size-small text-muted text-left">#{{ book.accession_no || extractId(book) }}</td>
+              <tr v-if="loading">
+                <td colspan="4" class="text-center py-8 text-muted font-mono">
+                  LOADING_CREATOR_ASSETS...
+                </td>
+              </tr>
+
+              <tr v-else-if="errorMessage">
+                <td colspan="4" class="text-center py-8 error-message">
+                  {{ errorMessage }}
+                </td>
+              </tr>
+
+              <tr v-else-if="targetedAuthorBooks.length === 0">
+                <td colspan="4" class="text-center py-8 text-muted font-mono">
+                  NO_ASSETS_FOUND_FOR_THIS_CREATOR
+                </td>
+              </tr>
+
+              <tr
+                v-else
+                v-for="book in targetedAuthorBooks"
+                :key="extractId(book)"
+                class="data-row"
+              >
+                <td class="font-mono size-small text-muted text-left">
+                  #{{ book.accession_no ?? extractId(book) }}
+                </td>
+
                 <td class="text-left">
-                  <router-link :to="'/details/' + extractId(book)" class="interactive-book-trigger">
+                  <router-link
+                    :to="`/details/${extractId(book)}`"
+                    class="interactive-book-trigger"
+                  >
                     {{ book.title || 'UNTITLED_ASSET_RECORD' }}
                   </router-link>
                 </td>
-                <td class="text-center font-mono text-magenta size-small">{{ book.genre || 'GENERAL' }}</td>
-                <td class="text-right font-mono size-small text-blue">{{ book.call_number || book.call_no || 'UNASSIGNED' }}</td>
+
+                <td class="text-center font-mono text-magenta size-small">
+                  {{ book.genre || 'GENERAL' }}
+                </td>
+
+                <td class="text-right font-mono size-small text-blue">
+                  {{ book.call_no || 'UNASSIGNED' }}
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
-
       </div>
     </main>
   </div>
@@ -109,89 +193,302 @@
 import { ref, computed, onMounted } from 'vue'
 import axios from 'axios'
 
+interface CatalogueItem {
+  serial_no?: string | number
+  id?: string | number
+  item_id?: string | number
+  accession?: string | number
+  accession_no?: string | number
+  title?: string
+  author?: string | null
+  language?: string | null
+  genre?: string | null
+  call_no?: string | null
+  [key: string]: unknown
+}
+
 interface AuthorAggregate {
   name: string
   count: number
   primaryLanguage: string
 }
 
+interface CatalogueResponse {
+  data?: CatalogueItem[]
+  total?: number
+  page?: number
+  limit?: number
+}
+
 const loading = ref(true)
 const searchQuery = ref('')
 const selectedAuthor = ref<string | null>(null)
+const errorMessage = ref('')
 
-const masterCatalogueData = ref<any[]>([])
+const masterCatalogueData = ref<CatalogueItem[]>([])
 const aggregatedAuthorsList = ref<AuthorAggregate[]>([])
 const totalAssetCount = ref(0)
 
-function extractId(book: any): string | number {
-  if (!book) return 'undefined'
-  const targetId = book.serial_no ?? book.id ?? book.item_id ?? book.accession
-  return targetId !== undefined ? targetId : 'undefined'
+/**
+ * The catalogue detail endpoint uses serial_no.
+ */
+function extractId(book: CatalogueItem): string | number {
+  return (
+    book.serial_no ??
+    book.id ??
+    book.item_id ??
+    book.accession_no ??
+    book.accession ??
+    'undefined'
+  )
 }
 
-async function compileAuthorsRegistry() {
-  loading.value = true
-  try {
-    const response = await axios.get('/catalogue?limit=1000')
-    const items = response.data?.data || []
-    masterCatalogueData.value = items
-    totalAssetCount.value = items.length
+/**
+ * Normalize author names to avoid grouping the same author separately
+ * because of leading/trailing spaces or repeated whitespace.
+ */
+function normalizeAuthor(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return 'UNKNOWN_CREATOR'
+  }
 
-    const mapping: Record<string, { count: number; languages: Record<string, number> }> = {}
+  return value.trim().replace(/\s+/g, ' ')
+}
 
-    items.forEach((item: any) => {
-      const authorName = item.author ? item.author.trim() : 'UNKNOWN_CREATOR'
-      const lang = item.language || 'Unknown'
-      
-      if (!mapping[authorName]) {
-        mapping[authorName] = { count: 0, languages: {} }
+/**
+ * Normalize language values for the language-frequency count.
+ */
+function normalizeLanguage(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return 'Unknown'
+  }
+
+  return value.trim().replace(/\s+/g, ' ')
+}
+
+/**
+ * Build the authors registry from all fetched catalogue records.
+ *
+ * The primary language is the most frequent language among each
+ * author's catalogue records.
+ */
+function buildAuthorsRegistry(items: CatalogueItem[]): void {
+  const mapping = new Map<
+    string,
+    {
+      count: number
+      languages: Map<string, number>
+    }
+  >()
+
+  for (const item of items) {
+    const authorName = normalizeAuthor(item.author)
+    const language = normalizeLanguage(item.language)
+
+    let entry = mapping.get(authorName)
+
+    if (!entry) {
+      entry = {
+        count: 0,
+        languages: new Map<string, number>()
       }
-      mapping[authorName].count++
-      mapping[authorName].languages[lang] = (mapping[authorName].languages[lang] || 0) + 1
-    })
 
-    aggregatedAuthorsList.value = Object.keys(mapping).map(name => {
-      const langMap = mapping[name].languages
-      const primaryLang = Object.keys(langMap).reduce((a: string, b: string) => langMap[a] > langMap[b] ? a : b)
+      mapping.set(authorName, entry)
+    }
+
+    entry.count += 1
+
+    entry.languages.set(
+      language,
+      (entry.languages.get(language) ?? 0) + 1
+    )
+  }
+
+  aggregatedAuthorsList.value = Array.from(mapping.entries())
+    .map(([name, entry]) => {
+      let primaryLanguage = 'Unknown'
+      let highestCount = 0
+
+      for (const [language, count] of entry.languages) {
+        if (count > highestCount) {
+          primaryLanguage = language
+          highestCount = count
+        }
+      }
+
       return {
         name,
-        count: mapping[name].count,
-        primaryLanguage: primaryLang
+        count: entry.count,
+        primaryLanguage
       }
-    }).sort((a, b) => b.count - a.count)
+    })
+    .sort((a, b) => {
+      const countDifference = b.count - a.count
 
-  } catch (err) {
-    console.error("Failed to compile author metrics matrix:", err)
+      return countDifference !== 0
+        ? countDifference
+        : a.name.localeCompare(b.name)
+    })
+}
+
+/**
+ * Load every page of the catalogue.
+ *
+ * This matches the FastAPI response:
+ * {
+ *   data: [...],
+ *   total: number,
+ *   page: number,
+ *   limit: number
+ * }
+ *
+ * The backend supports a maximum limit of 100.
+ */
+async function compileAuthorsRegistry(): Promise<void> {
+  loading.value = true
+  errorMessage.value = ''
+
+  try {
+    const allItems: CatalogueItem[] = []
+    const limit = 100
+    let page = 1
+    let expectedTotal: number | null = null
+
+    const seenPageSignatures = new Set<string>()
+
+    while (true) {
+      const response = await axios.get<CatalogueResponse>(
+        '/catalogue/',
+        {
+          params: {
+            page,
+            limit
+          }
+        }
+      )
+
+      const payload = response.data
+
+      if (!Array.isArray(payload?.data)) {
+        throw new Error(
+          'Unexpected catalogue response: expected a data array.'
+        )
+      }
+
+      const batch = payload.data
+
+      if (
+        typeof payload.total === 'number' &&
+        Number.isFinite(payload.total)
+      ) {
+        expectedTotal = payload.total
+      }
+
+      if (batch.length === 0) {
+        break
+      }
+
+      // Detect repeated pages to avoid an infinite pagination loop.
+      const signature = batch
+        .map(item => String(extractId(item)))
+        .join('|')
+
+      if (seenPageSignatures.has(signature)) {
+        throw new Error(
+          'Catalogue pagination returned a repeated page. ' +
+          'Check the backend pagination parameters.'
+        )
+      }
+
+      seenPageSignatures.add(signature)
+      allItems.push(...batch)
+
+      // Stop when all records reported by the backend are fetched.
+      if (
+        expectedTotal !== null &&
+        allItems.length >= expectedTotal
+      ) {
+        break
+      }
+
+      // A shorter page means there are no further records.
+      if (batch.length < limit) {
+        break
+      }
+
+      page += 1
+    }
+
+    masterCatalogueData.value = allItems
+
+    // Use the backend's total when available.
+    totalAssetCount.value = expectedTotal ?? allItems.length
+
+    buildAuthorsRegistry(allItems)
+  } catch (error: unknown) {
+    console.error('Failed to load authors registry:', error)
+
+    if (axios.isAxiosError(error)) {
+      const detail = error.response?.data?.detail
+
+      errorMessage.value =
+        typeof detail === 'string'
+          ? detail
+          : error.message || 'Unable to load the catalogue.'
+    } else if (error instanceof Error) {
+      errorMessage.value = error.message
+    } else {
+      errorMessage.value = 'Unable to load the catalogue.'
+    }
+
+    masterCatalogueData.value = []
+    aggregatedAuthorsList.value = []
+    totalAssetCount.value = 0
   } finally {
     loading.value = false
   }
 }
 
+/**
+ * Search authors by name.
+ */
 const filteredAuthors = computed(() => {
-  if (!searchQuery.value) return aggregatedAuthorsList.value
-  const query = searchQuery.value.toLowerCase().trim()
-  return aggregatedAuthorsList.value.filter(a => a.name.toLowerCase().includes(query))
-})
+  const query = searchQuery.value.trim().toLocaleLowerCase()
 
-const targetedAuthorBooks = computed(() => {
-  if (!selectedAuthor.value) return []
-  return masterCatalogueData.value.filter(
-    item => (item.author ? item.author.trim() : 'UNKNOWN_CREATOR') === selectedAuthor.value
+  if (!query) {
+    return aggregatedAuthorsList.value
+  }
+
+  return aggregatedAuthorsList.value.filter(author =>
+    author.name.toLocaleLowerCase().includes(query)
   )
 })
 
-function selectAuthor(name: string) {
+/**
+ * Get all catalogue records belonging to the selected author.
+ */
+const targetedAuthorBooks = computed(() => {
+  const selected = selectedAuthor.value
+
+  if (!selected) {
+    return []
+  }
+
+  return masterCatalogueData.value.filter(
+    item => normalizeAuthor(item.author) === selected
+  )
+})
+
+function selectAuthor(name: string): void {
   selectedAuthor.value = name
 }
 
-function clearAuthorSelection() {
+function clearAuthorSelection(): void {
   selectedAuthor.value = null
 }
 
 onMounted(() => {
-  setTimeout(() => {
-    compileAuthorsRegistry()
-  }, 150)
+  void compileAuthorsRegistry()
 })
 </script>
 
@@ -202,17 +499,26 @@ onMounted(() => {
   background-color: #111216;
   color: #e2e4e9;
   position: fixed !important;
-  top: 0; left: 0; width: 100vw; height: 100vh;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
   z-index: 9999 !important;
-  display: flex; overflow: hidden;
+  display: flex;
+  overflow: hidden;
   font-family: 'JetBrains Mono', monospace;
   -webkit-font-smoothing: antialiased;
 }
 
 .metric-sidebar {
-  width: 420px; background-color: #0a0b0d !important;
+  width: 420px;
+  background-color: #0a0b0d !important;
   border-right: 1px solid #1c1f26 !important;
-  padding: 48px; display: flex; flex-direction: column; box-sizing: border-box; flex-shrink: 0;
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .escape-matrix-link {
@@ -231,76 +537,326 @@ onMounted(() => {
   background: rgba(245, 158, 11, 0.03);
   transition: all 0.2s ease;
 }
+
 .escape-matrix-link:hover {
   color: #ffffff;
   background: #f59e0b;
   border-color: #f59e0b;
 }
-.escape-icon { font-size: 14px; }
 
-.panel-badge { font-size: 10px; font-weight: bold; color: #525966; letter-spacing: 2px; margin-bottom: 40px; }
-.hero-identity-block { margin-bottom: auto; }
-.meta-label { font-size: 9px; color: #626a7a; letter-spacing: 1px; display: block; margin-bottom: 8px; }
-.display-title { font-size: 32px; font-weight: 800; color: #ffffff; margin: 0 0 16px 0; letter-spacing: 1px; }
-.display-summary { font-size: 12px; line-height: 1.6; color: #626a7a; margin: 0; }
+.escape-icon {
+  font-size: 14px;
+}
+
+.panel-badge {
+  font-size: 10px;
+  font-weight: bold;
+  color: #525966;
+  letter-spacing: 2px;
+  margin-bottom: 40px;
+}
+
+.hero-identity-block {
+  margin-bottom: auto;
+}
+
+.meta-label {
+  font-size: 9px;
+  color: #626a7a;
+  letter-spacing: 1px;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.display-title {
+  font-size: 32px;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0 0 16px;
+  letter-spacing: 1px;
+}
+
+.display-summary {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #626a7a;
+  margin: 0;
+}
 
 .system-status-matrix {
-  background-color: #111216; border: 1px solid #1c1f26; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px;
+  background-color: #111216;
+  border: 1px solid #1c1f26;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
-.status-node { display: flex; justify-content: space-between; align-items: center; font-size: 11px; }
-.status-node span { color: #525966; font-weight: bold; }
 
-.registry-feed-column { flex-grow: 1; height: 100%; overflow-y: auto; background-color: #111216; }
-.feed-scroll-wrapper { padding: 48px 64px; max-width: 1000px; box-sizing: border-box; }
+.status-node {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
 
-.feed-header { margin-bottom: 32px; }
+.status-node span {
+  color: #525966;
+  font-weight: bold;
+}
+
+.registry-feed-column {
+  flex-grow: 1;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  background-color: #111216;
+}
+
+.feed-scroll-wrapper {
+  padding: 48px 64px;
+  max-width: 1000px;
+  box-sizing: border-box;
+}
+
+.feed-header {
+  margin-bottom: 32px;
+}
+
 .feed-header-isolated {
-  display: flex; justify-content: space-between; align-items: center;
-  background-color: #16181f; border: 1px solid #22252e; border-radius: 6px;
-  padding: 14px 20px; margin-bottom: 32px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  border-radius: 6px;
+  padding: 14px 20px;
+  margin-bottom: 32px;
 }
-.filter-breadcrumb-badge { font-size: 11px; font-weight: bold; color: #525966; letter-spacing: 1px; }
-.filter-breadcrumb-badge .highlight { color: #f59e0b; font-weight: 800; }
+
+.filter-breadcrumb-badge {
+  font-size: 11px;
+  font-weight: bold;
+  color: #525966;
+  letter-spacing: 1px;
+}
+
+.filter-breadcrumb-badge .highlight {
+  color: #f59e0b;
+  font-weight: 800;
+}
 
 .clear-filter-btn {
-  background: transparent; border: none; color: #f87171; font-family: inherit;
-  font-size: 11px; font-weight: bold; cursor: pointer; letter-spacing: 1px;
+  background: transparent;
+  border: none;
+  color: #f87171;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 1px;
 }
-.clear-filter-btn:hover { color: #ef4444; text-decoration: underline; }
+
+.clear-filter-btn:hover {
+  color: #ef4444;
+  text-decoration: underline;
+}
 
 .search-box-wrapper {
-  background-color: #16181f; border: 1px solid #22252e; border-radius: 6px; padding: 12px 16px; display: flex; align-items: center; gap: 12px;
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  border-radius: 6px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-.search-icon { color: #525966; font-size: 16px; }
-.search-input { background: transparent; border: none; color: #ffffff; font-family: inherit; font-size: 13px; width: 100%; }
-.search-input:focus { outline: none; }
 
-.table-container { background-color: #16181f; border: 1px solid #22252e; border-radius: 8px; overflow: hidden; }
-.vault-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
-.vault-table th { background-color: #12141a; color: #525966; font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 16px 24px; border-bottom: 1px solid #22252e; text-transform: uppercase; }
-.vault-table td { padding: 16px 24px; border-bottom: 1px solid #1c1f26; color: #a3a8b4; vertical-align: middle; }
-.data-row:hover { background-color: rgba(255,255,255,0.01); }
+.search-icon {
+  color: #525966;
+  font-size: 16px;
+}
+
+.search-input {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  width: 100%;
+  min-width: 0;
+}
+
+.search-input:focus {
+  outline: none;
+}
+
+.table-container {
+  background-color: #16181f;
+  border: 1px solid #22252e;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.vault-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.vault-table th {
+  background-color: #12141a;
+  color: #525966;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 16px 24px;
+  border-bottom: 1px solid #22252e;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.vault-table td {
+  padding: 16px 24px;
+  border-bottom: 1px solid #1c1f26;
+  color: #a3a8b4;
+  vertical-align: middle;
+}
+
+.data-row:hover {
+  background-color: rgba(255, 255, 255, 0.01);
+}
 
 .interactive-identity-trigger {
-  background: transparent; border: none; color: #ffffff; font-family: inherit;
-  font-size: 13px; font-weight: bold; cursor: pointer; padding: 0; text-align: left;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
 }
-.interactive-identity-trigger:hover { color: #10b981; text-decoration: underline; }
+
+.interactive-identity-trigger:hover {
+  color: #10b981;
+  text-decoration: underline;
+}
 
 .interactive-book-trigger {
-  color: #ffffff; text-decoration: none; font-weight: bold; transition: color 0.2s ease;
+  color: #ffffff;
+  text-decoration: none;
+  font-weight: bold;
+  transition: color 0.2s ease;
 }
-.interactive-book-trigger:hover { color: #3b82f6; text-decoration: underline; }
 
-.text-left { text-align: left; }
-.text-center { text-align: center; }
-.text-right { text-align: right; }
-.text-emerald { color: #10b981; }
-.text-blue { color: #3b82f6; }
-.text-magenta { color: #ec4899; }
-.text-amber { color: #f59e0b; }
-.text-muted { color: #525966; }
-.bold { font-weight: bold; }
-.size-small { font-size: 11px; }
-.py-8 { padding-top: 32px; padding-bottom: 32px; }
+.interactive-book-trigger:hover {
+  color: #3b82f6;
+  text-decoration: underline;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.text-emerald {
+  color: #10b981;
+}
+
+.text-blue {
+  color: #3b82f6;
+}
+
+.text-magenta {
+  color: #ec4899;
+}
+
+.text-amber {
+  color: #f59e0b;
+}
+
+.text-muted {
+  color: #525966;
+}
+
+.bold {
+  font-weight: bold;
+}
+
+.size-small {
+  font-size: 11px;
+}
+
+.py-8 {
+  padding-top: 32px;
+  padding-bottom: 32px;
+}
+
+.error-message {
+  color: #f87171;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+@media (max-width: 900px) {
+  .classification-layout {
+    position: relative !important;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    flex-direction: column;
+    overflow: auto;
+  }
+
+  .metric-sidebar {
+    width: 100%;
+    padding: 24px;
+    gap: 20px;
+  }
+
+  .hero-identity-block {
+    margin-bottom: 0;
+  }
+
+  .panel-badge {
+    margin-bottom: 12px;
+  }
+
+  .registry-feed-column {
+    height: auto;
+    overflow: visible;
+  }
+
+  .feed-scroll-wrapper {
+    padding: 24px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .feed-scroll-wrapper {
+    padding: 16px;
+  }
+
+  .feed-header-isolated {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .vault-table th,
+  .vault-table td {
+    padding: 12px;
+  }
+}
 </style>
+```

@@ -112,6 +112,75 @@
       </div>
     </section>
 
+    <section class="form-card">
+      <div class="section-heading">
+        <div class="section-number">03</div>
+        <div>
+          <h2>Physical Artifact & Provenance</h2>
+          <p>Record physical dimensions, condition, acquisition history, and digital status.</p>
+        </div>
+      </div>
+
+      <div class="section-body">
+        <div class="field">
+          <label>EXTENT / PAGE COUNT</label>
+          <input v-model="form.extent_page_count" placeholder="e.g. xiv, 342 p." />
+        </div>
+
+        <div class="field">
+          <label>PHYSICAL DIMENSIONS</label>
+          <input v-model="form.physical_dimensions" placeholder="e.g. 24 cm" />
+        </div>
+
+        <div class="field">
+          <label>DATE ACQUIRED</label>
+          <input v-model="form.date_acquired" type="date" />
+        </div>
+
+        <div class="field">
+          <label>COLLECTION / FONDS</label>
+          <input v-model="form.collection_fonds" placeholder="Named special collection" />
+        </div>
+
+        <div class="field">
+          <label>PHYSICAL CONDITION</label>
+          <input v-model="form.physical_condition" placeholder="e.g. Fine, Good, Fragile" />
+        </div>
+
+        <div class="field">
+          <label>BINDING TYPE</label>
+          <input v-model="form.binding_type" placeholder="e.g. Hardcover, Leather" />
+        </div>
+
+        <div class="field full">
+          <label>PROVENANCE SOURCE / DONOR</label>
+          <input v-model="form.provenance_source" placeholder="Source or vendor history" />
+        </div>
+
+        <div class="field full">
+          <label>ARTIFACTUAL NOTES</label>
+          <textarea v-model="form.artifactual_notes" placeholder="Bookplates, inscriptions, marginalia..." rows="2" style="width:100%; background:var(--input); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:10px;"></textarea>
+        </div>
+
+        <div class="field">
+          <label>DIGITAL SCAN AVAILABLE</label>
+          <select v-model="form.digital_scan_available">
+            <option :value="false">No</option>
+            <option :value="true">Yes</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>OCR STATUS</label>
+          <select v-model="form.ocr_status">
+            <option value="Unindexed">Unindexed</option>
+            <option value="Indexed">Indexed</option>
+            <option value="Partial">Partial</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
     <section class="action-card">
       <div>
         <span class="footer-label">
@@ -257,7 +326,18 @@ const creationReason = ref("")
 
 const form = ref({
   work_id: "",
-  language_id: ""
+  language_id: "",
+  extent_page_count: "",
+  physical_dimensions: "",
+  date_acquired: "",
+  collection_fonds: "",
+  physical_condition: "",
+  binding_type: "",
+  provenance_source: "",
+  artifactual_notes: "",
+  access_restrictions: "",
+  digital_scan_available: false,
+  ocr_status: "Unindexed"
 })
 
 const result = ref(null)
@@ -316,9 +396,6 @@ async function executeConfirmedCreation() {
   loading.value = true
   result.value = null
 
-  // Close the confirmation dialog as soon as the registration is submitted.
-  // The result card below the form is then the single place that reports
-  // success or failure, so an error cannot remain trapped behind the modal.
   showPromptModal.value = false
 
   try {
@@ -326,7 +403,18 @@ async function executeConfirmedCreation() {
       "/catalogue/create-item",
       {
         work_id: Number(form.value.work_id),
-        language_id: form.value.language_id
+        language_id: form.value.language_id,
+        extent_page_count: form.value.extent_page_count || null,
+        physical_dimensions: form.value.physical_dimensions || null,
+        date_acquired: form.value.date_acquired || null,
+        collection_fonds: form.value.collection_fonds || null,
+        physical_condition: form.value.physical_condition || null,
+        binding_type: form.value.binding_type || null,
+        provenance_source: form.value.provenance_source || null,
+        artifactual_notes: form.value.artifactual_notes || null,
+        access_restrictions: form.value.access_restrictions || null,
+        digital_scan_available: !!form.value.digital_scan_available,
+        ocr_status: form.value.ocr_status || null
       },
       {
         headers: {
@@ -356,6 +444,17 @@ async function executeConfirmedCreation() {
 
     form.value.work_id = ""
     form.value.language_id = ""
+    form.value.extent_page_count = ""
+    form.value.physical_dimensions = ""
+    form.value.date_acquired = ""
+    form.value.collection_fonds = ""
+    form.value.physical_condition = ""
+    form.value.binding_type = ""
+    form.value.provenance_source = ""
+    form.value.artifactual_notes = ""
+    form.value.access_restrictions = ""
+    form.value.digital_scan_available = false
+    form.value.ocr_status = "Unindexed"
     authority.value = null
     creationReason.value = ""
   } catch (err) {
@@ -369,7 +468,6 @@ async function executeConfirmedCreation() {
 }
 
 onMounted(() => {
-  // Continue from the Work registration dossier without making the operator retype its identity.
   const queryWorkId = Array.isArray(route.query.work_id) ? route.query.work_id[0] : route.query.work_id
   const queryLanguageId = Array.isArray(route.query.language_id) ? route.query.language_id[0] : route.query.language_id
   if (queryWorkId && /^\d+$/.test(String(queryWorkId))) form.value.work_id = String(queryWorkId)

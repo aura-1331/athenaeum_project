@@ -9,7 +9,7 @@ from app.auth import get_current_user, require_role
 from app.audit_utils import audit_action
 from app.services.audit_service import log_audit_activity
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List
 from psycopg2.extras import RealDictCursor
 from app.routers.review_utils import (
@@ -40,7 +40,10 @@ def get_item(
             SELECT w.title, w.author, w.language, w.publisher, w.year, w.genre, w.notes
             FROM public.items i
             JOIN public.works w ON i.work_id = w.work_id
-            WHERE i.serial_no = %s AND i.is_deleted = FALSE
+            WHERE i.serial_no = %s
+              AND COALESCE(i.is_deleted, FALSE) = FALSE
+              AND UPPER(BTRIM(COALESCE(w.status, ''))) = 'APPROVED'
+              AND UPPER(BTRIM(COALESCE(i.availability_status, ''))) NOT IN ('PENDING', 'REJECTED')
         """, (serial_no,))
         
         row = cur.fetchone()
@@ -95,6 +98,24 @@ def update_item(
             raise HTTPException(status_code=404, detail="Holding not found")
             
         work_id = item_row[0]
+
+        # Validate bibliographic values before changing either the Work or its
+        # denormalized Item fields. A malformed year must be a client error,
+        # not a database exception/HTTP 500.
+        for required_field in ("title", "language"):
+            if required_field in payload and not str(payload.get(required_field) or "").strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{required_field.title()} cannot be empty."
+                )
+        safe_year = None
+        year_is_set = "year" in payload and payload.get("year") is not None
+        if year_is_set and str(payload.get("year")).strip() != "":
+            try:
+                safe_year = int(str(payload.get("year")).strip())
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="Year must be a whole number or blank.")
+
         old_state = {
             "title": item_row[1],
             "author": item_row[2],
@@ -160,14 +181,14 @@ def update_item(
                 author = COALESCE(%s, author),
                 language = COALESCE(%s, language),
                 publisher = COALESCE(%s, publisher),
-                year = COALESCE(%s, year),
+                year = CASE WHEN %s THEN %s ELSE year END,
                 genre = COALESCE(%s, genre),
                 notes = COALESCE(%s, notes),
                 updated_at = NOW()
             WHERE work_id = %s
         """, (
             payload.get("title"), resolved_author if (requested_author is not None or authority_id is not None) else None, payload.get("language"),
-            payload.get("publisher"), payload.get("year"), payload.get("genre"),
+            payload.get("publisher"), year_is_set, safe_year, payload.get("genre"),
             payload.get("notes"), work_id
         ))
 
@@ -177,14 +198,14 @@ def update_item(
             SET title = COALESCE(%s, title),
                 author = COALESCE(%s, author),
                 publisher = COALESCE(%s, publisher),
-                year = COALESCE(%s, year),
+                year = CASE WHEN %s THEN %s ELSE year END,
                 genre = COALESCE(%s, genre),
                 notes = COALESCE(%s, notes)
-            WHERE serial_no = %s
+            WHERE work_id = %s
         """, (
             payload.get("title"), resolved_author if (requested_author is not None or authority_id is not None) else None, payload.get("publisher"),
-            payload.get("year"), payload.get("genre"), payload.get("notes"),
-            serial_no
+            year_is_set, safe_year, payload.get("genre"), payload.get("notes"),
+            work_id
         ))
 
 
@@ -307,21 +328,26 @@ async def create_item(
 
         existing_work_id, title, language, category, call_no, work_status = work
 
-        if str(work_status).upper() != "APPROVED":
+        if str(work_status or "").strip().upper() != "APPROVED":
             raise HTTPException(
                 status_code=409,
                 detail="This Work is not yet approved and cannot receive an additional copy."
             )
 
+        # The physical Item's language must agree with its parent Work. The
+        # frontend sends the Work language label as language_id; reject stale
+        # or mismatched form state instead of creating inconsistent metadata.
+        normalized_work_language = str(language or "").strip().casefold()
+        normalized_item_language = str(language_id or "").strip().casefold()
+        if not normalized_work_language or normalized_item_language != normalized_work_language:
+            raise HTTPException(
+                status_code=400,
+                detail="The Item language must match the approved Work's language. Reload the Work and try again."
+            )
+
         # An approved Work must still have a usable author authority before a
         # new physical Item can be attached to it.
         validate_work_authority(cur, existing_work_id)
-
-        cur.execute("""
-            SELECT COALESCE(MAX(serial_no), 0) + 1
-            FROM public.items
-        """)
-        serial_no = cur.fetchone()[0]
 
         lang_prefix = get_language_prefix(language)
         
@@ -360,18 +386,42 @@ async def create_item(
                 work_id,
                 accession_no,
                 call_no,
+                shelf,
                 language_id,
+                extent_page_count,
+                physical_dimensions,
+                date_acquired,
+                collection_fonds,
+                physical_condition,
+                binding_type,
+                provenance_source,
+                artifactual_notes,
+                access_restrictions,
+                digital_scan_available,
+                ocr_status,
                 availability_status,
                 is_deleted,
                 proposed_by
             )
-            VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, FALSE, %s)
         """, (
             created_serial_no,
             existing_work_id,
             accession_no,
             call_no,
+            payload.get("shelf"),
             language_id,
+            payload.get("extent_page_count"),
+            payload.get("physical_dimensions"),
+            payload.get("date_acquired"),
+            payload.get("collection_fonds"),
+            payload.get("physical_condition"),
+            payload.get("binding_type"),
+            payload.get("provenance_source"),
+            payload.get("artifactual_notes"),
+            payload.get("access_restrictions"),
+            payload.get("digital_scan_available", False),
+            payload.get("ocr_status"),
             item_status,
             token_user_id
         ))
@@ -420,9 +470,12 @@ async def create_item(
 
         return {
             "serial_no": created_serial_no,
+            "item_id": created_serial_no,
             "accession_no": accession_no,
             "work_id": existing_work_id,
-            "status": item_status
+            "title": title,
+            "status": item_status,
+            "availability_status": item_status,
         }
 
     except HTTPException:
@@ -432,8 +485,8 @@ async def create_item(
     except Exception as e:
         if conn:
             conn.rollback()
-        print(f"❌ Database Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Item creation failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail="Unable to create Item. No changes were committed.")
     finally:
         cur.close()
         conn.close()
@@ -483,13 +536,13 @@ async def resubmit_item(
                 detail="Rejected Item not found."
             )
 
-        if str(item["availability_status"]).upper() != "REJECTED":
+        if str(item["availability_status"] or "").strip().upper() != "REJECTED":
             raise HTTPException(
                 status_code=409,
                 detail="Only a rejected Item can be corrected and resubmitted."
             )
 
-        if str(item["work_status"]).upper() != "APPROVED":
+        if str(item["work_status"] or "").strip().upper() != "APPROVED":
             raise HTTPException(
                 status_code=409,
                 detail="The parent Work is not approved and this Item cannot be resubmitted."
@@ -634,12 +687,12 @@ def list_pending_items(request: Request, current_user: dict = Depends(get_curren
               -- Work approval/rejection decides that initial copy's state.
               AND UPPER(TRIM(w.status)) = 'APPROVED'
               AND (
-                    %s = 'The Chief'
+                    LOWER(TRIM(%s)) = 'the chief'
                     OR i.proposed_by = %s
                   )
             ORDER BY i.serial_no DESC
         """, (
-            str(current_user.get("role") or ""),
+            str(current_user.get("role") or "").strip().lower(),
             int(current_user.get("user_id")),
         ))
         return cur.fetchall()
@@ -685,8 +738,8 @@ async def approve_item(
                 FROM public.works w
                 WHERE i.serial_no = %s
                   AND i.work_id = w.work_id
-                  AND i.availability_status = 'PENDING'
-                  AND i.is_deleted = FALSE
+                  AND UPPER(BTRIM(COALESCE(i.availability_status, ''))) = 'PENDING'
+                  AND COALESCE(i.is_deleted, FALSE) = FALSE
                   AND UPPER(TRIM(w.status)) = 'APPROVED'
                 RETURNING i.serial_no, i.accession_no, i.work_id
             """, (serial_no,))
@@ -697,8 +750,8 @@ async def approve_item(
                     is_deleted = TRUE,
                     deletion_reason = %s
                 WHERE i.serial_no = %s
-                  AND i.availability_status = 'PENDING'
-                  AND i.is_deleted = FALSE
+                  AND UPPER(BTRIM(COALESCE(i.availability_status, ''))) = 'PENDING'
+                  AND COALESCE(i.is_deleted, FALSE) = FALSE
                   AND EXISTS (
                       SELECT 1
                       FROM public.works w
@@ -836,11 +889,14 @@ async def update_ledger_record(
         cur.execute("SET LOCAL request.custom.ip_address = %s;", (x_ip_address,))
 
         cur.execute("""
-            UPDATE public.items SET 
-                shelf = NULLIF(BTRIM(%s), '')
-            WHERE serial_no = %s 
+            UPDATE public.items SET
+                shelf = CASE
+                    WHEN %s THEN NULLIF(BTRIM(%s), '')
+                    ELSE shelf
+                END
+            WHERE serial_no = %s
             RETURNING work_id
-        """, (payload.get('shelf'), serial_no))
+        """, ("shelf" in payload, payload.get("shelf"), serial_no))
         
         res = cur.fetchone()
         if not res:
@@ -867,6 +923,12 @@ async def update_ledger_record(
             lang_initial = lang_prefix if len(lang_prefix) == 2 else current_lang[0].upper()
             clean_lang = current_lang.strip()
 
+            # Match the lock used by Work creation so concurrent allocations
+            # cannot calculate the same next call number.
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"call_no:{clean_lang.casefold()}:{new_cat.casefold()}",)
+            )
             cur.execute("""
                 SELECT COUNT(*) + 1 
                 FROM public.works 
@@ -875,44 +937,53 @@ async def update_ledger_record(
             next_call_count = cur.fetchone()[0]
             final_call_no = f"{lang_initial}-{cat_code}-{next_call_count}.0"
 
-        raw_year = payload.get('year')
+        raw_year = payload.get("year")
         safe_year = None
-        if raw_year is not None and str(raw_year).strip() != "":
-            try:
-                safe_year = int(str(raw_year).strip())
-            except ValueError:
-                safe_year = None
+        if "year" in payload:
+            if raw_year is None or str(raw_year).strip() == "":
+                safe_year = None  # An explicitly blank year clears the year.
+            else:
+                try:
+                    safe_year = int(str(raw_year).strip())
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Year must be a whole number or blank. Existing data was not changed."
+                    )
 
+        # PATCH semantics: fields omitted from the request are left untouched.
+        # Explicitly supplied blank values clear nullable fields; title, author,
+        # and language keep their existing values when supplied as blank.
         cur.execute("""
-            UPDATE public.works SET 
-                title = COALESCE(NULLIF(BTRIM(%s), ''), title),
-                author = COALESCE(NULLIF(BTRIM(%s), ''), 'Unknown'),
-                publisher = NULLIF(BTRIM(%s), ''),
-                isbn = NULLIF(BTRIM(%s), ''),
-                ddc = NULLIF(BTRIM(%s), ''),
-                year = %s,
-                category = NULLIF(BTRIM(%s), ''),
-                genre = NULLIF(BTRIM(%s), ''),
-                language = COALESCE(NULLIF(BTRIM(%s), ''), language),
-                original_language = NULLIF(BTRIM(%s), ''),
-                translation_compilation = NULLIF(BTRIM(%s), ''),
-                notes = NULLIF(BTRIM(%s), ''),
-                call_no = COALESCE(NULLIF(BTRIM(%s), ''), call_no)
+            UPDATE public.works SET
+                title = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), title) ELSE title END,
+                author = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), author) ELSE author END,
+                publisher = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE publisher END,
+                isbn = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE isbn END,
+                ddc = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE ddc END,
+                year = CASE WHEN %s THEN %s ELSE year END,
+                category = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE category END,
+                genre = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE genre END,
+                language = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), language) ELSE language END,
+                original_language = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_language END,
+                translation_compilation = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE translation_compilation END,
+                notes = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE notes END,
+                call_no = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), call_no) ELSE call_no END
             WHERE work_id = %s
         """, (
-            payload.get('title'),
-            payload.get('author'),
-            payload.get('publisher'),
-            payload.get('isbn'),
-            payload.get('ddc'),
-            safe_year,
-            new_cat,
-            payload.get('genre'),
-            payload.get('language'),
-            payload.get('original_language'),
-            payload.get('translation_compilation'),
-            payload.get('notes'),
-            final_call_no,
+            "title" in payload, payload.get("title"),
+            "author" in payload, payload.get("author"),
+            "publisher" in payload, payload.get("publisher"),
+            "isbn" in payload, payload.get("isbn"),
+            "ddc" in payload, payload.get("ddc"),
+            "year" in payload, safe_year,
+            "category" in payload, new_cat,
+            "genre" in payload, payload.get("genre"),
+            "language" in payload, payload.get("language"),
+            "original_language" in payload, payload.get("original_language"),
+            "translation_compilation" in payload, payload.get("translation_compilation"),
+            "notes" in payload, payload.get("notes"),
+            ("call_no" in payload or "category" in payload), final_call_no,
             work_id
         ))
 
@@ -976,13 +1047,18 @@ async def soft_delete_book(
     book_id: int, reason: str, request: Request,
     current_user: dict = Depends(get_current_user)
 ):    
+    reason = str(reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="A deaccession reason is required.")
+
     conn = get_connection(request=request)
     cur = conn.cursor()
     try:
         cur.execute("""
-            UPDATE public.items 
-            SET is_deleted = TRUE, deletion_reason = %s 
+            UPDATE public.items
+            SET is_deleted = TRUE, deletion_reason = %s
             WHERE serial_no = %s
+              AND COALESCE(is_deleted, FALSE) = FALSE
             RETURNING work_id, accession_no
         """, (reason, book_id))
         
@@ -1046,7 +1122,7 @@ class ReviewNoteCreate(BaseModel):
 
 
 class ItemCorrectionSubmit(BaseModel):
-    changes: dict = {}
+    changes: dict = Field(default_factory=dict)
     note: Optional[str] = None
 
 
@@ -1191,16 +1267,24 @@ async def request_item_correction(
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         actor = _actor_info(current_user)
+        if _open_correction(cur, "ITEM", serial_no):
+            raise HTTPException(
+                status_code=409,
+                detail="This Item already has an open correction request."
+            )
 
         cur.execute("""
-            UPDATE public.items
+            UPDATE public.items AS i
             SET availability_status = 'REJECTED',
                 is_deleted = TRUE,
                 deletion_reason = %s
-            WHERE serial_no = %s
-              AND availability_status = 'PENDING'
-              AND is_deleted = FALSE
-            RETURNING serial_no, accession_no, work_id
+            FROM public.works AS w
+            WHERE i.serial_no = %s
+              AND i.work_id = w.work_id
+              AND UPPER(TRIM(w.status)) = 'APPROVED'
+              AND i.availability_status = 'PENDING'
+              AND i.is_deleted = FALSE
+            RETURNING i.serial_no, i.accession_no, i.work_id
         """, (reason, serial_no))
         row = cur.fetchone()
         if not row:
@@ -1359,12 +1443,12 @@ async def resubmit_corrected_item(
         actor = _actor_info(current_user)
         item = _load_item_for_review(cur, serial_no, actor)
 
-        if str(item["availability_status"]).upper() != "REJECTED":
+        if str(item["availability_status"] or "").strip().upper() != "REJECTED":
             raise HTTPException(
                 status_code=409,
                 detail="Only a rejected Item can be corrected and resubmitted."
             )
-        if str(item["work_status"]).upper() != "APPROVED":
+        if str(item["work_status"] or "").strip().upper() != "APPROVED":
             raise HTTPException(
                 status_code=409,
                 detail="The parent Work is not approved and this Item cannot be resubmitted."
@@ -1403,6 +1487,30 @@ async def resubmit_corrected_item(
                     detail="Authorized Work ID must be a numeric Work ID."
                 )
 
+        target_work_id = new_values.get("work_id", item["work_id"])
+        cur.execute(
+            "SELECT work_id, language, call_no, status FROM public.works WHERE work_id = %s FOR SHARE",
+            (target_work_id,)
+        )
+        target_work_language_row = cur.fetchone()
+        if not target_work_language_row:
+            raise HTTPException(status_code=404, detail="Authorized catalogued work not found.")
+        if str(target_work_language_row["status"] or "").strip().upper() != "APPROVED":
+            raise HTTPException(
+                status_code=409,
+                detail="That Work is not approved and cannot receive this Item."
+            )
+        validate_work_authority(cur, target_work_id)
+        target_work_language = str(target_work_language_row["language"] or "").strip()
+        requested_language = new_values.get("language_id", target_work_language)
+        if str(requested_language or "").strip().casefold() != target_work_language.casefold():
+            raise HTTPException(
+                status_code=400,
+                detail="The Item language must match the selected Work's language."
+            )
+        # Keep the Item language synchronized if its parent Work was changed.
+        new_values["language_id"] = target_work_language
+
         ledger_change_set = _audit_ledger_diff(item, new_values)
         field_changes = ledger_change_set["fields"]
 
@@ -1432,8 +1540,6 @@ async def resubmit_corrected_item(
                     status_code=409,
                     detail="That Work is not yet approved and cannot receive this copy."
                 )
-
-            validate_work_authority(cur, new_work["work_id"])
 
             prefix = get_language_prefix(new_work["language"])
             cur.execute("""
@@ -1561,7 +1667,7 @@ def _generate_record_id(serial_no: int) -> str:
     from datetime import datetime
     return f"AO-REC-{datetime.now().year}-{str(serial_no).zfill(6)}"
 
-@catalogue_item_router.get("/{serial_no}")
+@catalogue_item_router.get("/holding/{serial_no}")
 def get_catalogue_book(request: Request, serial_no: int, current_user: dict = Depends(get_current_user)):
     conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -1587,7 +1693,10 @@ def get_catalogue_book(request: Request, serial_no: int, current_user: dict = De
                 w.translation_compilation
             FROM public.items i
             INNER JOIN public.works w ON i.work_id = w.work_id
-            WHERE i.serial_no = %s AND i.is_deleted = FALSE AND w.status = 'APPROVED'
+            WHERE i.serial_no = %s
+              AND COALESCE(i.is_deleted, FALSE) = FALSE
+              AND UPPER(BTRIM(COALESCE(w.status, ''))) = 'APPROVED'
+              AND UPPER(BTRIM(COALESCE(i.availability_status, ''))) NOT IN ('PENDING', 'REJECTED')
         """
         cur.execute(query, (serial_no,))
         result = cur.fetchone()

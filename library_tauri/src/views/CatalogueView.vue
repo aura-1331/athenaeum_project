@@ -1,332 +1,778 @@
 <template>
-  <div class="catalogue-page" :class="`theme-${theme}`">
-    <!-- PREMIUM: a library register with a permanent index rail and individual record folios -->
-        <template v-if="theme === 'command'">
-      <main class="command-main"><aside class="command-nav"><div class="command-logo">[L]</div><p>LIBRARY OPS</p><strong>CATALOGUE<br/>CONTROL</strong><span class="command-nav-active">01 / Records</span><span>02 / Classification</span><span>03 / Inventory</span><div class="command-nav-bottom">SYSTEM STATUS<br/><b>● CONNECTED</b></div></aside><section class="command-workspace"><header class="command-head"><div><small>WORKSPACE / CATALOGUE / LIVE</small><h1>Records console<span>_</span></h1></div><label class="theme-picker"><span>Interface</span><select v-model="theme"><option value="command">Command Centre</option><option value="electric">Electric Pop</option><option value="splitview">Split Explorer</option><option value="observatory">Collection Observatory</option><option value="professional">Professional Workspace</option></select></label></header><div class="command-stats"><div><small>TOTAL RECORDS</small><strong>{{ totalBooks.toLocaleString() }}</strong></div><div><small>VISIBLE NOW</small><strong>{{ filteredBooks.length }}</strong></div><div><small>PAGE</small><strong>{{ currentPage }}<i>/{{ totalPages }}</i></strong></div><button @click="exportCsv">↓ EXPORT DATA</button></div><div class="command-query"><span>QUERY //</span><input v-model="searchQuery" placeholder="title | author | accession | shelf"/><button @click="clearFilters">CLEAR ×</button></div><div class="command-filters"><label>CAT. <select v-model="filters.category"><option value="">ANY</option><option v-for="v in categories" :key="v">{{ v }}</option></select></label><label>AUTHOR <select v-model="filters.author"><option value="">ANY</option><option v-for="v in authors" :key="v">{{ v }}</option></select></label><label>SHELF <select v-model="filters.shelf"><option value="">ANY</option><option v-for="v in shelves" :key="v">{{ v }}</option></select></label><label>ORDER <select v-model="sortKey"><option value="serial_no">Serial</option><option value="title">Title</option><option value="author">Author</option><option value="accession_no">Accession</option></select></label><button @click="toggleDirection">{{ sortDirection.toUpperCase() }} ↕</button></div><div v-if="loading" class="empty-state">FETCHING RECORDS…</div><div v-else-if="!filteredBooks.length" class="empty-state">NO MATCHING RECORDS.</div><div v-else class="command-records"><button v-for="(item,index) in filteredBooks" :key="`${item.serial_no}-${index}`" @click="viewBook(item.serial_no)" class="command-record"><span>{{ String((currentPage-1)*itemsPerPage+books.indexOf(item)+1).padStart(4,'0') }}</span><strong>{{ item.title || 'Untitled work' }}<small>{{ item.author || 'Unknown author' }}</small></strong><span>{{ item.category || 'Uncategorised' }}</span><code>{{ item.accession_no || '—' }}</code><span>{{ item.shelf || '—' }}</span><b>↗</b></button></div><footer class="command-footer"><span>ENDPOINT /catalogue/ · {{ filteredBooks.length }} RESULTS</span><PaginationControls :current-page="currentPage" :total-pages="totalPages" :visible-pages="visiblePages" :loading="loading" @go="goToPage" /></footer></section></main>
-    </template>
+  <div ref="rootEl" class="cat" :class="{ 'filters-open': filtersOpen, dark: isDark }">
+    <!-- ================= HEADER ================= -->
+    <header class="cat-head">
+      <div class="head-title">
+        <p class="eyebrow">ATHENAEUM ORBIS &middot; CARD CATALOGUE</p>
+        <h1>Catalogue</h1>
+        <p class="sub">
+          <strong>{{ grandTotal === null ? '...' : grandTotal.toLocaleString() }}</strong> holdings on the shelves
+          <span v-if="hasFilters"> &middot; <strong>{{ total.toLocaleString() }}</strong> match your search</span>
+        </p>
+      </div>
+      <div class="head-actions">
+        <button type="button" class="btn ghost filters-toggle" @click="filtersOpen = !filtersOpen">
+          Filters<span v-if="activeCount" class="badge">{{ activeCount }}</span>
+        </button>
+        <button type="button" class="btn ghost" :disabled="exporting || !books.length" @click="exportCsv(false)">Export page</button>
+        <button type="button" class="btn solid" :disabled="exporting || !total" @click="exportCsv(true)">
+          {{ exporting ? 'Exporting ' + exportProgress + '...' : 'Export all matches' }}
+        </button>
+      </div>
+    </header>
 
-    <template v-else-if="theme === 'splitview'">
-      <main class="split-main"><aside class="split-rail"><div class="split-brand">FIELD<br/><b>NOTES</b><small>CATALOGUE EXPLORER</small></div><p>EXPLORE BY</p><button :class="{selected: !filters.category}" @click="filters.category = ''">All subjects <span>{{ totalBooks }}</span></button><button v-for="v in categories.slice(0,8)" :key="v" :class="{selected: filters.category === v}" @click="filters.category = v">{{ v }}<span>↗</span></button><div class="split-rail-bottom"><label class="theme-picker"><span>Concept</span><select v-model="theme"><option value="command">Command Centre</option><option value="electric">Electric Pop</option><option value="splitview">Split Explorer</option><option value="observatory">Collection Observatory</option><option value="professional">Professional Workspace</option></select></label><button @click="exportCsv">Export data ↗</button></div></aside><section class="split-content"><header class="split-header"><div><small>LIBRARY / DISCOVERY DESK</small><h1>Explore by curiosity.</h1></div><input v-model="searchQuery" placeholder="Search titles, authors, codes…"/></header><div class="split-toolbar"><label>AUTHOR <select v-model="filters.author"><option value="">All authors</option><option v-for="v in authors" :key="v">{{ v }}</option></select></label><label>SHELF <select v-model="filters.shelf"><option value="">All shelves</option><option v-for="v in shelves" :key="v">{{ v }}</option></select></label><label>SORT <select v-model="sortKey"><option value="title">Title</option><option value="author">Author</option><option value="serial_no">Serial number</option><option value="category">Category</option></select></label><button @click="toggleDirection">{{ sortDirection === 'asc' ? '↑' : '↓' }}</button><button @click="clearFilters">Reset all</button><span>{{ filteredBooks.length }} results</span></div><div v-if="loading" class="empty-state">Loading explorer…</div><div v-else-if="!filteredBooks.length" class="empty-state">Nothing found. Try another subject.</div><div v-else class="split-workspace"><nav class="split-results"><button v-for="(item,index) in filteredBooks" :key="`${item.serial_no}-${index}`" :class="{active: selectedBook && selectedBook.serial_no === item.serial_no}" @click="selectedSerial = item.serial_no" class="split-result"><span>{{ String((currentPage-1)*itemsPerPage+books.indexOf(item)+1).padStart(2,'0') }}</span><strong>{{ item.title || 'Untitled work' }}<small>{{ item.author || 'Unknown author' }}</small></strong><i>›</i></button></nav><article class="split-detail" v-if="selectedBook"><div class="split-detail-art"><span>{{ (selectedBook.title || 'B').trim().slice(0,1).toUpperCase() }}</span><small>CATALOGUE RECORD</small></div><p class="split-detail-kicker">{{ selectedBook.category || 'UNCATEGORISED' }} · SHELF {{ selectedBook.shelf || '—' }}</p><h2>{{ selectedBook.title || 'Untitled work' }}</h2><p class="split-author">by {{ selectedBook.author || 'Author not recorded' }}</p><dl><dt>ACCESSION NUMBER</dt><dd>{{ selectedBook.accession_no || '—' }}</dd><dt>WORK ID</dt><dd>{{ selectedBook.work_id || selectedBook.id || '—' }}</dd><dt>RECORD ID</dt><dd>{{ selectedBook.record_id || '—' }}</dd><dt>SERIAL NUMBER</dt><dd>{{ selectedBook.serial_no }}</dd></dl><button class="split-open-record" @click="viewBook(selectedBook.serial_no)">Open full record ↗</button></article></div><footer class="split-footer"><span>MASTER LIST / DETAIL PREVIEW</span><PaginationControls :current-page="currentPage" :total-pages="totalPages" :visible-pages="visiblePages" :loading="loading" @go="goToPage" /></footer></section></main>
-    </template>
-
-
-    <!-- MAP ROOM: catalogue navigation as a wall map of subject zones and shelf coordinates -->
-    <!-- KANBAN: catalogue cards are organized into category columns for fast scanning -->
-
-
-
-
-    <template v-else-if="theme === 'electric'">
-      <main class="modern-main">
-        <header class="modern-header">
-          <div><p class="eyebrow">LIBRARY MANAGEMENT <span>/</span> CATALOGUE</p><h1>Catalogue overview</h1><p>Find, sort and review collection records.</p></div>
-          <div class="modern-actions"><label class="theme-picker"><span>Appearance</span><select v-model="theme"><option value="command">Command Centre</option><option value="electric">Electric Pop</option><option value="splitview">Split Explorer</option><option value="observatory">Collection Observatory</option><option value="professional">Professional Workspace</option></select></label><button class="modern-export" type="button" @click="exportCsv" :disabled="filteredBooks.length === 0">Export CSV <span>↗</span></button></div>
-        </header>
-        <section class="metric-grid"><article class="metric-card"><span>ALL CATALOGUE RECORDS</span><strong>{{ totalBooks.toLocaleString() }}</strong><small>Total records in the collection</small><div class="metric-decoration">▤</div></article><article class="metric-card"><span>THIS PAGE</span><strong>{{ books.length }}</strong><small>Records loaded</small></article><article class="metric-card"><span>FILTERED RESULTS</span><strong>{{ filteredBooks.length }}</strong><small>Matching current filters</small></article><article class="metric-card"><span>CURRENT PAGE</span><strong>{{ currentPage }}<small> / {{ totalPages }}</small></strong><small>Catalogue pagination</small></article></section>
-        <section class="modern-panel"><div class="panel-heading"><div><h2>Collection records</h2><p>Choose a filter or select a column heading to sort.</p></div><button class="clear-button" type="button" @click="clearFilters" :disabled="!hasActiveFilters && !searchQuery">Clear filters</button></div>
-          <div class="modern-filterbar"><label><span>Category</span><select v-model="filters.category"><option value="">All categories</option><option v-for="v in categories" :key="v" :value="v">{{ v }}</option></select></label><label><span>Author</span><select v-model="filters.author"><option value="">All authors</option><option v-for="v in authors" :key="v" :value="v">{{ v }}</option></select></label><label><span>Shelf</span><select v-model="filters.shelf"><option value="">All shelves</option><option v-for="v in shelves" :key="v" :value="v">{{ v }}</option></select></label><div class="result-chip">{{ filteredBooks.length }} results</div></div>
-          <div v-if="loading" class="empty-state">Loading catalogue records…</div><div v-else-if="filteredBooks.length === 0" class="empty-state">No records match the current filters.</div>
-          <div v-else class="modern-table-wrap"><table class="modern-table"><thead><tr><th><button @click="setSort('serial_no')">SL No {{ sortIndicator('serial_no') }}</button></th><th><button @click="setSort('work_id')">Work ID {{ sortIndicator('work_id') }}</button></th><th><button @click="setSort('accession_no')">Accession No {{ sortIndicator('accession_no') }}</button></th><th><button @click="setSort('title')">Title {{ sortIndicator('title') }}</button></th><th><button @click="setSort('author')">Author {{ sortIndicator('author') }}</button></th><th><button @click="setSort('category')">Category {{ sortIndicator('category') }}</button></th><th><button @click="setSort('shelf')">Shelf {{ sortIndicator('shelf') }}</button></th><th><button @click="setSort('record_id')">Record ID {{ sortIndicator('record_id') }}</button></th></tr></thead><tbody><tr v-for="(item, index) in filteredBooks" :key="`${item.serial_no}-${index}`" @click="viewBook(item.serial_no)" tabindex="0" @keydown.enter="viewBook(item.serial_no)"><td class="number-cell">{{ (currentPage - 1) * itemsPerPage + books.indexOf(item) + 1 }}</td><td>{{ item.work_id || item.id || '—' }}</td><td><span class="modern-code">{{ item.accession_no || '—' }}</span></td><td class="modern-title">{{ item.title || 'Untitled' }}</td><td>{{ item.author || '—' }}</td><td><span class="modern-category">{{ item.category || 'Uncategorised' }}</span></td><td>{{ item.shelf || '—' }}</td><td>{{ item.record_id || '—' }}</td></tr></tbody></table></div>
-          <footer class="modern-footer"><span>Page {{ currentPage }} of {{ totalPages }}</span><PaginationControls :current-page="currentPage" :total-pages="totalPages" :visible-pages="visiblePages" :loading="loading" @go="goToPage" /></footer>
-        </section>
-      </main>
-    </template>
-
-    <template v-else-if="theme === 'professional'">
-      <main class="pro-main">
-        <header class="pro-topbar">
-          <div class="pro-brand"><span class="pro-brand-mark">L</span><div><strong>LIBRARY / CATALOGUE</strong><small>COLLECTION MANAGEMENT WORKSPACE</small></div></div>
-          <div class="pro-top-actions"><span class="pro-live"><i></i> Catalogue connected</span><label class="theme-picker"><span>Workspace design</span><select v-model="theme"><option value="command">Command Centre</option><option value="electric">Electric Pop</option><option value="splitview">Split Explorer</option><option value="observatory">Collection Observatory</option><option value="professional">Professional Workspace</option></select></label><button class="pro-export" @click="exportCsv" :disabled="!filteredBooks.length">Export results ↓</button></div>
-        </header>
-        <section class="pro-heading"><div><p class="pro-breadcrumb">COLLECTIONS <span>/</span> GENERAL CATALOGUE</p><h1>Catalogue workspace</h1><p>Search, inspect, and move between records without losing your place.</p></div><div class="pro-heading-count"><strong>{{ totalBooks.toLocaleString() }}</strong><span>total catalogue records</span></div></section>
-        <section class="pro-commandbar"><span class="pro-command-icon">⌕</span><input v-model="searchQuery" type="search" placeholder="Search title, author, subject, accession number…" aria-label="Search catalogue"/><kbd>SEARCH</kbd><span class="pro-command-divider"></span><label>Sort by <select v-model="sortKey"><option value="serial_no">Serial number</option><option value="title">Title</option><option value="author">Author</option><option value="category">Subject</option><option value="shelf">Shelf</option><option value="accession_no">Accession number</option></select></label><button class="pro-direction" @click="toggleDirection" :aria-label="sortDirection === 'asc' ? 'Sort descending' : 'Sort ascending'">{{ sortDirection === 'asc' ? '↑' : '↓' }}</button></section>
-        <div class="pro-layout">
-          <aside class="pro-filters"><div class="pro-panel-title"><span>REFINE RESULTS</span><button @click="clearFilters" :disabled="!hasActiveFilters && !searchQuery">Clear all</button></div><label><span>Subject / category</span><select v-model="filters.category"><option value="">All subjects</option><option v-for="v in categories" :key="v" :value="v">{{ v }}</option></select></label><label><span>Author</span><select v-model="filters.author"><option value="">All authors</option><option v-for="v in authors" :key="v" :value="v">{{ v }}</option></select></label><label><span>Shelf location</span><select v-model="filters.shelf"><option value="">All shelves</option><option v-for="v in shelves" :key="v" :value="v">{{ v }}</option></select></label><div class="pro-filter-summary"><span>RESULTS IN THIS PAGE</span><strong>{{ filteredBooks.length }}</strong><small>of {{ books.length }} loaded records</small></div><div class="pro-filter-note"><strong>Working tip</strong><p>Select a record to inspect its metadata on the right. Your search and filters stay in place.</p></div></aside>
-          <section class="pro-results"><header class="pro-results-head"><div><span>RECORD BROWSER</span><h2>Catalogue records</h2></div><div class="pro-view-meta"><span class="pro-result-dot"></span>{{ filteredBooks.length }} results <i>·</i> Page {{ currentPage }} of {{ totalPages }}</div></header>
-            <div v-if="loading" class="pro-empty">Loading catalogue records…</div><div v-else-if="!filteredBooks.length" class="pro-empty"><strong>No matching records</strong><p>Try removing a filter or using a broader search.</p><button @click="clearFilters">Reset search</button></div>
-            <div v-else class="pro-record-list"><button v-for="item in filteredBooks" :key="item.serial_no" class="pro-record" :class="{ selected: (proSelected?.serial_no ?? selectedBook?.serial_no) === item.serial_no }" @click="proSelected = item"><span class="pro-record-check"><span></span></span><span class="pro-record-main"><strong>{{ item.title || 'Untitled work' }}</strong><small>{{ item.author || 'Author not recorded' }}</small><span class="pro-record-tags"><i>{{ item.category || 'Uncategorised' }}</i><i>Shelf {{ item.shelf || '—' }}</i></span></span><span class="pro-record-id"><small>ACCESSION</small><code>{{ item.accession_no || '—' }}</code></span><span class="pro-record-serial">#{{ item.serial_no ?? '—' }}</span><span class="pro-record-open">↗</span></button></div>
-            <footer class="pro-results-footer"><span>Showing {{ filteredBooks.length }} filtered records from the current API page</span><PaginationControls :current-page="currentPage" :total-pages="totalPages" :visible-pages="visiblePages" :loading="loading" @go="goToPage" /></footer>
-          </section>
-          <aside class="pro-inspector"><header><div><span>RECORD INSPECTOR</span><h2>Selected record</h2></div><span class="pro-inspector-icon">⌘</span></header><template v-if="proSelected || selectedBook"><div class="pro-record-stamp"><span>CATALOGUE RECORD</span><strong>{{ (proSelected || selectedBook)?.accession_no || 'UNASSIGNED' }}</strong><small>Serial no. {{ (proSelected || selectedBook)?.serial_no ?? '—' }}</small></div><h3>{{ (proSelected || selectedBook)?.title || 'Untitled work' }}</h3><p class="pro-inspector-author">{{ (proSelected || selectedBook)?.author || 'Author not recorded' }}</p><div class="pro-metadata"><div><span>SUBJECT</span><strong>{{ (proSelected || selectedBook)?.category || 'Not recorded' }}</strong></div><div><span>SHELF LOCATION</span><strong>{{ (proSelected || selectedBook)?.shelf || 'Not recorded' }}</strong></div><div><span>RECORD ID</span><strong>{{ (proSelected || selectedBook)?.record_id ?? '—' }}</strong></div><div><span>WORK ID</span><strong>{{ (proSelected || selectedBook)?.work_id ?? (proSelected || selectedBook)?.id ?? '—' }}</strong></div></div><button class="pro-open-record" @click="viewBook((proSelected || selectedBook).serial_no)">Open full record <span>↗</span></button><p class="pro-inspector-footnote">Metadata shown here reflects fields available in the current catalogue response.</p></template><div v-else class="pro-inspector-empty"><span>↖</span><strong>Select a record</strong><p>Choose any result to inspect its catalogue metadata here.</p></div></aside>
+    <div class="cat-body">
+      <!-- ================= FILTER RAIL ================= -->
+      <aside class="rail" aria-label="Search and filters">
+        <div class="field">
+          <label for="cat-search">Search</label>
+          <div class="search-box">
+            <span class="search-icon" aria-hidden="true">&#8981;</span>
+            <input
+              id="cat-search"
+              ref="searchEl"
+              v-model="text"
+              type="search"
+              autocomplete="off"
+              :placeholder="scopePlaceholder"
+              @keydown.esc.stop="clearSearch"
+            />
+            <kbd v-if="!text" class="kbd" aria-hidden="true">/</kbd>
+            <button v-else type="button" class="clear-x" aria-label="Clear search" @click="clearSearch">&times;</button>
+          </div>
+          <div class="scope" role="radiogroup" aria-label="Search in">
+            <button
+              v-for="s in SCOPES"
+              :key="s.key"
+              type="button"
+              role="radio"
+              :aria-checked="scope === s.key"
+              :class="{ on: scope === s.key }"
+              @click="scope = s.key"
+            >{{ s.label }}</button>
+          </div>
         </div>
-      </main>
-    </template>
 
-    <!-- COLLECTION OBSERVATORY: analytical views of the loaded collection, with honest scope labels. -->
-    <template v-else-if="theme === 'observatory'">
-      <main class="observatory-app"><header class="observatory-header"><div><p>COLLECTION INTELLIGENCE / OBSERVATORY</p><h1>Look at the library<br/><em>from above.</em></h1><span>Patterns in the currently loaded catalogue records. Change pages to inspect another slice.</span></div><div class="observatory-actions"><label class="theme-picker"><span>Concept</span><select v-model="theme"><option value="command">Command Centre</option><option value="electric">Electric Pop</option><option value="splitview">Split Explorer</option><option value="observatory">Collection Observatory</option><option value="professional">Professional Workspace</option></select></label><button @click="exportCsv">Export data ↓</button></div></header>
-        <section class="observatory-metrics"><article><span>ALL CATALOGUE RECORDS</span><strong>{{ totalBooks.toLocaleString() }}</strong><small>API-reported total</small></article><article><span>LOADED FOR ANALYSIS</span><strong>{{ books.length }}</strong><small>Current page only</small></article><article><span>SUBJECTS IN THIS SLICE</span><strong>{{ categoryStats.length }}</strong><small>Distinct category values</small></article><article><span>AUTHORS IN THIS SLICE</span><strong>{{ authorStats.length }}</strong><small>Distinct author values</small></article></section>
-        <section class="observatory-charts"><article class="observatory-chart"><header><div><span>01 / SUBJECT MIX</span><h2>Which subjects appear?</h2></div><small>{{ books.length }} records analysed</small></header><button v-for="item in categoryStats" :key="item.name" class="observatory-bar-row" @click="filters.category = filters.category === item.name ? '' : item.name" :class="{ active: filters.category === item.name }"><span>{{ item.name }}</span><span class="observatory-bar-track"><i :style="{ width: `${item.percent}%` }"></i></span><b>{{ item.count }}</b></button><p class="observatory-footnote">Select a subject to filter the catalogue below. Percentages are calculated from the loaded page.</p></article><article class="observatory-chart"><header><div><span>02 / AUTHOR LANDSCAPE</span><h2>Who appears in this slice?</h2></div><small>Top 8 by frequency</small></header><button v-for="item in authorStats" :key="item.name" class="observatory-author" @click="filters.author = filters.author === item.name ? '' : item.name" :class="{ active: filters.author === item.name }"><span class="observatory-avatar">{{ item.name.slice(0,1).toUpperCase() }}</span><span>{{ item.name }}</span><b>{{ item.count }} record<span v-if="item.count !== 1">s</span></b></button><p class="observatory-footnote">Author counts are not collection-wide statistics unless all records are loaded by the API.</p></article></section>
-        <section class="observatory-records"><header><div><span>03 / TRACE THE DATA BACK</span><h2>Records behind the pattern</h2></div><label>Sort <select v-model="sortKey"><option value="serial_no">Serial number</option><option value="title">Title</option><option value="author">Author</option><option value="category">Subject</option></select></label></header><div class="observatory-tools"><input v-model="searchQuery" placeholder="Search loaded records…"/><select v-model="filters.shelf"><option value="">All shelves</option><option v-for="v in shelves" :key="v" :value="v">{{ v }}</option></select><button @click="clearFilters">Reset filters</button></div><button v-for="item in filteredBooks" :key="item.serial_no" class="observatory-record" @click="viewBook(item.serial_no)"><code>{{ item.accession_no || item.serial_no }}</code><span><strong>{{ item.title || 'Untitled work' }}</strong><small>{{ item.author || 'Unknown author' }} · {{ item.category || 'Uncategorised' }}</small></span><b>Open ↗</b></button><footer><span>PAGE {{ currentPage }} / {{ totalPages }}</span><PaginationControls :current-page="currentPage" :total-pages="totalPages" :visible-pages="visiblePages" :loading="loading" @go="goToPage" /></footer></section></main>
-    </template>
+        <div class="field">
+          <span class="label">Category</span>
+          <div class="chips">
+            <button type="button" class="chip" :class="{ on: !category }" @click="category = ''">
+              <span>All</span><b>{{ facetAll === null ? '' : facetAll }}</b>
+            </button>
+            <button
+              v-for="c in CATEGORIES"
+              :key="c.name"
+              type="button"
+              class="chip"
+              :class="[{ on: category === c.name }, 'tone-' + c.tone]"
+              :disabled="facets[c.name] === 0 && category !== c.name"
+              @click="category = category === c.name ? '' : c.name"
+            >
+              <i class="dot" aria-hidden="true"></i><span>{{ c.name }}</span>
+              <b>{{ facets[c.name] === undefined ? '' : facets[c.name] }}</b>
+            </button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="cat-language">Language</label>
+          <select id="cat-language" v-model="language">
+            <option value="">Any language</option>
+            <option v-for="l in languages" :key="l" :value="l">{{ l }}</option>
+          </select>
+        </div>
+
+        <div class="field" v-if="genres.length">
+          <label for="cat-genre">Genre</label>
+          <select id="cat-genre" v-model="genre">
+            <option value="">Any genre</option>
+            <option v-for="g in genres" :key="g" :value="g">{{ g }}</option>
+          </select>
+        </div>
+
+        <div class="field two">
+          <div>
+            <label for="cat-sort">Sort by</label>
+            <select id="cat-sort" v-model="sortBy">
+              <option v-for="s in SORTS" :key="s.key" :value="s.key">{{ s.label }}</option>
+            </select>
+          </div>
+          <button type="button" class="dir" :aria-label="order === 'asc' ? 'Ascending, switch to descending' : 'Descending, switch to ascending'" @click="order = order === 'asc' ? 'desc' : 'asc'">
+            {{ order === 'asc' ? 'A\u2192Z' : 'Z\u2192A' }}
+          </button>
+        </div>
+
+        <div class="field">
+          <label for="cat-size">Records per page</label>
+          <select id="cat-size" v-model.number="pageSize">
+            <option v-for="n in [15, 30, 60, 100]" :key="n" :value="n">{{ n }}</option>
+          </select>
+        </div>
+
+        <button type="button" class="btn ghost wide" :disabled="!hasFilters" @click="clearAll">Clear all filters</button>
+
+        <p class="tips">
+          <b>Tips</b><br />
+          <kbd>/</kbd> search &nbsp; <kbd>&uarr;</kbd><kbd>&darr;</kbd> move &nbsp; <kbd>Enter</kbd> open
+        </p>
+      </aside>
+
+      <!-- ================= RESULTS ================= -->
+      <section class="results" aria-label="Results">
+        <div class="meta-row">
+          <p class="count" aria-live="polite">
+            <template v-if="loading && !books.length">Loading records...</template>
+            <template v-else-if="total === 0">No records</template>
+            <template v-else>Showing <strong>{{ from }}&ndash;{{ to }}</strong> of <strong>{{ total.toLocaleString() }}</strong></template>
+          </p>
+          <div class="active" v-if="hasFilters">
+            <span v-if="text.trim()" class="tag">{{ scopeLabel }}: &ldquo;{{ text.trim() }}&rdquo;<button type="button" aria-label="Remove search" @click="clearSearch">&times;</button></span>
+            <span v-if="category" class="tag">{{ category }}<button type="button" aria-label="Remove category" @click="category = ''">&times;</button></span>
+            <span v-if="language" class="tag">{{ language }}<button type="button" aria-label="Remove language" @click="language = ''">&times;</button></span>
+            <span v-if="genre" class="tag">{{ genre }}<button type="button" aria-label="Remove genre" @click="genre = ''">&times;</button></span>
+          </div>
+        </div>
+
+        <div v-if="error" class="banner" role="alert">
+          <span>{{ error }}</span>
+          <button type="button" class="btn ghost" @click="reload">Try again</button>
+        </div>
+
+        <ul v-if="loading && !books.length" class="list skeleton" aria-hidden="true">
+          <li v-for="n in 8" :key="n"><i></i><i></i><i></i></li>
+        </ul>
+
+        <div v-else-if="!books.length && !error" class="empty">
+          <div class="empty-mark" aria-hidden="true">&#9776;</div>
+          <h2>Nothing matches that search</h2>
+          <p>Try fewer words, check the spelling, or search by author instead of title.</p>
+          <button v-if="hasFilters" type="button" class="btn solid" @click="clearAll">Clear all filters</button>
+        </div>
+
+        <ul v-else ref="listEl" class="list" :class="{ busy: loading }" @keydown="onListKey">
+          <li v-for="book in books" :key="book.serial_no">
+            <button
+              type="button"
+              class="row"
+              :class="['tone-' + toneOf(book.category), { selected: book.serial_no === selectedSerial }]"
+              :aria-current="book.serial_no === selectedSerial ? 'true' : undefined"
+              @click="pick(book)"
+              @dblclick="openBook(book)"
+            >
+              <span class="spine" aria-hidden="true"></span>
+              <span class="main">
+                <strong class="title">
+                  <template v-for="(p, i) in parts(book.title || 'Untitled')" :key="i"><mark v-if="p.hit">{{ p.t }}</mark><template v-else>{{ p.t }}</template></template>
+                </strong>
+                <span class="author" :class="{ unknown: !hasAuthor(book) }">
+                  <template v-for="(p, i) in parts(authorText(book))" :key="i"><mark v-if="p.hit">{{ p.t }}</mark><template v-else>{{ p.t }}</template></template>
+                </span>
+                <span class="line"><b class="serial">#{{ book.serial_no }}</b>{{ metaLine(book) }}</span>
+              </span>
+              <span class="side">
+                <span class="pill" :class="'tone-' + toneOf(book.category)">{{ book.category || 'Uncategorised' }}</span>
+                <span class="lang">{{ book.language }}</span>
+                <span class="acc">{{ book.accession_no }}</span>
+                <span v-if="book.shelf" class="shelf">Shelf {{ book.shelf }}</span>
+              </span>
+            </button>
+          </li>
+        </ul>
+
+        <nav v-if="totalPages > 1" class="pager" aria-label="Catalogue pages">
+          <button type="button" class="btn ghost" :disabled="page === 1 || loading" @click="goTo(page - 1)">&larr; Previous</button>
+          <template v-for="(n, i) in pageNumbers" :key="'p' + i">
+            <span v-if="n === -1" class="gap">&hellip;</span>
+            <button v-else type="button" class="num" :class="{ on: n === page }" :aria-current="n === page ? 'page' : undefined" :disabled="loading" @click="goTo(n)">{{ n }}</button>
+          </template>
+          <button type="button" class="btn ghost" :disabled="page === totalPages || loading" @click="goTo(page + 1)">Next &rarr;</button>
+        </nav>
+      </section>
+
+      <!-- ================= CARD PREVIEW ================= -->
+      <aside class="card-pane" aria-label="Record preview">
+        <article v-if="selectedBook" class="index-card" :class="'tone-' + toneOf(selectedBook.category)">
+          <div class="card-tab">{{ selectedBook.call_no || selectedBook.accession_no || 'No call number' }}</div>
+          <p class="card-kicker">{{ selectedBook.category || 'Uncategorised' }} &middot; {{ selectedBook.language }}</p>
+          <h2 class="card-title">{{ selectedBook.title || 'Untitled' }}</h2>
+          <p class="card-author" :class="{ unknown: !hasAuthor(selectedBook) }">{{ authorText(selectedBook) }}</p>
+          <div class="card-rule"></div>
+          <dl class="card-facts">
+            <template v-for="f in factsOf(selectedBook)" :key="f.label">
+              <dt>{{ f.label }}</dt>
+              <dd :class="{ mono: f.mono }">{{ f.value }}</dd>
+            </template>
+          </dl>
+          <div v-if="selectedBook.notes" class="card-notes"><b>Notes</b><p>{{ selectedBook.notes }}</p></div>
+          <div class="card-actions">
+            <button type="button" class="btn solid" @click="openBook(selectedBook)">Open full record &rarr;</button>
+            <button type="button" class="btn ghost" :disabled="!selectedBook.accession_no" @click="copy(selectedBook.accession_no, 'acc')">
+              {{ copied === 'acc' ? 'Copied \u2713' : 'Copy accession no.' }}
+            </button>
+          </div>
+          <p class="card-record">{{ selectedBook.record_id }}</p>
+        </article>
+        <div v-else class="card-empty">
+          <p>Select a record to see its catalogue card here.</p>
+        </div>
+      </aside>
+    </div>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, computed, onMounted, defineComponent, h } from 'vue'
-import { useRouter } from 'vue-router'
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import axios from 'axios'
-import { useAuthStore } from '@/stores/auth.ts'
 
-const PaginationControls = defineComponent({
-  props: { currentPage: { type: Number, required: true }, totalPages: { type: Number, required: true }, visiblePages: { type: Array as () => number[], required: true }, loading: { type: Boolean, required: true } },
-  emits: ['go'],
-  setup(props, { emit }) {
-    return () => h('nav', { class: 'pagination-controls', 'aria-label': 'Catalogue pages' }, [
-      h('button', { type: 'button', disabled: props.currentPage === 1 || props.loading, onClick: () => emit('go', 1) }, 'First'),
-      h('button', { type: 'button', disabled: props.currentPage === 1 || props.loading, 'aria-label': 'Previous page', onClick: () => emit('go', props.currentPage - 1) }, '‹'),
-      ...props.visiblePages.map((page, index) => page === -1 ? h('span', { key: `ellipsis-${index}`, class: 'page-ellipsis' }, '…') : h('button', { key: page, type: 'button', class: { active: page === props.currentPage }, 'aria-current': page === props.currentPage ? 'page' : undefined, onClick: () => emit('go', page) }, String(page))),
-      h('button', { type: 'button', disabled: props.currentPage === props.totalPages || props.loading, 'aria-label': 'Next page', onClick: () => emit('go', props.currentPage + 1) }, '›'),
-      h('button', { type: 'button', disabled: props.currentPage === props.totalPages || props.loading, onClick: () => emit('go', props.totalPages) }, 'Last')
-    ])
-  }
+const router = useRouter()
+const route = useRoute()
+
+// ---------- constants ----------
+const CATEGORIES = [
+  { name: 'Fiction', tone: 'rust' },
+  { name: 'Non-Fiction', tone: 'teal' },
+  { name: 'Reference', tone: 'ochre' },
+  { name: 'Religious', tone: 'plum' },
+  { name: 'Poetry', tone: 'moss' }
+]
+const SORTS = [
+  { key: 'serial_no', label: 'Serial number' },
+  { key: 'title', label: 'Title' },
+  { key: 'author', label: 'Author' },
+  { key: 'category', label: 'Category' },
+  { key: 'genre', label: 'Genre' },
+  { key: 'year', label: 'Year' },
+  { key: 'publisher', label: 'Publisher' },
+  { key: 'language', label: 'Language' },
+  { key: 'accession_no', label: 'Accession number' },
+  { key: 'work_id', label: 'Work ID' }
+]
+const SCOPES = [
+  { key: 'all', label: 'Everything', param: 'q', hint: 'Title, author, call no., ISBN, accession...' },
+  { key: 'title', label: 'Title', param: 'title', hint: 'Search titles...' },
+  { key: 'author', label: 'Author', param: 'author', hint: 'Search authors...' }
+]
+const FALLBACK_LANGUAGES = ['Malayalam', 'English', 'Multi -Lingual', 'Malay', 'Russian', 'Arabic', 'Marathi', 'German', 'Tamil']
+const PREF_KEY = 'athenaeum_catalogue_prefs'
+
+// ---------- state ----------
+const books = ref([])
+const total = ref(0)
+const grandTotal = ref(null)
+const loading = ref(true)
+const error = ref('')
+const exporting = ref(false)
+const exportProgress = ref('')
+const filtersOpen = ref(false)
+const copied = ref('')
+const searchEl = ref(null)
+const rootEl = ref(null)
+const isDark = ref(false)
+const listEl = ref(null)
+
+const text = ref('')
+const debouncedText = ref('')
+const scope = ref('all')
+const category = ref('')
+const language = ref('')
+const genre = ref('')
+const sortBy = ref('serial_no')
+const order = ref('asc')
+const pageSize = ref(15)
+const page = ref(1)
+const selectedSerial = ref(null)
+
+const facets = ref({})
+const facetAll = ref(null)
+const languages = ref(FALLBACK_LANGUAGES)
+const genres = ref([])
+const isWide = ref(true)
+
+// ---------- derived ----------
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const from = computed(() => (total.value ? (page.value - 1) * pageSize.value + 1 : 0))
+const to = computed(() => Math.min(page.value * pageSize.value, total.value))
+const term = computed(() => debouncedText.value.trim())
+const hasFilters = computed(() => Boolean(term.value || category.value || language.value || genre.value))
+const activeCount = computed(() => [term.value, category.value, language.value, genre.value].filter(Boolean).length)
+const scopeObj = computed(() => SCOPES.find(s => s.key === scope.value) || SCOPES[0])
+const scopePlaceholder = computed(() => scopeObj.value.hint)
+const scopeLabel = computed(() => scopeObj.value.label)
+const selectedBook = computed(() => books.value.find(b => b.serial_no === selectedSerial.value) || null)
+
+const pageNumbers = computed(() => {
+  const n = totalPages.value, c = page.value
+  if (n <= 7) return Array.from({ length: n }, (_, i) => i + 1)
+  const set = new Set([1, 2, n - 1, n, c - 1, c, c + 1].filter(p => p >= 1 && p <= n))
+  const sorted = [...set].sort((a, b) => a - b)
+  const out = []
+  sorted.forEach((p, i) => { if (i && p - sorted[i - 1] > 1) out.push(-1); out.push(p) })
+  return out
 })
 
-type Book = { serial_no: number; work_id?: string | number; id?: string | number; accession_no?: string | number; title?: string; author?: string; category?: string; shelf?: string; record_id?: string | number; [key: string]: unknown }
-type SortKey = 'serial_no' | 'work_id' | 'accession_no' | 'title' | 'author' | 'category' | 'shelf' | 'record_id'
-const router = useRouter()
-const authStore = useAuthStore()
-const books = ref<Book[]>([])
-const loading = ref(true)
-const totalBooks = ref(0)
-const currentPage = ref(1)
-const itemsPerPage = ref(15)
-const theme = ref('command')
-const selectedSerial = ref<number | null>(null)
-const proSelected = ref<Book | null>(null)
-const selectedBook = computed(() => filteredBooks.value.find(book => book.serial_no === selectedSerial.value) || filteredBooks.value[0] || null)
-const filters = ref({ category: '', author: '', shelf: '' })
-const searchQuery = ref('')
-const sortKey = ref<SortKey>('serial_no')
-const sortDirection = ref<'asc' | 'desc'>('asc')
-const totalPages = computed(() => Math.max(1, Math.ceil(totalBooks.value / itemsPerPage.value)))
-const uniqueValues = (key: 'category' | 'author' | 'shelf') => [...new Set(books.value.map(b => String(b[key] ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
-const categories = computed(() => uniqueValues('category'))
-const authors = computed(() => uniqueValues('author'))
-const shelves = computed(() => uniqueValues('shelf'))
-const categoryStats = computed(() => { const counts = new Map<string, number>(); books.value.forEach(book => { const name = String(book.category || 'Uncategorised'); counts.set(name, (counts.get(name) || 0) + 1) }); const max = Math.max(1, ...counts.values()); return [...counts.entries()].map(([name, count]) => ({ name, count, percent: Math.max(6, Math.round(count / max * 100)) })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)) })
-const authorStats = computed(() => { const counts = new Map<string, number>(); books.value.forEach(book => { const name = String(book.author || 'Author not recorded'); counts.set(name, (counts.get(name) || 0) + 1) }); return [...counts.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)).slice(0, 8) })
-const hasActiveFilters = computed(() => Boolean(filters.value.category || filters.value.author || filters.value.shelf))
-const filteredBooks = computed(() => books.value.filter(book => (!filters.value.category || String(book.category ?? '') === filters.value.category) && (!filters.value.author || String(book.author ?? '') === filters.value.author) && (!filters.value.shelf || String(book.shelf ?? '') === filters.value.shelf) && (!searchQuery.value.trim() || [book.title, book.author, book.category, book.accession_no, book.shelf, book.record_id].some(value => String(value ?? '').toLocaleLowerCase().includes(searchQuery.value.trim().toLocaleLowerCase())))).slice().sort((a, b) => {
-  const left = a[sortKey.value], right = b[sortKey.value]
-  const comparison = sortKey.value === 'serial_no' ? Number(left ?? 0) - Number(right ?? 0) : String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true, sensitivity: 'base' })
-  return sortDirection.value === 'asc' ? comparison : -comparison
-}))
-const visiblePages = computed(() => { const total = totalPages.value, current = currentPage.value, pages: number[] = []; if (total <= 7) { for (let i = 1; i <= total; i++) pages.push(i) } else { pages.push(1); if (current > 3) pages.push(-1); for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) if (!pages.includes(i)) pages.push(i); if (current < total - 2) pages.push(-1); if (!pages.includes(total)) pages.push(total) } return pages })
-async function fetchCatalogue() {
-  loading.value = true
-  try {
-    const token = authStore.accessToken || authStore.access_token
-    if (!token) { router.push('/login'); return }
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
-    const response = await axios.get(`${baseUrl}/catalogue/`, { params: { page: currentPage.value, limit: itemsPerPage.value, sort_by: 'serial_no', order: 'asc' }, headers: { Authorization: `Bearer ${token}` } })
-    books.value = response.data.data ?? []
-    totalBooks.value = response.data.total ?? 0
-  } catch (err: any) {
-    if (err.response?.status === 401) { books.value = []; totalBooks.value = 0; router.push('/login') }
-    else console.error('Failed to load catalogue records:', err)
-  } finally { loading.value = false }
+// ---------- helpers ----------
+const PLACEHOLDER_AUTHOR = /^(author|unknown|n\/a|-+)$/i
+function hasAuthor(b) {
+  const a = String((b && b.author) || '').trim()
+  return Boolean(a) && !PLACEHOLDER_AUTHOR.test(a)
 }
-function goToPage(page: number) { if (page >= 1 && page <= totalPages.value && page !== currentPage.value) { currentPage.value = page; fetchCatalogue() } }
-function viewBook(serialNo: number) { router.push(`/details/${serialNo}`) }
-function setSort(key: SortKey) { if (sortKey.value === key) toggleDirection(); else { sortKey.value = key; sortDirection.value = 'asc' } }
-function toggleDirection() { sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc' }
-function sortIndicator(key: SortKey) { return sortKey.value === key ? (sortDirection.value === 'asc' ? '↑' : '↓') : '↕' }
-function clearFilters() { filters.value = { category: '', author: '', shelf: '' }; searchQuery.value = '' }
-function exportCsv() {
-  const columns: (keyof Book)[] = ['serial_no', 'work_id', 'accession_no', 'title', 'author', 'category', 'shelf', 'record_id']
-  const escape = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`
-  const csv = [columns.join(','), ...filteredBooks.value.map(book => columns.map(key => escape(book[key])).join(','))].join('\r\n')
+function authorText(b) { return hasAuthor(b) ? String(b.author).trim() : 'Author not recorded' }
+function metaLine(b) {
+  const year = Number(b.year) > 0 ? String(b.year) : ''
+  return [b.genre, year, b.publisher].filter(v => v && String(v).trim()).join(' \u00b7 ')
+}
+
+function toneOf(name) {
+  const hit = CATEGORIES.find(c => c.name === name)
+  return hit ? hit.tone : 'none'
+}
+
+function parts(value) {
+  const str = String(value ?? '')
+  const q = term.value
+  if (!q) return [{ t: str, hit: false }]
+  const lower = str.toLowerCase(), needle = q.toLowerCase()
+  const out = []
+  let i = 0
+  while (i < str.length) {
+    const at = lower.indexOf(needle, i)
+    if (at === -1) { out.push({ t: str.slice(i), hit: false }); break }
+    if (at > i) out.push({ t: str.slice(i, at), hit: false })
+    out.push({ t: str.slice(at, at + needle.length), hit: true })
+    i = at + needle.length
+  }
+  return out.length ? out : [{ t: str, hit: false }]
+}
+
+function factsOf(b) {
+  const rows = [
+    ['Author', b.author], ['Genre', b.genre], ['Year', b.year], ['Publisher', b.publisher],
+    ['Original language', b.original_language], ['Translation / compilation', b.translation_compilation],
+    ['ISBN', b.isbn, true], ['DDC', b.ddc, true], ['Call no.', b.call_no, true],
+    ['Accession no.', b.accession_no, true], ['Serial no.', b.serial_no, true], ['Work ID', b.work_id, true],
+    ['Shelf', b.shelf, true]
+  ]
+  return rows
+    .filter(r => r[1] !== null && r[1] !== undefined && String(r[1]).trim() !== '' && r[0] !== 'Author' && !(r[0] === 'Year' && !(Number(r[1]) > 0)))
+    .map(r => ({ label: r[0], value: r[1], mono: Boolean(r[2]) }))
+}
+
+function baseParams(withCategory) {
+  const p = {}
+  if (term.value) p[scopeObj.value.param] = term.value
+  if (withCategory && category.value) p.category = category.value
+  if (language.value) p.language = language.value
+  if (genre.value) p.genre = genre.value
+  return p
+}
+
+function friendly(err) {
+  const status = err && err.response && err.response.status
+  if (status === 401) return 'Your session has expired. Please sign in again.'
+  if (status === 403) return 'You do not have permission to view the catalogue.'
+  if (status === 400) return (err.response.data && err.response.data.detail) || 'The server did not accept that search.'
+  return 'The catalogue could not be loaded. Check your connection and try again.'
+}
+
+// ---------- loading ----------
+let requestId = 0
+
+async function fetchPage() {
+  const id = ++requestId
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await axios.get('/catalogue', {
+      params: { ...baseParams(true), page: page.value, limit: pageSize.value, sort_by: sortBy.value, order: order.value }
+    })
+    if (id !== requestId) return
+    const data = res.data || {}
+    books.value = Array.isArray(data.data) ? data.data : []
+    total.value = Number(data.total || 0)
+    if (!books.value.some(b => b.serial_no === selectedSerial.value)) {
+      selectedSerial.value = isWide.value && books.value.length ? books.value[0].serial_no : null
+    }
+  } catch (err) {
+    if (id !== requestId) return
+    books.value = []
+    total.value = 0
+    error.value = friendly(err)
+    if (err && err.response && err.response.status === 401) router.push('/login')
+  } finally {
+    if (id === requestId) loading.value = false
+  }
+}
+
+let facetId = 0
+async function fetchFacets() {
+  const id = ++facetId
+  const base = { ...baseParams(false), page: 1, limit: 1 }
+  const calls = [axios.get('/catalogue', { params: base }), ...CATEGORIES.map(c => axios.get('/catalogue', { params: { ...base, category: c.name } }))]
+  const results = await Promise.allSettled(calls)
+  if (id !== facetId) return
+  const count = r => (r.status === 'fulfilled' ? Number((r.value.data || {}).total || 0) : undefined)
+  facetAll.value = count(results[0]) ?? null
+  const next = {}
+  CATEGORIES.forEach((c, i) => { next[c.name] = count(results[i + 1]) })
+  facets.value = next
+}
+
+async function fetchEverythingCount() {
+  try {
+    const res = await axios.get('/catalogue', { params: { page: 1, limit: 1 } })
+    grandTotal.value = Number((res.data || {}).total || 0)
+  } catch (e) { /* the header simply keeps showing ... */ }
+}
+
+async function fetchOptions() {
+  try {
+    const res = await axios.get('/catalogue/review/field-options')
+    const d = res.data || {}
+    if (Array.isArray(d.languages) && d.languages.length) languages.value = d.languages
+    if (Array.isArray(d.genres)) genres.value = d.genres
+  } catch (e) { /* other roles keep the built-in language list */ }
+}
+
+function reload() { fetchPage(); fetchFacets() }
+
+// ---------- actions ----------
+function goTo(n) {
+  if (n < 1 || n > totalPages.value || n === page.value) return
+  page.value = n
+  fetchPage()
+  nextTick(() => { if (listEl.value) listEl.value.scrollIntoView({ block: 'start', behavior: 'smooth' }) })
+}
+function pick(book) {
+  if (isWide.value) selectedSerial.value = book.serial_no
+  else openBook(book)
+}
+function openBook(book) { router.push('/details/' + book.serial_no) }
+function clearSearch() { text.value = ''; debouncedText.value = '' }
+function clearAll() { clearSearch(); category.value = ''; language.value = ''; genre.value = '' }
+
+async function copy(value, key) {
+  try {
+    await navigator.clipboard.writeText(String(value))
+    copied.value = key
+    setTimeout(() => { if (copied.value === key) copied.value = '' }, 1600)
+  } catch (e) { copied.value = '' }
+}
+
+function onListKey(e) {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return
+  const idx = books.value.findIndex(b => b.serial_no === selectedSerial.value)
+  if (e.key === 'Enter') {
+    if (idx >= 0 && e.target && e.target.classList && e.target.classList.contains('row')) { e.preventDefault(); openBook(books.value[idx]) }
+    return
+  }
+  e.preventDefault()
+  const nextIdx = Math.min(books.value.length - 1, Math.max(0, idx + (e.key === 'ArrowDown' ? 1 : -1)))
+  selectedSerial.value = books.value[nextIdx].serial_no
+  nextTick(() => {
+    const rows = listEl.value ? listEl.value.querySelectorAll('.row') : []
+    if (rows[nextIdx]) rows[nextIdx].focus()
+  })
+}
+
+function onGlobalKey(e) {
+  const tag = (e.target && e.target.tagName) || ''
+  if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) {
+    e.preventDefault()
+    filtersOpen.value = true
+    nextTick(() => searchEl.value && searchEl.value.focus())
+  }
+}
+
+// ---------- export ----------
+function csvEscape(v) { return '"' + String(v ?? '').replace(/"/g, '""') + '"' }
+
+async function exportCsv(all) {
+  const columns = ['serial_no', 'work_id', 'accession_no', 'title', 'author', 'category', 'genre', 'language', 'year', 'publisher', 'isbn', 'ddc', 'call_no', 'shelf', 'record_id']
+  let rows = books.value
+  if (all) {
+    exporting.value = true
+    rows = []
+    try {
+      const cap = 5000
+      for (let p = 1; rows.length < Math.min(total.value, cap); p++) {
+        exportProgress.value = rows.length + ' / ' + Math.min(total.value, cap)
+        const res = await axios.get('/catalogue', { params: { ...baseParams(true), page: p, limit: 100, sort_by: sortBy.value, order: order.value } })
+        const chunk = (res.data && res.data.data) || []
+        if (!chunk.length) break
+        rows = rows.concat(chunk)
+      }
+    } catch (err) {
+      error.value = 'The export stopped early: ' + friendly(err)
+    } finally { exporting.value = false; exportProgress.value = '' }
+  }
+  if (!rows.length) return
+  const csv = [columns.join(','), ...rows.map(r => columns.map(k => csvEscape(r[k])).join(','))].join('\r\n')
   const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
-  const link = document.createElement('a'); link.href = url; link.download = `catalogue-page-${currentPage.value}.csv`; link.click(); URL.revokeObjectURL(url)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = all ? 'catalogue-matches.csv' : 'catalogue-page-' + page.value + '.csv'
+  a.click()
+  URL.revokeObjectURL(url)
 }
-onMounted(fetchCatalogue)
+
+// ---------- remember state (URL + preferences) ----------
+function syncUrl() {
+  const q = {}
+  if (term.value) q.q = term.value
+  if (scope.value !== 'all') q.in = scope.value
+  if (category.value) q.cat = category.value
+  if (language.value) q.lang = language.value
+  if (genre.value) q.genre = genre.value
+  if (sortBy.value !== 'serial_no') q.sort = sortBy.value
+  if (order.value !== 'asc') q.order = order.value
+  if (page.value > 1) q.page = String(page.value)
+  if (pageSize.value !== 15) q.size = String(pageSize.value)
+  router.replace({ query: q }).catch(() => {})
+}
+function savePrefs() {
+  try { localStorage.setItem(PREF_KEY, JSON.stringify({ pageSize: pageSize.value, sortBy: sortBy.value, order: order.value })) } catch (e) { /* storage unavailable */ }
+}
+function loadState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PREF_KEY) || '{}')
+    if ([15, 30, 60, 100].includes(saved.pageSize)) pageSize.value = saved.pageSize
+    if (SORTS.some(s => s.key === saved.sortBy)) sortBy.value = saved.sortBy
+    if (saved.order === 'asc' || saved.order === 'desc') order.value = saved.order
+  } catch (e) { /* ignore broken preferences */ }
+  const q = route.query
+  const one = v => (Array.isArray(v) ? v[0] : v) || ''
+  if (one(q.q)) { text.value = one(q.q); debouncedText.value = one(q.q) }
+  if (SCOPES.some(s => s.key === one(q.in))) scope.value = one(q.in)
+  if (CATEGORIES.some(c => c.name === one(q.cat))) category.value = one(q.cat)
+  language.value = one(q.lang)
+  genre.value = one(q.genre)
+  if (SORTS.some(s => s.key === one(q.sort))) sortBy.value = one(q.sort)
+  if (one(q.order) === 'asc' || one(q.order) === 'desc') order.value = one(q.order)
+  if ([15, 30, 60, 100].includes(Number(one(q.size)))) pageSize.value = Number(one(q.size))
+  const p = parseInt(one(q.page), 10)
+  if (p > 0) page.value = p
+}
+
+// ---------- reactions ----------
+let debounceTimer = null
+watch(text, v => {
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => { debouncedText.value = v }, 350)
+})
+
+let ready = false
+watch([debouncedText, scope, category, language, genre, sortBy, order, pageSize], (now, before) => {
+  if (!ready) return
+  const facetsChanged = now[0] !== before[0] || now[1] !== before[1] || now[3] !== before[3] || now[4] !== before[4]
+  page.value = 1
+  fetchPage()
+  if (facetsChanged) fetchFacets()
+  savePrefs()
+  syncUrl()
+})
+watch(page, () => { if (ready) syncUrl() })
+
+function channelsOf(css) {
+  const m = String(css).match(/rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)(?:[ ,/]+([\d.]+))?/)
+  return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null
+}
+function detectDark() {
+  const html = document.documentElement
+  const body = document.body
+  const hints = [html.getAttribute('data-theme'), body && body.getAttribute('data-theme'), html.className, body && body.className].join(' ').toLowerCase()
+  if (/(^|[^a-z])(dark|night)([^a-z]|$)/.test(hints)) { isDark.value = true; return }
+  // otherwise look at the colour the app paints behind this page
+  let el = rootEl.value ? rootEl.value.parentElement : null
+  while (el) {
+    const c = channelsOf(getComputedStyle(el).backgroundColor)
+    if (c && c.a > 0.5) { isDark.value = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) < 115; return }
+    el = el.parentElement
+  }
+  isDark.value = false
+}
+let themeObserver = null
+function watchTheme() {
+  detectDark()
+  themeObserver = new MutationObserver(records => {
+    if (records.some(r => r.target.contains(rootEl.value) && r.target !== rootEl.value)) requestAnimationFrame(detectDark)
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ['class', 'data-theme', 'style'] })
+}
+
+function onResize() { isWide.value = window.matchMedia('(min-width: 1200px)').matches }
+
+onMounted(async () => {
+  onResize()
+  watchTheme()
+  window.addEventListener('resize', onResize)
+  window.addEventListener('keydown', onGlobalKey)
+  loadState()
+  await fetchPage()
+  ready = true
+  fetchFacets()
+  fetchEverythingCount()
+  fetchOptions()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('keydown', onGlobalKey)
+  clearTimeout(debounceTimer)
+  if (themeObserver) themeObserver.disconnect()
+})
 </script>
 
 <style scoped>
-.catalogue-page{min-height:100%;width:100%;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:var(--page);--page:#f3f5f6;--surface:#fff;--ink:#202724;--muted:#747e79;--line:#e2e7e4;--accent:#286447;--accent-soft:#e5f1e9;--soft:#f7f9f8}*{box-sizing:border-box}button,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}select{border:1px solid var(--line);border-radius:6px;padding:9px 30px 9px 10px;background:var(--surface);color:var(--ink);max-width:100%}.eyebrow{font-size:10px;letter-spacing:1.8px;font-weight:700;color:var(--muted);margin:0 0 12px}.theme-picker{display:flex;flex-direction:column;gap:5px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}.theme-picker select{font-size:12px;text-transform:none;letter-spacing:0;min-width:155px}.empty-state{padding:44px 18px;text-align:center;color:var(--muted)}.pagination-controls{display:flex;gap:5px;align-items:center;flex-wrap:wrap}.pagination-controls :deep(button){min-width:31px;height:31px;padding:0 8px;border:1px solid var(--line);border-radius:5px;background:var(--surface);color:var(--ink);font-size:12px}.pagination-controls :deep(button.active){background:var(--accent);border-color:var(--accent);color:white}.pagination-controls :deep(button:disabled){opacity:.35}.pagination-controls :deep(.page-ellipsis){padding:0 4px;color:var(--muted)}
-/* PREMIUM LIBRARY: parchment, burgundy ink, serif title, left archive rail, folio records. */
-.theme-premium{--page:#eee8dd;--surface:#f8f4ec;--ink:#292721;--muted:#80766b;--line:#d8cec0;--accent:#74413e;--accent-soft:#eadbd7;--soft:#f2ece2;font-family:Georgia,'Times New Roman',serif;display:grid;grid-template-columns:235px minmax(0,1fr);background:#eee8dd}.premium-rail{background:#292a25;color:#f3ede2;padding:30px 24px;display:flex;flex-direction:column;min-height:100%;}.rail-monogram{width:43px;height:43px;border:1px solid #bda99b;border-radius:50%;display:grid;place-items:center;font-size:13px;letter-spacing:2px}.rail-kicker{font:700 9px Arial,sans-serif;letter-spacing:2px;color:#c2afa0;margin:25px 0 12px}.premium-rail h1{font-size:34px;line-height:1.05;font-weight:400;margin:0}.rail-rule{height:1px;background:#5b5750;margin:28px 0}.rail-label{font:700 9px Arial,sans-serif;letter-spacing:2px;color:#c2afa0;margin:0 0 7px}.rail-total{font-size:44px;margin:0}.rail-caption{font:12px Arial,sans-serif;color:#b8b0a4;margin:0}.rail-bottom{margin-top:auto;padding-top:35px;display:grid;gap:15px}.theme-premium .theme-picker{color:#b8b0a4}.theme-premium .theme-picker select{background:#373831;color:#f3ede2;border-color:#625c53;border-radius:0}.premium-export{border:1px solid #887268;background:transparent;color:#f3ede2;padding:12px;text-align:left;font-size:12px}.premium-main{padding:42px clamp(24px,4vw,62px) 28px;min-width:0}.premium-heading{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;padding-bottom:28px;border-bottom:1px solid var(--line)}.premium-heading .eyebrow{font:700 9px Arial,sans-serif;letter-spacing:2px}.premium-heading h2{font-size:clamp(34px,4vw,52px);font-weight:400;letter-spacing:-1.5px;margin:0}.heading-note{font:13px Arial,sans-serif;color:var(--muted);margin:10px 0 0}.folio-count{text-align:right;white-space:nowrap}.folio-count span{display:block;font:700 9px Arial,sans-serif;letter-spacing:2px;color:var(--muted)}.folio-count strong{font-size:34px;font-weight:400}.folio-count i{font-size:14px;color:var(--muted);font-style:normal}.premium-controls{display:flex;align-items:end;gap:12px;padding:20px 0;border-bottom:1px solid var(--line);flex-wrap:wrap}.control-title{display:flex;align-items:center;gap:9px;margin-right:auto;min-width:145px;padding-bottom:9px}.control-title span{font-size:11px;color:var(--accent)}.control-title strong{font-size:15px;font-weight:400}.premium-controls label,.minimal-filters label{display:flex;flex-direction:column;gap:6px;font:10px Arial,sans-serif;color:var(--muted)}.premium-controls select{border-radius:0;background:transparent;border-color:#cfc3b4;min-width:125px;font-size:12px}.text-action{background:none;border:0;color:var(--accent);font-size:12px;padding:10px 0}.premium-list-heading{display:flex;justify-content:space-between;gap:15px;align-items:center;padding:22px 0 10px;font:700 9px Arial,sans-serif;letter-spacing:1.7px;color:var(--muted)}.premium-list-heading label{display:flex;align-items:center;gap:7px;letter-spacing:0;font-weight:400}.premium-list-heading select{font:12px Arial,sans-serif;background:transparent;border-radius:0;padding:5px;border-color:var(--line)}.direction-button{background:transparent;border:1px solid var(--line);padding:4px 8px;color:var(--accent)}.folio-list{border-top:1px solid var(--line)}.folio{display:grid;grid-template-columns:48px minmax(150px,1fr) minmax(110px,180px) 20px;gap:18px;align-items:center;text-align:left;width:100%;padding:19px 8px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink)}.folio:hover{background:#e7ded1}.folio-index{font:12px Arial,sans-serif;color:#98897b}.folio-copy{display:grid;gap:5px;min-width:0}.folio-copy strong{font-size:18px;font-weight:400;overflow-wrap:anywhere}.folio-copy>span{font:12px Arial,sans-serif;color:#665e55}.folio-copy small{font:10px Arial,sans-serif;color:var(--muted)}.folio-copy i{font-style:normal;padding:0 4px}.folio-accession{display:grid;gap:4px;text-align:right}.folio-accession small{font:8px Arial,sans-serif;letter-spacing:1.1px;color:var(--muted)}.folio-accession strong{font:12px Arial,sans-serif;color:var(--accent)}.folio-arrow{color:var(--accent);font-size:18px}.premium-footer,.modern-footer,.minimal-footer{display:flex;justify-content:space-between;align-items:center;gap:14px;padding-top:20px;color:var(--muted);font:11px Arial,sans-serif;flex-wrap:wrap}
-/* MODERN DASHBOARD: cool neutral canvas, green accent, KPI cards, compact sortable table. */
-.theme-modern{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f2f4f3;--page:#f2f4f3;--surface:#fff;--ink:#202724;--muted:#747e79;--line:#e2e7e4;--accent:#286447;--accent-soft:#e5f1e9;--soft:#f7f9f8;padding:30px clamp(16px,3vw,44px)}.modern-main{max-width:1600px;margin:0 auto}.modern-header{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;flex-wrap:wrap;margin-bottom:25px}.modern-header h1{font-size:clamp(28px,3vw,39px);letter-spacing:-1.2px;margin:0;font-weight:700}.modern-header p:not(.eyebrow){color:var(--muted);font-size:13px;margin:8px 0 0}.modern-header .eyebrow span{padding:0 7px;color:#b0b9b4}.modern-actions{display:flex;align-items:end;gap:12px}.modern-export{background:#286447;color:white;border:1px solid #286447;border-radius:7px;padding:11px 15px;font-size:12px;font-weight:600}.modern-export span{padding-left:8px}.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:22px}.metric-card{position:relative;overflow:hidden;background:#fff;border:1px solid #e1e6e2;border-radius:10px;padding:20px;min-height:130px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}.metric-card>span{font-size:9px;font-weight:700;letter-spacing:1.2px;color:#78827c}.metric-card>strong{font-size:32px;line-height:1.1;font-weight:650;letter-spacing:-1px}.metric-card>strong small{font-size:14px;letter-spacing:0;color:#8b958f;font-weight:500}.metric-card>small{font-size:11px;color:#89928d}.metric-feature{background:#244d3a;color:white;border-color:#244d3a}.metric-feature>span,.metric-feature>small{color:#d1e0d6}.metric-decoration{position:absolute;right:20px;bottom:8px;font-size:62px;color:#ffffff18}.modern-panel{background:#fff;border:1px solid #e0e5e2;border-radius:10px;overflow:hidden}.panel-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:22px 22px 17px}.panel-heading h2{font-size:17px;margin:0}.panel-heading p{font-size:11px;color:var(--muted);margin:6px 0 0}.clear-button{background:white;border:1px solid var(--line);border-radius:6px;padding:8px 11px;font-size:11px;color:var(--ink)}.modern-filterbar{display:flex;align-items:end;gap:12px;flex-wrap:wrap;background:#f8faf9;border-top:1px solid #edf0ee;border-bottom:1px solid #e6ebe8;padding:14px 22px}.modern-filterbar label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:10px}.modern-filterbar select{min-width:145px;border-color:#dfe5e1;border-radius:6px;padding:8px 28px 8px 10px;font-size:11px}.result-chip{margin-left:auto;background:#e5f1e9;color:#286447;border-radius:20px;padding:7px 10px;font-size:10px;font-weight:700}.modern-table-wrap{overflow:auto}.modern-table{width:100%;border-collapse:collapse;white-space:nowrap;font-size:11px}.modern-table th{text-align:left;padding:13px 12px;background:#fff;border-bottom:1px solid #e5e9e6;color:#7b857f;font-size:9px;letter-spacing:.3px}.modern-table th:first-child,.modern-table td:first-child{padding-left:22px}.modern-table th button{border:0;background:transparent;color:inherit;font:inherit;padding:0;cursor:pointer}.modern-table td{padding:14px 12px;border-bottom:1px solid #edf0ee;color:#4d5852}.modern-table tbody tr{cursor:pointer}.modern-table tbody tr:hover{background:#f5faf6}.modern-table tbody tr:last-child td{border-bottom:0}.modern-table .number-cell{color:#8a948e}.modern-table .modern-title{color:#202724;font-weight:600;max-width:260px;overflow:hidden;text-overflow:ellipsis}.modern-code{font-family:ui-monospace,SFMono-Regular,monospace;background:#f1f4f2;padding:5px 6px;border-radius:4px;color:#4e5c53}.modern-category{display:inline-block;background:#e8f2eb;color:#286447;padding:5px 7px;border-radius:4px;font-size:10px}.modern-footer{padding:15px 22px;border-top:1px solid #e9edea}
-/* ELECTRIC POP: saturated violet, coral and acid-lime accents with a playful dashboard treatment. */
-.theme-electric{--page:#f6efff;--surface:#fff;--ink:#29133f;--muted:#795f8c;--line:#e5d7f3;--accent:#fa4778;--accent-soft:#efff75;--soft:#fff8fc;background:radial-gradient(ellipse at 7% 0%,#e7d4ff 0,transparent 31%),radial-gradient(ellipse at 95% 9%,#ffd6df 0,transparent 24%),#f8f2ff;padding:30px clamp(16px,3vw,44px);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#29133f}
-.theme-electric .eyebrow{color:#a04479;letter-spacing:2.1px}
-.theme-electric .modern-header h1{font-size:clamp(34px,4vw,50px);letter-spacing:-2px;font-weight:850;color:#29133f}
-.theme-electric .modern-header p:not(.eyebrow){color:#795f8c}
-.theme-electric .theme-picker{color:#795f8c}
-.theme-electric .theme-picker select{border:1px solid #dfc7f3;background:#fff;border-radius:12px;color:#29133f;padding:11px 32px 11px 12px;box-shadow:0 4px 0 #e9dbf5}
-.theme-electric .modern-export{background:#fa4778;border:2px solid #fa4778;border-radius:12px;padding:12px 17px;color:#fff;box-shadow:0 5px 0 #c62e61;transition:transform .16s,box-shadow .16s}
-.theme-electric .modern-export:hover{transform:translateY(2px);box-shadow:0 3px 0 #c62e61}
-.theme-electric .metric-grid{gap:16px}
-.theme-electric .metric-card{border:0;border-radius:20px;padding:22px;min-height:145px;box-shadow:0 8px 0 #e9dcf4,0 14px 30px #6d3c8510;gap:10px}
-.theme-electric .metric-card:nth-child(1){background:#702be0;color:#fff;box-shadow:0 8px 0 #4c1aa5,0 14px 30px #6d3c8520}
-.theme-electric .metric-card:nth-child(1)>span,.theme-electric .metric-card:nth-child(1)>small{color:#e9d9ff}
-.theme-electric .metric-card:nth-child(2){background:#ffcfdf;color:#5a2044}
-.theme-electric .metric-card:nth-child(2)>span,.theme-electric .metric-card:nth-child(2)>small{color:#8b3d69}
-.theme-electric .metric-card:nth-child(3){background:#efff75;color:#302b18}
-.theme-electric .metric-card:nth-child(3)>span,.theme-electric .metric-card:nth-child(3)>small{color:#5f5a29}
-.theme-electric .metric-card:nth-child(4){background:#ff8a54;color:#4b1f2d}
-.theme-electric .metric-card:nth-child(4)>span,.theme-electric .metric-card:nth-child(4)>small{color:#7d2d43}
-.theme-electric .metric-card>span{font-size:10px;letter-spacing:1.4px;font-weight:800}
-.theme-electric .metric-card>strong{font-size:38px;font-weight:850;letter-spacing:-1.5px}
-.theme-electric .metric-card>small{font-size:12px}
-.theme-electric .metric-decoration{font-size:75px;right:17px;bottom:0;color:#ffffff30}
-.theme-electric .modern-panel{border:2px solid #e6d4f4;border-radius:22px;box-shadow:0 10px 0 #e9dcf4;overflow:hidden}
-.theme-electric .panel-heading{padding:24px 24px 20px}
-.theme-electric .panel-heading h2{font-size:21px;font-weight:800;letter-spacing:-.5px;color:#29133f}
-.theme-electric .panel-heading p{font-size:12px;color:#795f8c}
-.theme-electric .clear-button{border:1px solid #dfc7f3;border-radius:10px;background:#fff7fc;color:#6e398c;padding:9px 13px;font-weight:700}
-.theme-electric .modern-filterbar{background:#f2e6ff;border-top:1px solid #e6d4f4;border-bottom:1px solid #e6d4f4;padding:17px 24px;gap:14px}
-.theme-electric .modern-filterbar label{font-size:10px;font-weight:750;color:#795f8c}
-.theme-electric .modern-filterbar select{border:1px solid #dfc7f3;border-radius:10px;padding:10px 30px 10px 12px;background:#fff;color:#29133f;min-width:150px}
-.theme-electric .result-chip{background:#efff75;color:#3b3210;border-radius:10px;padding:10px 13px;font-size:11px}
-.theme-electric .modern-table{font-size:12px}
-.theme-electric .modern-table th{background:#35134f;color:#e9d9ff;border-bottom:0;padding:15px 12px;font-size:10px;letter-spacing:.6px}
-.theme-electric .modern-table th button{color:#e9d9ff}
-.theme-electric .modern-table td{padding:16px 12px;border-bottom:1px solid #f0e7f8;color:#634d70}
-.theme-electric .modern-table tbody tr:nth-child(even){background:#fff9fd}
-.theme-electric .modern-table tbody tr:hover{background:#efff75}
-.theme-electric .modern-table .modern-title{color:#29133f;font-weight:750}
-.theme-electric .modern-code{background:#f2e6ff;color:#702be0;border-radius:7px;font-weight:700}
-.theme-electric .modern-category{background:#ffcfdf;color:#9d2456;border-radius:7px;font-weight:750;padding:6px 9px}
-.theme-electric .modern-footer{padding:18px 24px;border-top:1px solid #eadcf5;background:#fffafd;color:#795f8c}
-.theme-electric .pagination-controls :deep(button){border:1px solid #dfc7f3;border-radius:9px;background:#fff;color:#55246e;font-weight:700}
-.theme-electric .pagination-controls :deep(button.active){background:#702be0;border-color:#702be0;color:#fff}
-.theme-electric .empty-state{color:#795f8c}
-/* ELECTRIC POP DISCOVERY: a visual bookshelf, theatrical hero and filter rail; intentionally not a table layout. */
-.theme-electric{padding:0;background:#fbf4ff;color:#29133f;--page:#fbf4ff;--surface:#fff;--ink:#29133f;--muted:#7b648c;--line:#eadcf5;--accent:#702be0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-
-
-
-.theme-electric .metric-card {
-  border: 0;
-  border-radius: 20px;
-  padding: 8px 14px;
-  min-height: 78px;
-  box-shadow: 0 8px 0 #e9dcf4, 0 14px 30px #6d3c8510;
-  gap: 4px;
+/* ===== design tokens: warm paper, forest ink, brass accents ===== */
+.cat {
+  --paper: #f5f0e4; --card: #fffdf7; --ink: #23312b; --muted: #6f776f; --line: #ddd4c1;
+  --forest: #2f5d46; --forest-ink: #ffffff; --brass: #b08d3c; --soft: #ece5d3; --focus: #b08d3c;
+  --rust: #b4533a; --teal: #2a7d74; --ochre: #9a7a1f; --plum: #7a4b8c; --moss: #4d7a3a; --none: #8b8b80;
+  min-height: 100%; box-sizing: border-box; padding: 26px clamp(14px, 2.4vw, 36px) 40px;
+  background: var(--paper); color: var(--ink); font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
 }
+.cat.dark, :global(html[data-theme='dark']) .cat {
+  --paper: #121a16; --card: #1a2520; --ink: #e9efe9; --muted: #98a59c; --line: #2c3a32;
+  --forest: #7cc79b; --forest-ink: #0d1a12; --brass: #d3b25f; --soft: #22302a; --focus: #d3b25f;
+  --rust: #e08a70; --teal: #5cc4b8; --ochre: #d9b84f; --plum: #c39ad6; --moss: #93c77c; --none: #98a59c;
+}
+.cat *, .cat *::before, .cat *::after { box-sizing: border-box; }
+.cat button, .cat input, .cat select { font: inherit; color: inherit; }
+.cat h1, .cat h2, .cat h3, .cat p, .cat strong, .cat dd, .cat dt { color: inherit; }
+.cat { --serif: Georgia, 'Noto Serif Malayalam', 'Nirmala UI', 'Kartika', 'Times New Roman', serif; }
+.cat :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tone-rust { --tone: var(--rust); } .tone-teal { --tone: var(--teal); } .tone-ochre { --tone: var(--ochre); }
+.tone-plum { --tone: var(--plum); } .tone-moss { --tone: var(--moss); } .tone-none { --tone: var(--none); }
 
-.theme-electric .metric-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  max-width: 600px;
-  margin-inline: auto;
-}
-.theme-electric .metric-grid {
-  display: none !important;
-}
+/* ===== header ===== */
+.cat-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; padding-bottom: 20px; border-bottom: 2px solid var(--ink); }
+.eyebrow { margin: 0 0 6px; font-size: 11px; letter-spacing: .18em; font-weight: 700; color: var(--brass); }
+.cat-head h1 { margin: 0; font: 400 clamp(34px, 4.4vw, 54px)/1 var(--serif); letter-spacing: -.02em; color: var(--ink); }
+.sub { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+.sub strong { color: var(--ink); }
+.head-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.filters-toggle { display: none; }
+.badge { margin-left: 8px; background: var(--forest); color: var(--forest-ink); border-radius: 99px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
 
+.btn { border: 1px solid var(--line); background: var(--card); padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: transform .15s, filter .15s, background .15s; }
+.btn.solid { background: var(--forest); color: var(--forest-ink); border-color: var(--forest); }
+.btn.ghost:hover:not(:disabled) { background: var(--soft); }
+.btn:hover:not(:disabled) { transform: translateY(-1px); }
+.btn:active:not(:disabled) { transform: translateY(1px) scale(.98); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.wide { width: 100%; }
 
-.electric-main{max-width:1800px;margin:0 auto;padding:0 clamp(16px,4vw,64px) 28px;overflow:hidden}.electric-topbar{min-height:86px;display:flex;justify-content:space-between;align-items:center;gap:20px;border-bottom:1px solid #eadcf5}.electric-brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:#29133f;font-size:16px;font-weight:950;letter-spacing:-.7px}.electric-brand>span:last-child{display:flex;flex-direction:column;line-height:1.05}.electric-brand small{font-size:8px;letter-spacing:1.8px;color:#8d749f;margin-top:5px}.brand-mark{display:grid;place-items:center;width:41px;height:41px;border-radius:13px;background:#efff75;color:#35134f;font-size:19px;transform:rotate(-5deg);box-shadow:3px 3px 0 #29133f}.brand-dot{color:#fa4778}.electric-top-actions{display:flex;align-items:center;gap:14px}.collection-pill{font-size:9px;font-weight:850;letter-spacing:1px;background:#e9d9ff;color:#702be0;border-radius:999px;padding:10px 13px}.theme-electric .theme-picker{font-size:9px;color:#795f8c}.theme-electric .theme-picker select{min-width:135px;padding:9px 25px 9px 10px;border:1px solid #dfc7f3;border-radius:10px;background:white;box-shadow:none;font-size:11px}.electric-export{border:0;border-radius:10px;padding:12px 15px;background:#fa4778;color:white;font-size:11px;font-weight:850;box-shadow:0 4px 0 #c62e61}.electric-hero{min-height:365px;margin:22px 0 28px;background:#702be0;border-radius:27px;display:grid;grid-template-columns:1.05fr .95fr;position:relative;overflow:hidden;color:white;box-shadow:0 9px 0 #e7d8f5}.hero-copy{padding:clamp(28px,4vw,55px);position:relative;z-index:2}.hero-kicker{font-size:9px;letter-spacing:1.7px;font-weight:850;color:#e4d2ff;margin:0 0 17px}.hero-spark{color:#efff75;font-size:16px;margin-right:8px}.hero-copy h1{font-size:clamp(44px,6vw,76px);letter-spacing:-4.5px;line-height:.91;margin:0;font-weight:950}.hero-copy h1 span{color:#efff75}.hero-copy>p:not(.hero-kicker){font-size:12px;line-height:1.7;color:#e8d8ff;max-width:400px;margin:17px 0}.electric-search{display:flex;align-items:center;gap:12px;background:#fff;border:3px solid #29133f;border-radius:14px;box-shadow:5px 5px 0 #29133f;max-width:590px;padding:0 13px;height:53px;color:#702be0}.electric-search>span{font-size:27px;line-height:1}.electric-search input{width:100%;min-width:0;border:0;outline:0;background:transparent;color:#29133f;font-size:12px}.electric-search input::placeholder{color:#a08cac}.electric-search kbd{background:#f1e6fc;border-radius:6px;padding:4px 6px;color:#86699c;font-size:10px}.hero-tags{display:flex;gap:15px;flex-wrap:wrap;margin-top:18px;font-size:9px;color:#e8d8ff;font-weight:650}.hero-art{position:relative;min-height:320px;overflow:hidden}.orbit{position:absolute;border:1px solid #ffffff3d;border-radius:50%;width:340px;height:340px;top:13px;left:50%;transform:translateX(-50%)}.orbit-two{width:260px;height:260px;top:53px}.art-star{position:absolute;color:#efff75;font-size:39px}.star-one{top:32px;left:19%}.star-two{right:16%;top:80px;color:#ffcfdf;font-size:30px}.hero-book{position:absolute;display:flex;flex-direction:column;justify-content:space-between;padding:20px 17px;box-shadow:10px 13px 0 #35134f50;border:2px solid #29133f;border-radius:5px 12px 12px 5px;width:145px;height:215px;top:67px;left:calc(50% - 93px);transform:rotate(-12deg);text-align:left}.hero-book span{font-size:25px;line-height:.94;font-weight:950;letter-spacing:-1.5px}.hero-book small{font-size:7px;letter-spacing:1px;font-weight:850}.book-back{background:#ff8a54;color:#4b1f2d;left:calc(50% + 18px);top:84px;transform:rotate(12deg)}.book-front{background:#efff75;color:#35134f}.book-front span i{font-style:normal;color:#fa4778}.art-sticker{position:absolute;right:7%;bottom:26px;background:#fa4778;border:2px solid #29133f;border-radius:50%;width:91px;height:91px;display:grid;place-content:center;text-align:center;font-size:10px;line-height:1.2;font-weight:950;transform:rotate(10deg);box-shadow:3px 4px 0 #35134f}.electric-body{display:grid;grid-template-columns:220px minmax(0,1fr);gap:27px;align-items:start}.electric-sidebar{background:#fff;border:1px solid #eadcf5;border-radius:19px;padding:20px;position:sticky;top:16px;box-shadow:0 5px 0 #e9dcf4}.sidebar-title{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-bottom:17px;border-bottom:1px solid #f0e6f8;font-size:10px;letter-spacing:1px;font-weight:900}.sidebar-title button{border:0;background:transparent;color:#fa4778;font-size:10px;font-weight:800}.filter-group{display:grid;gap:8px;padding:17px 0;border-bottom:1px solid #f0e6f8}.filter-group label{display:flex;justify-content:space-between;font-size:11px;font-weight:800;color:#402154}.filter-group label span{color:#b6a2c7;font-size:9px}.filter-group select{width:100%;border:1px solid #e4d4f1;border-radius:9px;background:#fcf9ff;padding:10px 24px 10px 10px;font-size:11px;color:#4f3064}.sidebar-note{display:grid;gap:10px;margin-top:18px;padding:15px;border-radius:13px;background:#efff75;color:#342a16}.sidebar-note>span{font-size:24px;color:#fa4778}.sidebar-note strong{font-size:14px;line-height:1.2}.sidebar-note small{font-size:10px;line-height:1.6;color:#65562e}.electric-results{min-width:0}.results-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:15px;flex-wrap:wrap;margin:0 0 17px}.results-eyebrow{font-size:9px;letter-spacing:1.8px;font-weight:900;color:#fa4778;margin:0 0 7px}.results-heading h2{font-size:clamp(24px,3vw,36px);letter-spacing:-1.8px;line-height:1.1;margin:0;font-weight:950}.results-heading h2 span{color:#fa4778}.results-heading p:not(.results-eyebrow){font-size:11px;color:#876b99;margin:8px 0 0}.electric-sort{display:flex;align-items:center;gap:7px}.electric-sort>span{font-size:8px;font-weight:900;letter-spacing:1px;color:#9479a5}.electric-sort select{border:1px solid #e4d4f1;border-radius:9px;padding:9px 26px 9px 9px;background:white;font-size:10px}.electric-sort button{width:34px;height:34px;border:0;border-radius:9px;background:#efff75;color:#352d12;font-size:18px;font-weight:900}.book-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:17px}.book-card{min-width:0;text-align:left;border:1px solid #eadcf5;border-radius:17px;background:#fff;padding:12px;color:#29133f;box-shadow:0 5px 0 #e9dcf4;transition:transform .18s,box-shadow .18s;overflow:hidden}.book-card:hover{transform:translateY(-5px) rotate(-.5deg);box-shadow:0 10px 0 #e9dcf4}.card-topline{display:flex;align-items:center;justify-content:space-between;padding:0 2px 10px}.card-number{font-size:9px;font-weight:900;color:#9b80ac}.card-open{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;background:#f2e6ff;color:#702be0;font-size:15px;font-weight:900}.book-cover{height:177px;position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;padding:16px 13px;border:1px solid #29133f;border-radius:4px 10px 10px 4px;box-shadow:inset 5px 0 #29133f18,4px 5px 0 #29133f20}.book-tone-0 .book-cover{background:#efff75;color:#3a3010}.book-tone-1 .book-cover{background:#ffcfdf;color:#6d2046}.book-tone-2 .book-cover{background:#ff8a54;color:#51202b}.book-tone-3 .book-cover{background:#b8a0ff;color:#35134f}.book-tone-4 .book-cover{background:#7be6d1;color:#124c46}.book-tone-5 .book-cover{background:#702be0;color:#fff}.cover-symbol{position:absolute;right:-5px;top:-25px;font-size:125px;line-height:1;font-weight:950;opacity:.13;letter-spacing:-10px}.book-cover strong{position:relative;z-index:1;font-size:clamp(15px,1.5vw,21px);font-weight:950;line-height:1.03;letter-spacing:-.8px;overflow-wrap:anywhere}.book-cover small{position:relative;z-index:1;font-size:7px;letter-spacing:1px;font-weight:850;overflow-wrap:anywhere}.cover-decoration{position:absolute;right:12px;bottom:34px;font-size:32px;font-style:normal;opacity:.55}.book-card-info{display:grid;gap:6px;padding:13px 2px 3px;min-width:0}.book-card-info>strong{font-size:13px;font-weight:900;line-height:1.25;overflow-wrap:anywhere}.book-card-info>span:not(.book-meta){font-size:10px;color:#846b94;overflow-wrap:anywhere}.book-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}.book-meta span{font-size:8px;letter-spacing:.2px;font-weight:850;background:#f2e6ff;color:#702be0;border-radius:5px;padding:5px 6px;max-width:100%;overflow-wrap:anywhere}.book-meta span+span{background:#fff0e8;color:#a64831}.book-accession{font:9px ui-monospace,SFMono-Regular,monospace;color:#a08bac;margin-top:3px;overflow-wrap:anywhere}.electric-empty{min-height:280px;display:grid;align-content:center;justify-items:center;text-align:center;gap:12px;background:#fff;border:1px dashed #ddc7f0;border-radius:18px;padding:28px;color:#49275f}.loading-orb,.empty-emoji{font-size:38px;color:#fa4778}.electric-empty>strong{font-size:20px}.electric-empty p{font-size:12px;color:#8b719c;margin:0}.electric-empty button{border:0;background:#efff75;border-radius:9px;padding:10px 14px;font-size:11px;font-weight:850;color:#392f17}.electric-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:25px;padding:18px 0;border-top:1px solid #e9d9f5;color:#8d749f;font-size:9px;font-weight:850;letter-spacing:1px}.electric-footer>b{color:#fa4778;padding:0 5px}.theme-electric .pagination-controls :deep(button){border:1px solid #dfc7f3;border-radius:9px;background:white;color:#55246e;font-weight:750}.theme-electric .pagination-controls :deep(button.active){background:#702be0;border-color:#702be0;color:#fff}
-/* MINIMAL: paper-white canvas, oversized typography, fine rules and open horizontal index rows. */
-.theme-minimal{--page:#fff;--surface:#fff;--ink:#242424;--muted:#777;--line:#e9e9e9;--accent:#454545;--accent-soft:#f0f0f0;--soft:#fafafa;background:#fff;font-family:Arial,Helvetica,sans-serif;padding:28px clamp(18px,5vw,76px)}.minimal-main{max-width:1450px;margin:0 auto}.minimal-header{padding:8px 0 30px}.minimal-topline{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap;font-size:9px;letter-spacing:1.8px;color:#777}.minimal-tools{display:flex;align-items:center;gap:18px}.theme-minimal .theme-picker{display:flex;flex-direction:row;align-items:center;gap:8px}.theme-minimal .theme-picker select{border:0;border-bottom:1px solid #bbb;border-radius:0;padding:5px 20px 5px 3px;background:#fff}.minimal-export{background:transparent;border:1px solid #bbb;padding:8px 11px;font-size:10px}.minimal-header h1{font-size:clamp(55px,9vw,108px);font-weight:400;letter-spacing:-7px;line-height:1;margin:45px 0 12px}.minimal-header h1 span{color:#aaa}.minimal-header>p{font-size:14px;color:#777;margin:0}.minimal-count{margin-top:32px;padding-top:16px;border-top:1px solid #222;font-size:11px;color:#777}.minimal-count strong{font-size:20px;color:#222;font-weight:500;padding-right:4px}.minimal-count span{padding:0 9px;color:#bbb}.minimal-filters{display:flex;align-items:end;gap:19px;flex-wrap:wrap;padding:20px 0;border-top:1px solid #e6e6e6;border-bottom:1px solid #e6e6e6}.filter-caption{font-size:9px;letter-spacing:1.4px;color:#888;margin:0 4px 10px 0}.minimal-filters label{min-width:110px}.minimal-filters label select{border:0;border-bottom:1px solid #ccc;border-radius:0;padding:8px 18px 8px 0;background:#fff;font-size:12px}.minimal-filters>button{background:none;border:0;border-bottom:1px solid #aaa;padding:8px 0;font-size:11px;color:#555}.minimal-sort{margin-left:auto;display:flex;flex-direction:row!important;align-items:center;gap:8px!important}.minimal-sort button{border:1px solid #ccc;background:white;width:29px;height:29px;font-size:16px}.minimal-list-head{display:grid;grid-template-columns:45px minmax(170px,1.5fr) minmax(130px,.8fr) minmax(170px,1fr) 20px;gap:18px;padding:18px 8px 12px;font-size:9px;letter-spacing:1.1px;color:#888}.minimal-list{border-top:1px solid #222}.minimal-row{width:100%;display:grid;grid-template-columns:45px minmax(170px,1.5fr) minmax(130px,.8fr) minmax(170px,1fr) 20px;gap:18px;align-items:center;text-align:left;padding:19px 8px;border:0;border-bottom:1px solid #e7e7e7;background:#fff;color:#222}.minimal-row:hover{background:#fafafa}.minimal-row-number{font-size:11px;color:#999}.minimal-work,.minimal-classification,.minimal-identifiers{display:grid;gap:5px;min-width:0}.minimal-work strong{font-size:14px;font-weight:500;overflow-wrap:anywhere}.minimal-work small,.minimal-classification small,.minimal-identifiers small{font-size:11px;color:#888;overflow-wrap:anywhere}.minimal-classification strong{font-size:11px;font-weight:500}.minimal-identifiers strong{font:11px ui-monospace,SFMono-Regular,monospace}.minimal-arrow{font-size:17px;color:#888}.minimal-footer{padding:22px 0;border-top:1px solid #222;margin-top:0}.minimal-footer>span{font-size:10px}
-/* Shared interaction polish: consistent controls, visible keyboard focus, restrained motion. */
-.theme-picker select,
-.catalogue-page select,
-.catalogue-page button,
-.catalogue-page input {
-  transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease, color .16s ease;
+/* ===== 3-zone body ===== */
+.cat-body { display: grid; grid-template-columns: 250px minmax(0, 1fr) 350px; gap: 26px; align-items: start; padding-top: 24px; }
+
+/* ===== filter rail ===== */
+.rail { position: sticky; top: 14px; max-height: calc(100vh - 130px); overflow-y: auto; display: grid; align-content: start; gap: 20px; padding: 20px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.field { display: grid; gap: 8px; }
+.field.two { grid-template-columns: 1fr auto; align-items: end; }
+.field label, .field .label { font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.field select { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.search-box { position: relative; display: flex; align-items: center; }
+.search-icon { position: absolute; left: 12px; font-size: 18px; color: var(--muted); }
+.search-box input { width: 100%; padding: 12px 38px 12px 36px; border: 2px solid var(--line); border-radius: 10px; background: var(--paper); font-size: 14px; }
+.search-box input:focus { border-color: var(--forest); outline: none; }
+.kbd, .tips kbd { font: 11px ui-monospace, Consolas, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; background: var(--paper); color: var(--muted); }
+.kbd { position: absolute; right: 10px; }
+.clear-x { position: absolute; right: 6px; border: 0; background: transparent; font-size: 22px; line-height: 1; padding: 4px 8px; cursor: pointer; color: var(--muted); }
+.scope { display: flex; gap: 4px; padding: 3px; background: var(--soft); border-radius: 9px; }
+.scope button { flex: 1; border: 0; background: transparent; padding: 7px 4px; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; color: var(--muted); }
+.scope button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, .15); }
+.chips { display: grid; gap: 6px; }
+.chip { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); cursor: pointer; font-size: 13px; transition: border-color .15s, background .15s; }
+.chip span { flex: 1; }
+.chip b { font: 700 12px ui-monospace, Consolas, monospace; color: var(--muted); }
+.chip .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--tone, var(--forest)); }
+.chip:hover:not(:disabled) { border-color: var(--tone, var(--forest)); }
+.chip.on { background: var(--tone, var(--forest)); border-color: var(--tone, var(--forest)); color: #fff; }
+.chip.on b { color: #fff; }
+.chip.on .dot { background: #fff; }
+.chip:disabled { opacity: .4; cursor: not-allowed; }
+.dir { height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); font-weight: 700; cursor: pointer; }
+.tips { margin: 0; font-size: 12px; line-height: 2; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 14px; }
+
+/* ===== results ===== */
+.results { min-width: 0; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.count { margin: 0; font-size: 14px; color: var(--muted); }
+.count strong { color: var(--ink); }
+.active { display: flex; gap: 8px; flex-wrap: wrap; }
+.tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 11px; border-radius: 99px; background: var(--soft); font-size: 12px; font-weight: 600; }
+.tag button { border: 0; background: transparent; cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; color: var(--muted); }
+.banner { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 12px 16px; margin-bottom: 14px; border: 1px solid var(--rust); border-left-width: 6px; border-radius: 10px; background: var(--card); }
+.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; transition: opacity .15s; }
+.list.busy { opacity: .55; }
+.row { position: relative; display: grid; grid-template-columns: 6px minmax(0, 1fr) minmax(112px, 150px); gap: 16px; align-items: center; width: 100%; text-align: left; padding: 14px 18px 14px 0; border: 1px solid var(--line); border-radius: 12px; background: var(--card); cursor: pointer; overflow: hidden; transition: transform .15s, box-shadow .15s, border-color .15s; }
+.row:hover { transform: translateX(3px); box-shadow: 0 4px 14px rgba(0, 0, 0, .1); }
+.row.selected { border-color: var(--tone, var(--forest)); box-shadow: 0 0 0 2px var(--tone, var(--forest)) inset; }
+.spine { align-self: stretch; background: var(--tone, var(--none)); }
+.line .serial { margin-right: 10px; font: 700 12px ui-monospace, Consolas, monospace; color: var(--ink); opacity: .7; }
+.main { display: grid; gap: 4px; min-width: 0; }
+.title { font: 500 16px/1.4 var(--serif); overflow-wrap: anywhere; color: var(--ink); }
+.author { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.author.unknown, .card-author.unknown { opacity: .65; font-style: italic; }
+.line { font-size: 12px; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
+mark { background: color-mix(in srgb, var(--brass) 40%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+.side { display: grid; justify-items: end; gap: 5px; font-size: 12px; }
+.pill { padding: 3px 10px; border-radius: 99px; font-size: 11px; font-weight: 700; color: #fff; background: var(--tone, var(--none)); }
+.lang { color: var(--muted); }
+.acc { font: 700 12px ui-monospace, Consolas, monospace; }
+.shelf { font-size: 11px; color: var(--muted); }
+
+.skeleton li { display: grid; gap: 8px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.skeleton i { display: block; height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--soft), var(--line), var(--soft)); background-size: 200% 100%; animation: shimmer 1.2s infinite linear; }
+.skeleton i:nth-child(1) { width: 55%; height: 16px; } .skeleton i:nth-child(2) { width: 35%; } .skeleton i:nth-child(3) { width: 20%; }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.empty { display: grid; justify-items: center; gap: 10px; text-align: center; padding: 60px 20px; border: 2px dashed var(--line); border-radius: 14px; }
+.empty-mark { font-size: 38px; color: var(--brass); }
+.empty h2 { margin: 0; font: 400 24px Georgia, serif; }
+.empty p { margin: 0 0 8px; color: var(--muted); max-width: 380px; }
+
+.pager { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin-top: 22px; }
+.num { min-width: 38px; height: 38px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); cursor: pointer; font-weight: 600; }
+.num.on { background: var(--forest); color: var(--forest-ink); border-color: var(--forest); }
+.num:disabled { cursor: not-allowed; }
+.gap { padding: 0 4px; color: var(--muted); }
+
+/* ===== catalogue card preview ===== */
+.card-pane { position: sticky; top: 14px; max-height: calc(100vh - 130px); overflow-y: auto; padding-bottom: 24px; }
+.index-card { position: relative; padding: 46px 26px 22px; background: var(--card); border: 1px solid var(--line); border-top: 4px solid var(--tone, var(--forest)); border-radius: 4px 4px 14px 14px; box-shadow: 0 10px 0 -4px var(--soft), 0 18px 30px -10px rgba(0, 0, 0, .25); background-image: repeating-linear-gradient(to bottom, transparent 0 31px, color-mix(in srgb, var(--line) 55%, transparent) 31px 32px); background-position: 0 150px; background-repeat: repeat-y; }
+.card-tab { position: absolute; top: -1px; left: 22px; padding: 6px 14px; background: var(--tone, var(--forest)); color: #fff; font: 700 12px ui-monospace, Consolas, monospace; letter-spacing: .06em; border-radius: 0 0 9px 9px; max-width: calc(100% - 44px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-kicker { margin: 0 0 8px; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--tone, var(--forest)); }
+.card-title { margin: 0; font: 400 24px/1.3 var(--serif); overflow-wrap: anywhere; color: var(--ink); }
+.card-author { margin: 8px 0 0; font-size: 15px; color: var(--muted); font-style: italic; }
+.card-rule { height: 2px; margin: 18px 0 10px; background: #c0392b; opacity: .75; }
+.card-facts { display: grid; grid-template-columns: 118px minmax(0, 1fr); margin: 0; font-size: 13px; }
+.card-facts dt { padding: 5px 0; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.card-facts dd { margin: 0; padding: 4px 0; overflow-wrap: anywhere; }
+.card-facts dd.mono { font: 600 13px ui-monospace, Consolas, monospace; }
+.card-notes { margin-top: 14px; padding: 10px 12px; background: var(--soft); border-radius: 8px; font-size: 13px; }
+.card-notes b { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.card-notes p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.card-actions { display: grid; gap: 8px; margin-top: 18px; }
+.card-record { margin: 14px 0 0; text-align: right; font: 11px ui-monospace, Consolas, monospace; color: var(--muted); }
+.card-empty { padding: 40px 24px; text-align: center; border: 2px dashed var(--line); border-radius: 14px; color: var(--muted); }
+
+/* ===== responsive ===== */
+@media (max-width: 1199px) {
+  .cat-body { grid-template-columns: 250px minmax(0, 1fr); }
+  .card-pane { display: none; }
 }
-.catalogue-page select:hover,
-.catalogue-page input:hover {
-  border-color: var(--accent);
-}
-.catalogue-page select:focus-visible,
-.catalogue-page input:focus-visible,
-.catalogue-page button:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--accent) 32%, transparent);
-  outline-offset: 2px;
-}
-.theme-picker select {
-  min-height: 38px;
-  cursor: pointer;
+@media (max-width: 820px) {
+  .cat-body { grid-template-columns: 1fr; }
+  .rail { position: static; display: none; }
+  .filters-open .rail { display: grid; }
+  .filters-toggle { display: inline-block; }
+  .row { grid-template-columns: 6px minmax(0, 1fr); padding: 14px 14px 14px 0; }
+  .side { grid-column: 2; justify-items: start; grid-auto-flow: column; justify-content: start; gap: 12px; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .catalogue-page *,
-  .catalogue-page *::before,
-  .catalogue-page *::after {
-    transition-duration: .01ms !important;
-    animation-duration: .01ms !important;
-    animation-iteration-count: 1 !important;
-    scroll-behavior: auto !important;
-  }
+  .row, .btn, .list, .chip { transition: none; }
+  .skeleton i { animation: none; }
 }
-
-@media(max-width:1000px){.theme-premium{grid-template-columns:190px minmax(0,1fr)}.premium-rail{padding:24px 18px}.premium-main{padding:30px 24px}.metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.modern-table{min-width:900px}.minimal-list-head,.minimal-row{grid-template-columns:35px minmax(140px,1.3fr) minmax(100px,.8fr) minmax(135px,1fr) 18px;gap:10px}.minimal-filters{gap:12px}}
-@media(max-width:700px){.theme-premium{display:block}.premium-rail{min-height:0;padding:16px 18px;display:grid;grid-template-columns:42px 1fr auto;align-items:center;gap:0 12px}.rail-monogram{grid-row:span 2}.rail-kicker{margin:0;font-size:8px}.premium-rail h1{font-size:19px;grid-column:2;grid-row:2}.rail-rule,.rail-label,.rail-total,.rail-caption{display:none}.rail-bottom{margin:0;padding:0;display:flex;grid-column:3;grid-row:1/3;align-items:center;gap:8px}.theme-premium .theme-picker span{display:none}.theme-premium .theme-picker select{min-width:0;max-width:130px;padding:7px;font-size:10px}.premium-export{padding:8px;font-size:10px}.premium-main{padding:24px 16px}.premium-heading h2{font-size:33px}.folio-count strong{font-size:25px}.premium-controls{gap:9px}.control-title{width:100%;padding:0}.premium-controls label{flex:1;min-width:90px}.premium-controls select{min-width:0;width:100%}.folio{grid-template-columns:29px minmax(0,1fr) 17px;gap:10px;padding:15px 2px}.folio-accession{grid-column:2;text-align:left;display:flex;gap:7px;align-items:center;flex-wrap:wrap}.folio-accession small{font-size:8px}.folio-arrow{grid-column:3;grid-row:1/3}.folio-copy strong{font-size:16px}.premium-footer,.modern-footer,.minimal-footer{align-items:flex-start;flex-direction:column}.theme-modern{padding:20px 12px}.modern-header{align-items:flex-start}.modern-actions{width:100%;justify-content:space-between}.metric-grid{gap:8px}.metric-card{padding:13px;min-height:112px}.metric-card>strong{font-size:27px}.metric-card>span{font-size:8px}.panel-heading{padding:17px 14px}.modern-filterbar{padding:12px;gap:9px}.modern-filterbar label{flex:1;min-width:110px}.modern-filterbar select{width:100%;min-width:0}.result-chip{margin-left:0}.modern-table{min-width:850px}.modern-footer{padding:14px}.theme-minimal{padding:20px 15px}.minimal-header h1{letter-spacing:-4px;margin-top:36px}.minimal-topline{align-items:flex-start}.minimal-tools{gap:8px}.theme-minimal .theme-picker select{max-width:115px;min-width:0}.minimal-count{line-height:1.8}.minimal-filters{gap:10px}.filter-caption{width:100%;margin-bottom:0}.minimal-filters label{flex:1;min-width:85px}.minimal-filters label select{width:100%;min-width:0}.minimal-sort{margin-left:0;flex:1}.minimal-list-head{display:none}.minimal-row{grid-template-columns:28px minmax(0,1fr) 18px;gap:10px;padding:16px 3px}.minimal-work{grid-column:2}.minimal-classification,.minimal-identifiers{grid-column:2;display:flex;flex-wrap:wrap;gap:6px 12px}.minimal-arrow{grid-column:3;grid-row:1/4}.minimal-work strong{font-size:13px}.minimal-classification strong,.minimal-identifiers strong{font-size:10px}.minimal-work small,.minimal-classification small,.minimal-identifiers small{font-size:10px}}
-
-@media(max-width:1050px){.electric-body{grid-template-columns:190px minmax(0,1fr);gap:17px}.book-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.collection-pill{display:none}.hero-copy h1{font-size:clamp(44px,6vw,65px)}}
-@media(max-width:700px){.electric-main{padding:0 13px 20px}.electric-topbar{padding:13px 0;align-items:flex-start;flex-wrap:wrap;gap:13px}.electric-brand{font-size:14px}.electric-brand small{font-size:7px}.electric-top-actions{width:100%;justify-content:space-between;gap:8px}.theme-electric .theme-picker{gap:3px}.theme-electric .theme-picker select{min-width:0;max-width:130px;font-size:10px;padding:8px 20px 8px 7px}.electric-export{padding:10px;font-size:10px}.electric-hero{grid-template-columns:1fr;margin:15px 0 21px;min-height:0;border-radius:20px}.hero-copy{padding:25px 20px 20px}.hero-copy h1{font-size:clamp(48px,13vw,68px);letter-spacing:-3px}.hero-copy>p:not(.hero-kicker){max-width:100%}.electric-search{height:49px;padding:0 9px;gap:7px}.electric-search input{font-size:10px}.electric-search kbd{display:none}.hero-art{min-height:225px}.orbit{width:250px;height:250px;top:-6px}.orbit-two{width:190px;height:190px;top:24px}.hero-book{width:112px;height:166px;padding:14px;top:20px;left:calc(50% - 73px)}.hero-book span{font-size:20px}.book-back{left:calc(50% + 4px);top:31px}.art-sticker{width:72px;height:72px;right:7%;bottom:14px;font-size:8px}.star-one{top:10px;left:14%}.star-two{right:14%;top:32px}.electric-body{grid-template-columns:1fr;gap:20px}.electric-sidebar{position:static;padding:14px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.sidebar-title{grid-column:1/-1;padding-bottom:10px}.filter-group{padding:4px 0;border:0;min-width:0}.filter-group label{font-size:10px}.filter-group select{font-size:10px;padding:9px 18px 9px 7px}.sidebar-note{display:none}.results-heading{align-items:flex-start}.results-heading h2{font-size:27px}.electric-sort{width:100%;justify-content:flex-start}.electric-sort select{flex:1;min-width:0}.book-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.book-card{padding:8px;border-radius:13px}.book-cover{height:145px;padding:12px 10px}.book-cover strong{font-size:16px}.book-cover small{font-size:6px}.book-card-info{padding-top:10px}.book-card-info>strong{font-size:12px}.book-meta span{font-size:7px}.electric-footer{align-items:flex-start;flex-direction:column}.hero-tags{font-size:8px;gap:8px}}
-@media(max-width:390px){.book-grid{grid-template-columns:1fr 1fr;gap:8px}.book-cover{height:125px}.book-cover strong{font-size:14px}.electric-sidebar{grid-template-columns:1fr}.sidebar-title{grid-column:auto}.filter-group{padding:4px 0}.electric-top-actions{flex-wrap:wrap}.theme-electric .theme-picker select{max-width:110px}}
-
-/* READING TRAIL: long-form timeline with numbered waypoints */
-.theme-timeline{background:#f1eee6;color:#1e342d;padding:clamp(18px,4vw,58px);font-family:Georgia,serif}.timeline-main{max-width:1240px;margin:auto}.timeline-head{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;padding:18px 0 38px;border-bottom:2px solid #1e342d}.timeline-stamp,.timeline-head p,.timeline-summary,.trail-list small,.trail-code,.trail-footer{font-family:Arial,sans-serif}.timeline-stamp{font-size:10px;letter-spacing:2px;font-weight:bold}.timeline-head h1{font-size:clamp(42px,7vw,82px);line-height:.98;letter-spacing:-4px;margin:28px 0 15px}.timeline-head h1 em{color:#d45131}.timeline-head p{color:#69736b;font-size:13px}.timeline-head-tools{display:grid;gap:12px;min-width:170px}.timeline-head-tools>button{background:#1e342d;color:#f1eee6;border:0;padding:12px}.timeline-toolbar,.editorial-tools,.shelfwall-controls{display:flex;gap:9px;align-items:center;flex-wrap:wrap;padding:18px 0}.timeline-toolbar input,.editorial-tools input,.shelfwall-controls input,.split-header input{flex:1;min-width:180px;padding:12px;border:1px solid #d1d1c5;background:#fff}.timeline-toolbar select,.timeline-toolbar button{padding:10px;border:1px solid #c9c9bd;background:transparent}.timeline-summary{font-size:11px;color:#737a70;padding:10px 0 20px}.timeline-summary strong{font-size:22px;color:#1e342d}.timeline-summary span{padding:0 10px}.trail-list{border-top:1px solid #c6c5b9}.trail-item{display:grid;width:100%;grid-template-columns:46px minmax(0,1fr) 150px 20px;gap:20px;align-items:center;text-align:left;background:transparent;border:0;border-bottom:1px solid #c6c5b9;padding:22px 5px;color:#1e342d}.trail-item:hover{background:#e7e4d9}.trail-dot{width:36px;height:36px;border:1px solid #d45131;color:#d45131;border-radius:50%;display:grid;place-items:center;font:11px Arial}.trail-main-copy{display:grid;gap:7px}.trail-main-copy small{font-size:9px;letter-spacing:1.1px;color:#d45131}.trail-main-copy strong{font-size:23px;font-weight:400}.trail-main-copy>span{font:12px Arial;color:#737a70}.trail-code{font-size:10px;color:#737a70}.trail-arrow{font-size:20px}.trail-footer,.editorial-footer,.shelfwall-footer,.split-footer{display:flex;justify-content:space-between;gap:15px;align-items:center;flex-wrap:wrap;padding:22px 0;font:10px Arial;letter-spacing:1px}
-/* COMMAND CENTRE: utilitarian operations terminal, not a conventional dashboard */
-.theme-command{background:#111714;color:#d8e4d8;font:12px ui-monospace,SFMono-Regular,monospace}.command-main{display:grid;grid-template-columns:215px minmax(0,1fr);min-height:100vh}.command-nav{background:#19221d;border-right:1px solid #35463a;padding:28px 20px;display:flex;flex-direction:column;gap:22px}.command-logo{width:44px;height:44px;border:1px solid #83f28b;color:#83f28b;display:grid;place-items:center;font-size:16px}.command-nav>p,.command-nav>strong,.command-nav>span,.command-nav-bottom{font-size:10px;letter-spacing:1px}.command-nav>p{color:#83f28b}.command-nav>strong{font-size:19px;line-height:1.4;letter-spacing:0}.command-nav>span{padding:12px 9px;border:1px solid transparent;color:#95a49a}.command-nav>span.command-nav-active{border-color:#3e5d47;background:#24382b;color:#83f28b}.command-nav-bottom{margin-top:auto;line-height:2;color:#8b9c90}.command-nav-bottom b{color:#83f28b}.command-workspace{padding:clamp(18px,3vw,44px);min-width:0}.command-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;border-bottom:1px solid #35463a;padding-bottom:25px}.command-head small,.command-stats small,.command-filters label,.command-query>span,.command-footer{color:#8b9c90;font-size:9px;letter-spacing:1px}.command-head h1{font-size:clamp(26px,4vw,44px);letter-spacing:-2px;margin:12px 0 0}.command-head h1 span{color:#83f28b}.theme-command .theme-picker{color:#8b9c90}.theme-command .theme-picker select,.command-filters select{background:#19221d;border:1px solid #35463a;color:#d8e4d8}.command-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;gap:12px;padding:24px 0}.command-stats>div{padding:16px;border:1px solid #35463a;display:grid;gap:12px}.command-stats strong{font-size:28px;color:#83f28b}.command-stats strong i{font-size:12px;color:#8b9c90;font-style:normal}.command-stats button,.command-query button,.command-filters>button{background:#83f28b;color:#111714;border:0;padding:12px;font-weight:bold}.command-query{display:flex;align-items:center;gap:12px;background:#19221d;border:1px solid #35463a;padding:10px 13px}.command-query input{flex:1;min-width:0;background:transparent;border:0;outline:0;color:#d8e4d8;padding:7px}.command-query button{padding:8px}.command-filters{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:16px 0}.command-filters label{display:flex;align-items:center;gap:7px}.command-filters select{padding:8px}.command-records{border-top:1px solid #35463a}.command-record{display:grid;width:100%;grid-template-columns:40px minmax(160px,1.5fr) minmax(90px,1fr) 120px 60px 20px;gap:14px;align-items:center;text-align:left;padding:15px 8px;background:transparent;border:0;border-bottom:1px solid #29382e;color:#d8e4d8;font:11px ui-monospace,monospace}.command-record:hover{background:#1c2b21}.command-record>span:first-child,.command-record code{color:#83f28b}.command-record strong{display:grid;gap:5px}.command-record strong small{color:#8b9c90;font-weight:normal}.command-record>span:nth-child(3){color:#d1b67a}.command-record code{font:10px ui-monospace}.command-record>b{color:#83f28b}.command-footer{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap;padding:20px 0}
-/* EDITORIAL SPREAD: asymmetric magazine composition and strong typographic hierarchy */
-.theme-editorial{background:#f8f0e4;color:#24251f;padding:clamp(16px,4vw,58px);font-family:Georgia,'Times New Roman',serif}.editorial-main{max-width:1360px;margin:auto}.editorial-masthead{display:flex;align-items:center;justify-content:space-between;gap:20px;padding-bottom:20px;border-bottom:2px solid #24251f}.editorial-logo{font-size:21px;line-height:.75;letter-spacing:-1px}.editorial-logo b{font-size:35px}.editorial-logo span{display:block;font:8px Arial;letter-spacing:2px;margin-top:9px}.editorial-mast-note{font:9px/1.8 Arial;letter-spacing:1.2px;color:#77705f}.editorial-feature{display:grid;grid-template-columns:1.2fr .8fr;gap:25px;align-items:center;padding:45px 0 35px;border-bottom:1px solid #c8bda9}.editorial-feature>div:first-child>span,.editorial-section-head>span{font:9px Arial;letter-spacing:1.6px;color:#bd4d30}.editorial-feature h1{font-size:clamp(52px,9vw,118px);line-height:.83;letter-spacing:-7px;margin:22px 0}.editorial-feature h1 i{color:#bd4d30;font-weight:400}.editorial-feature p{font:13px/1.7 Arial;color:#716b60;max-width:300px}.editorial-feature-art{min-height:290px;background:#d6ed68;display:flex;flex-direction:column;justify-content:space-between;padding:25px;position:relative;overflow:hidden;transform:rotate(1deg)}.editorial-feature-art:before{content:'';position:absolute;width:280px;height:280px;border:45px solid #24251f;border-radius:50%;right:-70px;top:20px}.editorial-feature-art span{position:relative;font-size:clamp(32px,4vw,56px);line-height:.9;font-weight:bold;z-index:1}.editorial-feature-art b{position:absolute;right:28px;top:95px;font:100px Arial;color:#bd4d30;z-index:2}.editorial-feature-art small{position:relative;font:9px Arial;letter-spacing:2px;z-index:2}.editorial-tools input{background:#fffdf8}.editorial-tools select,.editorial-tools button{padding:10px;border:1px solid #d4c7b3;background:transparent;color:#24251f;font:11px Arial}.editorial-section-head{display:flex;justify-content:space-between;align-items:baseline;gap:15px;border-top:3px solid #24251f;padding-top:12px}.editorial-section-head h2{font-size:32px;font-weight:400;margin:8px 0 18px}.editorial-list{border-top:1px solid #c8bda9}.editorial-entry{display:grid;grid-template-columns:45px minmax(0,1.5fr) minmax(110px,.8fr) minmax(110px,.8fr) 20px;gap:15px;align-items:center;text-align:left;width:100%;padding:19px 6px;border:0;border-bottom:1px solid #c8bda9;background:transparent;color:#24251f}.editorial-entry:hover{background:#eee3d3}.editorial-entry-num{color:#bd4d30;font:12px Arial}.editorial-entry-title{display:grid;gap:6px}.editorial-entry-title strong{font-size:21px;font-weight:400}.editorial-entry-title small,.editorial-entry-shelf small{font:11px Arial;color:#77705f}.editorial-entry-category,.editorial-entry-shelf{font:10px Arial}.editorial-entry-shelf{display:grid;gap:5px}
-/* SHELF WALL: a physical-looking wall of book spines */
-.theme-shelfwall{background:#e7dfcf;color:#27352c;padding:clamp(15px,3vw,42px);font-family:Arial,sans-serif}.shelfwall-main{max-width:1450px;margin:auto}.shelfwall-header{display:flex;align-items:end;justify-content:space-between;gap:20px;flex-wrap:wrap;padding:14px 0 28px}.shelfwall-header small{font-size:9px;letter-spacing:1.8px;color:#8a5c3c}.shelfwall-header h1{font:clamp(36px,6vw,68px) Georgia,serif;letter-spacing:-2px;margin:14px 0 7px}.shelfwall-header p{font-size:12px;color:#72776c}.shelfwall-count{display:flex;align-items:center;gap:10px}.shelfwall-count strong{font:52px Georgia;color:#8a5c3c}.shelfwall-count span{font-size:9px;line-height:1.6;letter-spacing:1px}.shelfwall-controls input{background:#f7f2e9;border-color:#c9bca7}.shelfwall-controls select,.shelfwall-controls button{background:#f7f2e9;border:1px solid #c9bca7;padding:10px;color:#27352c}.shelf-map{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0 12px;padding:15px;background:#c3a987;border:8px solid #9b7b58;box-shadow:inset 0 0 0 3px #d7c2a4}.shelf-slot{min-width:0;display:flex;flex-direction:column;justify-content:end;padding-top:18px}.shelf-book{height:205px;display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;text-align:left;padding:13px 9px;border:0;border-left:5px solid #0003;border-radius:3px 5px 0 0;box-shadow:3px 2px 3px #0002;color:#fff;overflow:hidden;transition:transform .15s}.shelf-book:hover{transform:translateY(-7px)}.shelf-book span{font-size:23px;opacity:.6}.shelf-book strong{font: bold 15px/1.1 Georgia,serif;overflow-wrap:anywhere}.shelf-book small{font-size:8px;line-height:1.3;overflow-wrap:anywhere}.shelf-book-0{background:#335b49}.shelf-book-1{background:#8b4536}.shelf-book-2{background:#334c70}.shelf-book-3{background:#c4a447;color:#2a2b21}.shelf-book-4{background:#684c79}.shelf-book-5{background:#3f7471}.shelf-book-6{background:#773d42}.shelf-plaque{height:25px;background:#eadbc3;border-bottom:5px solid #9b7b58;display:flex;justify-content:space-between;align-items:center;gap:3px;padding:3px;font-size:8px;color:#57452f}.shelf-plaque strong{font-size:7px;overflow-wrap:anywhere}.shelfwall-footer{font-size:11px;color:#6f604d}
-/* SPLIT EXPLORER: persistent subject navigation, master list, and live detail preview */
-.theme-splitview{background:#f2f4f8;color:#202c43;font-family:Arial,sans-serif}.split-main{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}.split-rail{background:#202c43;color:#eaf0fa;padding:27px 18px;display:flex;flex-direction:column;gap:13px}.split-brand{font-size:16px;line-height:.85;letter-spacing:2px}.split-brand b{font-size:29px}.split-brand small{display:block;font-size:8px;letter-spacing:1px;margin-top:12px;color:#9eabc2}.split-rail>p{font-size:9px;letter-spacing:1.5px;color:#9eabc2;margin:25px 0 3px}.split-rail>button{display:flex;justify-content:space-between;gap:8px;text-align:left;padding:11px 9px;border:0;background:transparent;color:#c4cee0;font-size:11px}.split-rail>button.selected{background:#354766;color:#fff;border-left:3px solid #f4a261}.split-rail>button span{color:#9eabc2}.split-rail-bottom{margin-top:auto;display:grid;gap:12px}.theme-splitview .theme-picker{color:#aab7cc}.theme-splitview .theme-picker select{background:#354766;border-color:#52617b;color:#fff;min-width:0;width:100%}.split-rail-bottom>button{background:#f4a261;color:#202c43;border:0;padding:11px;font-weight:bold}.split-content{min-width:0;padding:clamp(17px,3vw,42px)}.split-header{display:flex;justify-content:space-between;align-items:end;gap:20px;flex-wrap:wrap}.split-header small{font-size:9px;letter-spacing:1.5px;color:#78859a}.split-header h1{font-size:clamp(28px,4vw,48px);letter-spacing:-2px;margin:10px 0}.split-header input{max-width:360px;border-color:#d4dce8;border-radius:8px}.split-toolbar{display:flex;align-items:end;gap:10px;flex-wrap:wrap;padding:19px 0}.split-toolbar label{display:grid;gap:6px;font-size:8px;letter-spacing:1px;color:#78859a}.split-toolbar select,.split-toolbar button{background:#fff;border:1px solid #d4dce8;border-radius:6px;padding:9px;color:#202c43}.split-toolbar>span{margin-left:auto;font-size:11px;color:#78859a}.split-workspace{display:grid;grid-template-columns:minmax(220px,.8fr) minmax(280px,1.2fr);gap:18px;align-items:start}.split-results{background:#fff;border:1px solid #dce2eb;border-radius:10px;overflow:hidden}.split-result{width:100%;display:grid;grid-template-columns:25px minmax(0,1fr) 12px;gap:9px;align-items:center;text-align:left;padding:13px 11px;border:0;border-bottom:1px solid #edf0f5;background:#fff;color:#202c43}.split-result.active,.split-result:hover{background:#fff3e8}.split-result>span{font-size:9px;color:#9aa5b6}.split-result strong{display:grid;gap:5px;font-size:11px}.split-result strong small{font-size:10px;color:#78859a;font-weight:normal}.split-result i{font-style:normal;color:#e08b4b}.split-detail{background:#fff;border:1px solid #dce2eb;border-radius:12px;padding:24px;position:sticky;top:15px}.split-detail-art{height:180px;background:linear-gradient(135deg,#f4a261,#f7d6a7);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}.split-detail-art span{font:150px Georgia;color:#202c4320}.split-detail-art small{position:absolute;left:14px;bottom:12px;font-size:8px;letter-spacing:1px;color:#202c43}.split-detail-kicker{font-size:9px;letter-spacing:1px;color:#bd6b32;margin:20px 0 8px}.split-detail h2{font:32px/1.05 Georgia,serif;margin:0}.split-author{font-size:12px;color:#78859a}.split-detail dl{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;border-top:1px solid #e5e9f0;padding-top:15px;margin-top:20px}.split-detail dt{font-size:8px;letter-spacing:.7px;color:#8995a7}.split-detail dd{margin:0;font-size:11px;overflow-wrap:anywhere}.split-open-record{width:100%;margin-top:18px;background:#202c43;color:#fff;border:0;border-radius:7px;padding:13px}
-@media(max-width:900px){.shelf-map{grid-template-columns:repeat(4,minmax(0,1fr))}.command-main{grid-template-columns:160px minmax(0,1fr)}.command-nav{padding:20px 12px}.command-record{grid-template-columns:30px minmax(130px,1.5fr) minmax(70px,1fr) 90px 40px 15px;gap:8px}.split-main{grid-template-columns:170px minmax(0,1fr)}.split-workspace{grid-template-columns:1fr}.split-detail{position:static}.editorial-feature h1{letter-spacing:-4px}}
-
-/* MAP ROOM: navigable coordinate map, not a card or table layout */
-.theme-maproom{background:#e8e5d8;color:#202c27;font-family:Arial,sans-serif}.maproom-main{padding:clamp(18px,4vw,56px);max-width:1500px;margin:auto}.maproom-header{display:flex;justify-content:space-between;align-items:end;gap:20px}.maproom-header h1{font:clamp(36px,6vw,74px)/.98 Georgia,serif;letter-spacing:-3px;margin:20px 0 12px}.maproom-header h1 i{color:#c44f32;font-weight:normal}.maproom-header p{color:#68746d;font-size:13px}.maproom-layout{display:grid;grid-template-columns:190px minmax(0,1fr);gap:18px}.maproom-legend{padding:20px;background:#f8f7ef;display:flex;flex-direction:column;align-items:flex-start;gap:10px}.maproom-legend>span{font-size:9px;letter-spacing:2px;font-weight:bold}.maproom-legend p{display:flex;align-items:center;gap:9px;font-size:11px;color:#68746d}.map-dot{width:8px;height:8px;border-radius:50%}.map-dot-a{background:#c44f32}.map-dot-b{background:#d8a62e}.map-dot-c{background:#447a68}.maproom-legend>strong{font:46px Georgia;margin-top:auto}.maproom-legend>small{font-size:10px;color:#68746d}.maproom-map{min-height:480px;position:relative;overflow:hidden;background-color:#f8f7ef;background-image:linear-gradient(#dfe2d6 1px,transparent 1px),linear-gradient(90deg,#dfe2d6 1px,transparent 1px);background-size:36px 36px;border:1px solid #d4d9ce}.maproom-map:before,.maproom-map:after{content:'';position:absolute;border:1px dashed #c9d0c4;border-radius:50%;width:70%;height:45%;left:15%;top:25%;transform:rotate(-18deg);pointer-events:none}.maproom-map:after{width:45%;height:70%;left:28%;top:12%;transform:rotate(35deg)}.map-compass{position:absolute;right:18px;top:15px;z-index:2;text-align:center;font-size:10px;line-height:1.4;color:#7c887d}.map-pin{position:absolute;left:var(--x);top:var(--y);z-index:1;transform:translate(-50%,-50%);display:grid;grid-template-columns:30px minmax(0,1fr);gap:3px 8px;align-items:center;max-width:210px;text-align:left;border:1px solid #d2d8cb;background:#fffdf7;padding:8px 10px;box-shadow:3px 3px 0 #dce0d4;color:#202c27}.map-pin>span{grid-row:span 2;width:28px;height:28px;display:grid;place-items:center;background:#c44f32;color:white;border-radius:50%;font:14px Georgia}.map-pin strong{font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.map-pin small{font-size:8px;color:#68746d}.map-pin-1>span{background:#d8a62e;color:#202c27}.map-pin-2>span{background:#447a68}.map-pin-3>span{background:#5a5b9b}.map-pin-4>span{background:#bf6e8d}.maproom-overlay{position:absolute;inset:0;display:grid;place-items:center;background:#f8f7efcc;color:#202c27;text-align:center;padding:30px}
-/* CONSTELLATION: spatial node network with no conventional list/grid */
-.theme-constellation{background:#11152c;color:#f4f0ff;font-family:Arial,sans-serif}.constellation-main{padding:clamp(18px,4vw,54px);max-width:1500px;margin:auto}.constellation-head{display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:25px}.constellation-brand{font-size:12px;letter-spacing:3px;color:#9b9dfd}.constellation-brand b{font-size:21px;color:#fff;letter-spacing:1px}.constellation-head small{color:#9b9dfd}.constellation-head h1{font-size:clamp(30px,4vw,53px);line-height:1.04;letter-spacing:-2px;margin:12px 0}.theme-constellation .theme-picker{color:#a4a9cc}.theme-constellation .theme-picker select{background:#202545;border-color:#383f69;color:#fff}.constellation-controls input,.constellation-controls select,.constellation-controls button{background:#202545;border-color:#343c68;color:#f4f0ff}.constellation-controls button:last-child{background:#c3ff70;color:#11152c;border-color:#c3ff70}.constellation-field{height:530px;position:relative;overflow:hidden;border:1px solid #343c68;background:radial-gradient(ellipse at center,#23284d 0%,#151a35 60%,#11152c 100%)}.constellation-orbit{position:absolute;border:1px solid #434a78;border-radius:50%;pointer-events:none}.orbit-a{width:75%;height:70%;left:12%;top:15%;transform:rotate(-20deg)}.orbit-b{width:52%;height:95%;left:25%;top:2%;transform:rotate(36deg)}.constellation-node{position:absolute;left:var(--nx);top:var(--ny);transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:flex-start;gap:5px;max-width:190px;text-align:left;background:transparent;border:0;color:#f4f0ff;padding:8px}.constellation-node i{width:11px;height:11px;border-radius:50%;background:#c3ff70;box-shadow:0 0 16px #c3ff70;margin-bottom:3px}.constellation-node strong{font-size:12px;line-height:1.2}.constellation-node span,.constellation-node small{font-size:9px;color:#a4a9cc}.node-1 i{background:#ff7bbd;box-shadow:0 0 16px #ff7bbd}.node-2 i{background:#7fe4ff;box-shadow:0 0 16px #7fe4ff}.node-3 i{background:#b9a1ff;box-shadow:0 0 16px #b9a1ff}.node-4 i{background:#ffb36b;box-shadow:0 0 16px #ffb36b}.constellation-node:hover{background:#272d55;border-radius:9px;z-index:3}.constellation-state{padding:60px;text-align:center;color:#a4a9cc}
-/* KANBAN: category lanes and movable-looking information cards */
-.theme-kanban{background:#f4f1e9;color:#252a25;font-family:Arial,sans-serif}.theme-kanban .theme-picker{color:#6e766e}
-/* DISCOVERY: a featured find and a playful collection deck */
-.theme-discovery{background:#f8f0e6;color:#30251f;font-family:Arial,sans-serif}.discovery-main{padding:0 clamp(18px,4vw,54px) 28px;max-width:1500px;margin:auto}.discovery-nav{display:flex;align-items:center;gap:28px;padding:20px 0;border-bottom:1px solid #e3d3c5}.discovery-logo{font-size:11px;letter-spacing:3px;line-height:.9;color:#d45437}.discovery-logo b{font-size:18px;color:#30251f}.discovery-nav>span{margin-right:auto;font-size:9px;letter-spacing:1.5px;color:#8b7769}.theme-discovery .theme-picker{color:#8b7769}.theme-discovery .theme-picker select{background:#fff9f1;border-color:#e3d3c5}.discovery-hero{display:grid;grid-template-columns:1.2fr .8fr;gap:40px;padding:clamp(35px,6vw,80px) 0;align-items:center}.discovery-hero>div:first-child>small{font-size:9px;letter-spacing:2px;color:#d45437;font-weight:bold}.discovery-hero h1{font:clamp(42px,7vw,88px)/.91 Georgia,serif;letter-spacing:-4px;margin:20px 0}.discovery-hero h1 i{color:#d45437;font-weight:normal}.discovery-hero p{max-width:340px;font-size:13px;line-height:1.6;color:#806f62}.discovery-hero>div:first-child>button{background:#d45437;color:white;border:0;padding:14px 20px;margin-top:12px}.discovery-feature{background:#e9dfce;padding:24px;transform:rotate(1.5deg);max-width:390px;justify-self:center;width:100%}.discovery-feature-number{font-size:8px;letter-spacing:1.3px;color:#806f62}.discovery-cover{min-height:230px;margin:17px 0 13px;padding:25px;display:flex;flex-direction:column;justify-content:space-between;background:#244d43;color:#f7ead5;box-shadow:8px 8px 0 #d45437;position:relative;overflow:hidden}.discovery-cover:after{content:'';position:absolute;width:180px;height:180px;border:1px solid #ffffff55;border-radius:50%;right:-30px;top:15px;box-shadow:0 0 0 20px #ffffff12,0 0 0 40px #ffffff0a}.discovery-cover>span{font:70px Georgia;color:#e4b65b}.discovery-cover strong{font:25px Georgia;max-width:240px;z-index:1}.discovery-cover small{font-size:9px;letter-spacing:1px;z-index:1}.discovery-feature>p{font-size:10px}.discovery-feature>button{border:0;background:transparent;color:#d45437;font-weight:bold;padding:8px 0}.discovery-tools input,.discovery-tools select,.discovery-tools button{background:#fff9f1;border-color:#e3d3c5}.discovery-tools button:last-child{background:#30251f;color:#fff9f1}.discovery-list-title{font:28px Georgia;margin:24px 0 16px}.discovery-list-title span{font:10px Arial;color:#8b7769;margin-left:12px}.discovery-deck{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.discovery-card{min-height:210px;display:flex;flex-direction:column;align-items:flex-start;text-align:left;padding:17px;border:0;background:#e8d8c4;color:#30251f}.discovery-card-1{background:#d5e2d8}.discovery-card-2{background:#f0d1c7}.discovery-card-3{background:#ded8f0}.discovery-card-4{background:#e7e5b8}.discovery-card>span{font-size:8px;letter-spacing:1px;color:#806f62}.discovery-card>strong{font:22px/1.08 Georgia;margin:25px 0 8px}.discovery-card>small{font-size:10px;color:#806f62}.discovery-card>i{font-size:9px;font-style:normal;margin-top:12px}.discovery-card footer{display:flex;justify-content:space-between;width:100%;margin-top:auto;padding-top:12px;font-size:8px;border-top:1px solid #0000001a}.discovery-card footer b{font-size:14px}.discovery-empty{padding:35px;color:#806f62}
-/* WORKBENCH: scholarly faceted search and structured metadata inspection */
-.theme-workbench{background:#edf1f4;color:#182c3b;font-family:Arial,sans-serif}.workbench-main{padding:clamp(18px,3vw,42px);max-width:1550px;margin:auto}.workbench-head{display:flex;justify-content:space-between;align-items:end;gap:20px;border-bottom:1px solid #cbd5dd;padding-bottom:25px}.workbench-head h1{font-size:clamp(30px,4vw,49px);letter-spacing:-2px;margin:12px 0 7px}.workbench-head h1 span{color:#d86b43}.workbench-head p{font-size:12px;color:#617484}.theme-workbench .theme-picker{color:#617484}.theme-workbench .theme-picker select{background:#fff;border-color:#cbd5dd}.workbench-query{display:flex;gap:12px;align-items:center;padding:17px 0}.workbench-query>span{font-size:9px;letter-spacing:1px;color:#6d8292}.workbench-query input{flex:1;min-width:120px;padding:13px;border:1px solid #cbd5dd;background:#fff}.workbench-query button{padding:12px;border:1px solid #cbd5dd;background:#fff;color:#182c3b;font-size:11px}.workbench-query button:last-child{background:#182c3b;color:#fff}.workbench-grid{display:grid;grid-template-columns:230px minmax(0,1fr);gap:16px;align-items:start}.workbench-facets{background:#fff;border:1px solid #d4dde4;padding:17px;display:grid;gap:18px}.workbench-facets header{display:flex;justify-content:space-between;gap:8px;font-size:9px;letter-spacing:1px;font-weight:bold}.workbench-facets header button{border:0;background:transparent;color:#d86b43;font-size:10px}.workbench-facets>label{display:grid;gap:8px;font-size:11px;color:#617484}.workbench-facets select{width:100%;background:#f8fafb;border-color:#d4dde4}.workbench-result-count{display:flex;align-items:baseline;gap:8px;border-top:1px solid #e4e9ed;padding-top:16px}.workbench-result-count strong{font-size:29px}.workbench-result-count span{font-size:10px;color:#617484}.workbench-results{background:#fff;border:1px solid #d4dde4;min-width:0}.workbench-results-head{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:15px;border-bottom:1px solid #d4dde4}.workbench-results-head>strong{font-size:13px}.workbench-results-head label{font-size:10px;color:#617484}.workbench-results-head select,.workbench-results-head button{padding:7px;border:1px solid #d4dde4;background:#f8fafb;color:#182c3b}.workbench-table{width:100%}.workbench-row{display:grid;width:100%;grid-template-columns:35px minmax(150px,1.6fr) minmax(80px,.8fr) 70px 105px 15px;gap:12px;align-items:center;text-align:left;padding:14px 13px;border:0;border-bottom:1px solid #e9eef1;background:#fff;color:#182c3b}.workbench-row:hover{background:#f3f7f9}.workbench-row-index{font:10px ui-monospace,monospace;color:#d86b43}.workbench-row>span:nth-child(2){display:grid;gap:5px}.workbench-row>span:nth-child(2) strong{font-size:12px}.workbench-row small{display:block;font-size:9px;color:#718493}.workbench-row>span:nth-child(3){font-size:10px}.workbench-row code{font-size:9px;color:#547768}.workbench-row>b{color:#d86b43}.workbench-footer{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:17px;font-size:10px;color:#718493}
-
-@media(max-width:850px){.discovery-deck{grid-template-columns:repeat(2,minmax(0,1fr))}.workbench-grid{grid-template-columns:190px minmax(0,1fr)}.workbench-row{grid-template-columns:28px minmax(130px,1fr) 65px 15px}.workbench-row>span:nth-child(3),.workbench-row>span:nth-child(4),.workbench-row>code{display:none}}
-@media(max-width:620px){.maproom-layout{grid-template-columns:1fr}.maproom-legend{display:none}.maproom-map{min-height:520px}.map-pin{max-width:145px;grid-template-columns:23px minmax(0,1fr);padding:6px}.map-pin>span{width:22px;height:22px}.constellation-head{grid-template-columns:1fr;gap:15px}.constellation-brand{display:none}.constellation-field{height:600px}.constellation-node{max-width:135px}.discovery-nav{align-items:flex-start;flex-wrap:wrap}.discovery-nav>span{display:none}.discovery-hero{grid-template-columns:1fr;gap:24px}.discovery-hero h1{letter-spacing:-2px}.discovery-deck{grid-template-columns:1fr 1fr}.workbench-query{flex-wrap:wrap}.workbench-query input{flex-basis:100%}.workbench-grid{grid-template-columns:1fr}.workbench-row{grid-template-columns:25px minmax(0,1fr) 15px}.workbench-row>span:nth-child(3),.workbench-row>span:nth-child(4),.workbench-row>code{display:none}.workbench-results-head{align-items:flex-start;flex-direction:column}.timeline-head,.editorial-masthead{align-items:flex-start;flex-direction:column}.timeline-head h1{letter-spacing:-2px}.trail-item{grid-template-columns:36px minmax(0,1fr) 15px;gap:10px}.trail-code{grid-column:2}.trail-arrow{grid-column:3;grid-row:1/3}.command-main{grid-template-columns:1fr}.command-nav{display:none}.command-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.command-stats button{grid-column:1/-1}.command-record{grid-template-columns:28px minmax(0,1fr) 15px}.command-record>span:nth-child(3),.command-record code,.command-record>span:nth-child(5){display:none}.editorial-feature{grid-template-columns:1fr}.editorial-feature-art{min-height:200px}.editorial-entry{grid-template-columns:25px minmax(0,1fr) 15px;gap:9px}.editorial-entry-category,.editorial-entry-shelf{grid-column:2}.editorial-entry>span:last-child{grid-column:3;grid-row:1/4}.shelf-map{grid-template-columns:repeat(3,minmax(0,1fr));padding:8px;gap:0 6px}.shelf-book{height:160px;padding:9px 6px}.shelf-book strong{font-size:12px}.shelfwall-header h1{font-size:37px}.split-main{grid-template-columns:1fr}.split-rail{display:none}.split-header input{max-width:none;width:100%}.split-detail dl{grid-template-columns:1fr 1fr}.split-toolbar>span{margin-left:0}}
-
-
-/* AUDIO GUIDE — inspired by audio-player queues, with a featured listening-stage layout */
-.theme-audioguide{background:#f3f0e8;color:#171916;font-family:Arial,sans-serif}
-/* MUSEUM EXHIBIT — curated gallery walls and object labels */
-.theme-museum{background:#f2eee5;color:#20221e;font-family:Arial,sans-serif}.museum-main{max-width:1500px;margin:auto;padding:clamp(18px,4vw,55px)}.museum-header{display:grid;grid-template-columns:130px 1fr auto;gap:30px;align-items:start;padding:20px 0 42px;border-bottom:1px solid #bdb9ad}.museum-wordmark{font:15px/1.1 Georgia,serif;letter-spacing:1px}.museum-wordmark i{font-weight:bold;font-size:21px}.museum-header small{font-size:8px;letter-spacing:2px;color:#7b7a6d}.museum-header h1{font:clamp(35px,5vw,68px)/.98 Georgia,serif;letter-spacing:-2px;margin:18px 0}.museum-search{display:flex;align-items:center;gap:14px;padding:20px 0;border-bottom:1px solid #d2cec3}.museum-search>span{font-size:8px;letter-spacing:1px;color:#817e71}.museum-search input{flex:1;min-width:0}.museum-search button{border:0;background:#272c24;color:#f5f0e5;padding:12px}.museum-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:16px 0}.museum-toolbar span{margin-left:auto;font-size:8px;letter-spacing:1px;color:#7b7a6d}.museum-gallery{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:30px 20px;padding:20px 0}.museum-object{border:0;background:transparent;text-align:left;color:#20221e;display:flex;flex-direction:column;align-items:stretch}.museum-object-no{font-size:8px;letter-spacing:1px;color:#8a877b;border-bottom:1px solid #c9c4b8;padding-bottom:9px}.museum-art{height:190px;margin:15px 10px 18px;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;overflow:hidden;background:#d6d0c1;color:#262d26;box-shadow:0 5px 12px #00000012}.museum-art:before{content:'';position:absolute;width:130px;height:130px;border:1px solid currentColor;border-radius:50%;opacity:.5}.museum-art i{font:40px Georgia;z-index:1}.museum-art b{font:80px Georgia;opacity:.15;position:absolute;right:12px;bottom:-14px}.museum-art-1{background:#d7dfcf;color:#334d3e}.museum-art-2{background:#e8d3b9;color:#9b4e35}.museum-art-3{background:#d6d7e6;color:#434b76}.museum-art-4{background:#d9c5ca;color:#793c51}.museum-object-title{font:21px/1.12 Georgia,serif;margin-bottom:7px}.museum-object-author{font-size:11px;color:#777568}.museum-object-meta{font-size:8px;letter-spacing:.6px;color:#8b877a;margin-top:12px}.museum-object:hover .museum-art{transform:translateY(-3px)}
-/* FIELD NOTES — notebook margin, annotations and numbered entries */
-.theme-fieldnotes{background:#f4efdf;color:#28382e;font-family:Georgia,serif}.field-main{max-width:1450px;margin:auto;display:grid;grid-template-columns:190px minmax(0,1fr);gap:clamp(25px,5vw,70px);padding:clamp(20px,4vw,55px)}.field-margin{border-right:1px solid #d5cdb9;padding-right:20px;display:flex;flex-direction:column;align-items:flex-start}.field-stamp{font:20px/1.05 ui-monospace,monospace;border:2px solid #59735b;color:#59735b;padding:12px;transform:rotate(-4deg)}.field-stamp b{font-size:12px}.field-margin p,.field-margin small{font:8px/1.7 Arial,sans-serif;letter-spacing:1px;color:#78816f;margin-top:32px}.field-line{width:100%;height:1px;background:#d5cdb9;margin-top:auto}.field-header{display:flex;justify-content:space-between;gap:20px;align-items:start}.field-header small{font:8px Arial,sans-serif;letter-spacing:2px;color:#77806e}.field-header h1{font:clamp(40px,6vw,75px)/.92 Georgia,serif;letter-spacing:-3px;margin:18px 0 28px}.field-header h1 i{color:#b55e43}.field-search{display:flex;gap:8px}.field-search input{flex:1;min-width:0}.field-search button{background:#344b3b;color:#f4efdf;border:0;padding:12px}.field-filters{display:flex;gap:7px;flex-wrap:wrap;padding:14px 0;border-bottom:1px solid #d5cdb9}.field-filters button{background:transparent;border:1px solid #d5cdb9;padding:8px}.field-entries{padding:5px 0}.field-entry{width:100%;display:grid;grid-template-columns:40px minmax(0,1fr) 20px;gap:15px;text-align:left;background:transparent;border:0;border-bottom:1px solid #d5cdb9;padding:23px 5px;color:#28382e}.field-entry-number{font:12px ui-monospace,monospace;color:#b55e43;padding-top:4px}.field-entry-main{display:grid;gap:7px}.field-entry-main>small{font:8px Arial,sans-serif;letter-spacing:1px;color:#818571}.field-entry-main>strong{font:24px/1.12 Georgia,serif}.field-entry-main>span{font:12px Arial,sans-serif;color:#657363}.field-entry-main p{font:11px/1.5 Arial,sans-serif;color:#818571;margin:3px 0 0}.field-entry-arrow{color:#b55e43}.field-entry:hover{background:#eae4d2}
-/* READING CALENDAR — an irregular date-grid inspired catalogue index */
-.theme-calendar{background:#f7f6f1;color:#252a27;font-family:Arial,sans-serif}.calendar-main{max-width:1500px;margin:auto;padding:clamp(18px,4vw,55px)}.calendar-header{display:flex;justify-content:space-between;gap:25px;align-items:start}.calendar-header small{font-size:8px;letter-spacing:2px;color:#7a8178}.calendar-header h1{font:clamp(40px,6vw,76px)/.92 Georgia,serif;letter-spacing:-3px;margin:18px 0}.calendar-header h1 i{color:#c75e43;font-weight:normal}.calendar-header p{font-size:12px;color:#747a70}.calendar-toolbar{display:flex;gap:8px;flex-wrap:wrap;padding:22px 0}.calendar-toolbar input{flex:1;min-width:170px}.calendar-toolbar button{background:#252a27;color:white;border:0}.calendar-intro{display:flex;gap:10px;align-items:baseline;padding:13px 0;border-top:1px solid #d9dbd3;border-bottom:1px solid #d9dbd3;font-size:10px;color:#737a70}.calendar-intro strong{font:30px Georgia;color:#252a27}.calendar-intro i{height:14px;width:1px;background:#c8ccc2;margin:0 10px}.calendar-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;padding:18px 0}.calendar-tile{min-height:190px;padding:15px;display:flex;flex-direction:column;align-items:flex-start;text-align:left;border:1px solid #e0e1d8;background:#e9eee5;color:#252a27}.calendar-tile-1{background:#f4e4d8}.calendar-tile-2{background:#e7e4f0}.calendar-tile-3{background:#e6ebef}.calendar-tile-4{background:#f1edcf}.calendar-tile-5{background:#f0e1e5}.calendar-date{font:9px ui-monospace,monospace;color:#737a70}.calendar-date i{font-style:normal;font-size:7px;letter-spacing:1px;margin-left:5px}.calendar-tile>strong{font:21px/1.08 Georgia,serif;margin:25px 0 7px}.calendar-author{font-size:10px;color:#737a70}.calendar-bottom{display:flex;justify-content:space-between;gap:8px;align-items:center;width:100%;margin-top:auto;padding-top:16px}.calendar-bottom small{font-size:8px;color:#737a70}.calendar-bottom b{font:8px ui-monospace,monospace}.calendar-tile:hover{transform:translateY(-2px);box-shadow:0 5px 15px #252a2712}
-/* INVENTORY SCANNER — warehouse-style indexed rows and conspicuous identifiers */
-.theme-inventory{background:#e8ece9;color:#1e3029;font-family:Arial,sans-serif}.inventory-main{max-width:1550px;margin:auto;padding:clamp(18px,3vw,44px)}.inventory-header{display:grid;grid-template-columns:100px 1fr auto;gap:22px;align-items:center;padding-bottom:25px;border-bottom:2px solid #1e3029}.inventory-logo{font:17px ui-monospace,monospace;font-weight:bold;letter-spacing:-1px}.inventory-logo span{display:block;color:#d65b3f}.inventory-header small{font-size:8px;letter-spacing:1.5px;color:#65756b}.inventory-header h1{font-size:clamp(28px,4vw,48px);letter-spacing:-2px;margin:8px 0}.inventory-metrics{display:grid;grid-template-columns:repeat(3,1fr) auto;gap:10px;padding:18px 0}.inventory-metrics>div{background:#d9e1db;padding:16px}.inventory-metrics small{display:block;font-size:8px;letter-spacing:1px;color:#65756b}.inventory-metrics strong{display:block;font:32px ui-monospace,monospace;margin-top:8px}.inventory-metrics strong i{font-size:13px;color:#65756b;font-style:normal}.inventory-metrics button{background:#d65b3f;color:#fff;border:0;padding:15px}.inventory-search{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #c7d0c9;padding:8px 13px}.inventory-search>span{font-size:23px}.inventory-search input{flex:1;min-width:0;border:0;background:transparent}.inventory-search button{border:0;background:transparent;color:#d65b3f}.inventory-filters{display:flex;gap:12px;align-items:end;flex-wrap:wrap;padding:17px 0}.inventory-filters label{display:grid;gap:5px;font-size:9px;letter-spacing:.5px;color:#65756b}.inventory-filters button{padding:9px 14px;background:#1e3029;color:#fff;border:0}.inventory-table{background:#fff;border:1px solid #c7d0c9;overflow-x:auto}.inventory-table-head,.inventory-row{min-width:650px;display:grid;grid-template-columns:45px minmax(190px,1.7fr) minmax(100px,.8fr) 100px 125px 20px;gap:12px;align-items:center;padding:12px 15px}.inventory-table-head{font:8px ui-monospace,monospace;letter-spacing:1px;background:#1e3029;color:#e8ece9}.inventory-row{width:100%;text-align:left;border:0;border-bottom:1px solid #e3e8e4;background:#fff;color:#1e3029}.inventory-row:hover{background:#f0f5f0}.inventory-row>span:first-child{font:10px ui-monospace,monospace;color:#d65b3f}.inventory-row>span:nth-child(2){display:grid;gap:5px}.inventory-row>span:nth-child(2) strong{font-size:12px}.inventory-row>span:nth-child(2) small{font-size:10px;color:#718077}.inventory-shelf{font:10px ui-monospace,monospace;background:#e8ece9;padding:7px}.inventory-row code{font:9px ui-monospace,monospace;color:#d65b3f}.inventory-row>b{color:#d65b3f}
-@media(max-width:760px){.museum-header{grid-template-columns:1fr}.museum-gallery,.calendar-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.field-main{grid-template-columns:1fr}.field-margin{display:none}.field-header{flex-direction:column}.inventory-header{grid-template-columns:1fr}.inventory-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.inventory-metrics button{grid-column:1/-1}.calendar-header{flex-direction:column}}
-
-
-/* INFINITE CANVAS: spatial interface with draggable field, connected nodes and persistent record inspector. */
-.theme-infinite{background:#10151b;color:#e8edf1;--page:#10151b;--surface:#1b232c;--ink:#e8edf1;--muted:#91a0ad;--line:#303b46;--accent:#c4f36b;--accent-soft:#29391e;min-height:100vh;padding:clamp(16px,3vw,38px);font-family:Inter,ui-sans-serif,system-ui,sans-serif}.theme-infinite .theme-picker{color:#9aa8b4}.theme-infinite .theme-picker select{background:#1b232c;color:#e8edf1;border-color:#394653;border-radius:5px}.node-dot{width:40px;height:40px;display:grid;place-items:center;border:1px solid hsl(var(--node-hue) 72% 62%);background:hsl(var(--node-hue) 40% 20%);color:hsl(var(--node-hue) 85% 78%);border-radius:50%;font-size:15px;box-shadow:0 0 0 7px hsl(var(--node-hue) 40% 40% / .08);transition:transform .2s,box-shadow .2s}.node-orbit{position:absolute;left:-8px;top:-8px;width:56px;height:56px;border:1px solid hsl(var(--node-hue) 65% 55% / .18);border-radius:50%}
-
-
-/* Catalogue Workbench: task-oriented three-zone workspace, not a themed list */
-.theme-catalogueworkspace{background:#f4f0e8;color:#20241f;min-height:100vh;font-family:Inter,ui-sans-serif,system-ui,sans-serif;--line:#ded8cc;--muted:#77776d}.cw-app{max-width:1650px;margin:auto;padding:clamp(18px,3vw,42px)}.cw-header{display:flex;justify-content:space-between;align-items:end;gap:24px;padding-bottom:28px;border-bottom:2px solid #20241f}.cw-header>div>p,.cw-header small{font:700 10px ui-monospace,monospace;letter-spacing:1.6px;color:#d34c32;margin:0 0 12px}.cw-header h1{font-size:clamp(35px,5vw,66px);letter-spacing:-3px;line-height:.98;margin:0 0 13px}.cw-header h1 em{font-family:Georgia,serif;font-weight:400;color:#d34c32}.cw-header>div>span{font-size:13px;color:#77776d}.theme-catalogueworkspace .theme-picker{color:#77776d}.theme-catalogueworkspace .theme-picker select{background:#fffdf8;border-color:#ded8cc}.cw-command{display:flex;gap:10px;align-items:end;padding:18px 0;flex-wrap:wrap;border-bottom:1px solid #ded8cc}.cw-command label{display:grid;gap:6px;font:700 9px ui-monospace,monospace;letter-spacing:1px;color:#77776d}.cw-command label:first-child{flex:1;min-width:230px}.cw-command input,.cw-command select{width:100%;padding:12px;background:#fffdf8;border:1px solid #ded8cc;border-radius:0;color:#20241f}.cw-command button,.cw-sort button{padding:12px 14px;border:1px solid #ded8cc;background:#fffdf8;color:#20241f;font-size:11px}.cw-command .cw-export{background:#20241f;color:#fffdf8;border-color:#20241f}.cw-layout{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(340px,.8fr);gap:18px;padding-top:18px;align-items:start}.cw-browser,.cw-tray,.cw-saved{background:#fffdf8;border:1px solid #ded8cc;min-width:0}.cw-browser>header,.cw-tray>header,.cw-saved>header{display:flex;justify-content:space-between;align-items:end;gap:12px;padding:18px;border-bottom:1px solid #ded8cc}.cw-browser header small,.cw-tray header small,.cw-saved header small{font:700 9px ui-monospace,monospace;letter-spacing:1.3px;color:#d34c32}.cw-browser h2,.cw-tray h2,.cw-saved h2{font-size:20px;letter-spacing:-.6px;margin:5px 0 0}.cw-browser>header>span,.cw-tray header>span,.cw-saved header>span{font:10px ui-monospace,monospace;color:#77776d}.cw-sort{display:flex;justify-content:flex-end;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid #ded8cc}.cw-sort label{display:flex;align-items:center;gap:8px;font-size:10px;color:#77776d}.cw-sort select{background:#fffdf8;padding:7px;border-color:#ded8cc}.cw-sort button{padding:8px}.cw-record{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:15px 16px;border-bottom:1px solid #e9e4da}.cw-record:hover{background:#f8f4eb}.cw-record>div:first-child{min-width:0}.cw-code{font:9px ui-monospace,monospace;color:#d34c32}.cw-record h3{font-size:14px;margin:5px 0;overflow-wrap:anywhere}.cw-record p{font-size:11px;color:#62655c;margin:0 0 7px}.cw-record small{font-size:10px;color:#77776d}.cw-record-actions{display:flex;align-items:center;gap:5px;flex-shrink:0}.cw-record-actions button{font-size:10px;padding:8px;border:1px solid #ded8cc;background:transparent;color:#45483f;white-space:nowrap}.cw-record-actions button.active{background:#e4edce;border-color:#a6bd7b}.cw-record-actions .cw-open{font-size:15px}.cw-pagination{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:15px;font-size:10px;color:#77776d}.cw-side{display:grid;gap:18px}.cw-tray,.cw-saved{padding-bottom:8px}.cw-empty{padding:15px 18px;color:#77776d;font-size:12px;line-height:1.6}.cw-compare-table{overflow-x:auto}.cw-compare-row{display:grid;grid-template-columns:78px repeat(var(--unused,3),minmax(0,1fr));border-bottom:1px solid #eee9df}.cw-compare-row>*{padding:11px 9px;border-right:1px solid #eee9df;font-size:10px;overflow-wrap:anywhere;min-width:0}.cw-compare-row>span:first-child{color:#77776d;font:9px ui-monospace,monospace}.cw-compare-label{background:#f8f4eb}.cw-compare-label>span:not(:first-child){font-weight:700;position:relative;padding-right:20px}.cw-compare-label button{position:absolute;right:3px;top:5px;border:0;background:transparent;font-size:15px}.cw-saved-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 16px;border-bottom:1px solid #eee9df}.cw-saved-row>button:first-child{display:grid;gap:5px;text-align:left;border:0;background:transparent;min-width:0}.cw-saved-row strong{font-size:12px}.cw-saved-row small{font-size:10px;color:#77776d}.cw-saved-row>button:last-child{border:0;background:transparent;font-size:18px}.cw-clear-list{margin:12px 16px;border:0;background:transparent;color:#d34c32;font-size:10px;text-decoration:underline}.theme-catalogueworkspace .pagination-controls :deep(button.active){background:#d34c32;border-color:#d34c32}
-@media(max-width:950px){.cw-layout{grid-template-columns:1fr}.cw-side{grid-template-columns:1fr 1fr}.cw-header{align-items:flex-start;flex-direction:column}}
-@media(max-width:620px){.cw-side{grid-template-columns:1fr}.cw-record{align-items:flex-start;flex-direction:column}.cw-record-actions{flex-wrap:wrap}.cw-command label{flex:1}.cw-header h1{letter-spacing:-1.5px}}
-
-
-/* LIVING LIBRARY: activity-led editorial homepage. */
-.theme-livinglibrary{background:#f2f0e7;color:#172c27;padding:clamp(18px,4vw,58px);font-family:Inter,ui-sans-serif,system-ui,sans-serif}.living-app{max-width:1500px;margin:auto}.living-header{display:grid;grid-template-columns:145px 1fr auto;gap:28px;align-items:start;border-bottom:1px solid #c9d0c5;padding-bottom:34px}.living-wordmark{font-size:12px;letter-spacing:3px;line-height:1.4;color:#3e6758}.living-wordmark b{font-size:17px;letter-spacing:1px;color:#172c27}.living-intro>p,.observatory-header>div>p{font:700 9px ui-monospace,monospace;letter-spacing:1.6px;color:#bd573c}.living-intro h1,.observatory-header h1{font-size:clamp(38px,6vw,76px);line-height:.94;letter-spacing:-4px;margin:12px 0 18px}.living-intro h1 em,.observatory-header h1 em{font-family:Georgia,serif;font-weight:400;color:#bd573c}.living-intro>span,.observatory-header>div>span{color:#697a70;font-size:13px}.living-pulse{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #c9d0c5}.living-pulse article{padding:23px 18px;border-right:1px solid #c9d0c5;display:grid;gap:8px}.living-pulse article:first-child{padding-left:0}.living-pulse article:last-child{border:0}.living-pulse small,.living-section-label{font:700 9px ui-monospace,monospace;letter-spacing:1.3px;color:#697a70}.living-pulse strong{font-size:38px;letter-spacing:-2px}.living-pulse span{font-size:11px;color:#697a70}.living-columns{display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(20px,4vw,60px);padding:38px 0;border-bottom:1px solid #c9d0c5}.living-feature{background:#173d32;color:#f6f1e5;padding:clamp(24px,4vw,48px);min-height:330px;display:flex;flex-direction:column;align-items:flex-start}.living-feature .living-section-label{color:#b7d0b8}.living-feature-index{font:10px ui-monospace,monospace;color:#d7a96a;margin-top:30px}.living-feature>p{font:9px ui-monospace,monospace;letter-spacing:1px;color:#b7d0b8}.living-feature h2{font:clamp(30px,4vw,48px) Georgia,serif;line-height:1.05;margin:8px 0}.living-feature>span{font-size:12px;color:#c3d2c6}.living-feature-actions{display:flex;gap:9px;flex-wrap:wrap;margin-top:auto;padding-top:28px}.living-feature-actions button,.living-latest>header>button{background:#d7f06a;border:0;padding:12px 14px;color:#173d32;font-size:11px;font-weight:700}.living-feature-actions button+button{background:transparent;border:1px solid #628274;color:#f6f1e5}.living-subjects{display:flex;flex-direction:column;gap:0}.living-subjects .living-section-label{margin-bottom:15px}.living-subjects>button{display:grid;grid-template-columns:1fr 35px 18px;gap:10px;align-items:center;text-align:left;padding:15px 0;border:0;border-bottom:1px solid #c9d0c5;background:transparent;color:#172c27}.living-subjects>button b{font:11px ui-monospace,monospace;color:#bd573c}.living-subjects>button i{font-style:normal}.living-subjects>button.active{padding-left:10px;background:#e0e6d8}.living-subjects>p,.living-footnote{font-size:10px;line-height:1.6;color:#697a70}.living-latest{padding-top:30px}.living-latest>header,.living-footer,.observatory-records>header,.observatory-records>footer{display:flex;justify-content:space-between;align-items:end;gap:15px;flex-wrap:wrap}.living-latest h2,.observatory-chart h2,.observatory-records h2{font-size:25px;letter-spacing:-1px;margin:8px 0 0}.living-search{display:flex;gap:8px;margin:20px 0;flex-wrap:wrap}.living-search input{flex:1;min-width:220px}.living-search input,.living-search select,.living-search button,.observatory-tools input,.observatory-tools select,.observatory-tools button{padding:12px;border:1px solid #c9d0c5;background:#f9f8f2;color:#172c27}.living-search button,.observatory-tools button{background:#173d32;color:#fff;border-color:#173d32}.living-entry-list{border-top:1px solid #c9d0c5}.living-entry-list>button,.observatory-record{width:100%;display:grid;grid-template-columns:minmax(100px, .25fr) 1fr auto;gap:20px;align-items:center;text-align:left;padding:16px 4px;border:0;border-bottom:1px solid #c9d0c5;background:transparent;color:#172c27}.living-entry-list>button:hover,.observatory-record:hover{background:#e7e9dd}.living-entry-list code,.observatory-record code{font:10px ui-monospace,monospace;color:#bd573c}.living-entry-list>button>span,.observatory-record>span{display:grid;gap:5px}.living-entry-list strong,.observatory-record strong{font-size:13px}.living-entry-list small,.observatory-record small{font-size:11px;color:#697a70}.living-entry-list i,.observatory-record>b{font-style:normal;font-size:10px}.living-footer{padding-top:18px}.living-footer label{display:flex;align-items:center;gap:8px;font-size:10px}.living-footer button{padding:8px;border:1px solid #c9d0c5;background:transparent}
-/* BOOK DETECTIVE: guided clue entry and suspect investigation. */
-.theme-bookdetective{background:#f4efe6;color:#252822;padding:clamp(18px,4vw,55px);font-family:Inter,ui-sans-serif,system-ui,sans-serif}.detective-app{max-width:1450px;margin:auto}.detective-header{display:grid;grid-template-columns:90px 1fr auto;gap:25px;align-items:start;padding-bottom:32px;border-bottom:2px solid #252822}.detective-stamp{border:1px solid #c65338;padding:12px;text-align:center;font:9px ui-monospace,monospace;color:#c65338;transform:rotate(-3deg)}.detective-stamp b{font-size:14px}.detective-header>div:nth-child(2)>p,.detective-label{font:700 9px ui-monospace,monospace;letter-spacing:1.4px;color:#c65338}.detective-header h1{font-size:clamp(38px,5vw,67px);line-height:.95;letter-spacing:-3px;margin:10px 0 14px}.detective-header h1 em{font-family:Georgia,serif;font-weight:400}.detective-header>div:nth-child(2)>span{font-size:12px;color:#77766d}.detective-case{display:grid;grid-template-columns:minmax(260px,.65fr) minmax(0,1.35fr);gap:clamp(22px,4vw,55px);padding-top:28px}.detective-clues{background:#252822;color:#f4efe6;padding:25px;height:max-content}.detective-clues h2{font:28px Georgia,serif;margin:10px 0 25px}.detective-clues label{display:grid;gap:8px;margin:18px 0}.detective-clues label>span{font:9px ui-monospace,monospace;letter-spacing:.6px;color:#c8b8a0}.detective-clues input,.detective-clues select{width:100%;padding:12px;border:1px solid #55584e;background:#32362e;color:#fff}.detective-buttons{display:flex;gap:8px;flex-wrap:wrap}.detective-buttons button{padding:10px;border:1px solid #6e7165;background:transparent;color:#f4efe6;font-size:10px}.detective-buttons button+button{background:#d8ed7a;color:#252822;border-color:#d8ed7a}.detective-tip{font-size:10px;line-height:1.6;color:#c8c8bb;margin-top:22px}.detective-results>header{display:flex;justify-content:space-between;align-items:end;gap:15px;flex-wrap:wrap}.detective-results h2{font-size:27px;letter-spacing:-1px;margin:8px 0}.detective-results>header label{display:flex;align-items:center;gap:8px;font-size:10px}.detective-match-note{padding:12px;background:#e6e8d9;color:#4f6150;font-size:10px;margin:18px 0}.detective-match-note span{color:#63946b;margin-right:8px}.detective-suspect{display:grid;grid-template-columns:35px minmax(0,1fr) auto auto;gap:15px;align-items:center;width:100%;text-align:left;padding:17px 0;border:0;border-bottom:1px solid #d6d0c4;background:transparent;color:#252822}.detective-suspect:hover{background:#ebe5d9}.suspect-number{font:11px ui-monospace,monospace;color:#c65338}.suspect-copy{display:grid;gap:5px;min-width:0}.suspect-copy small,.detective-suspect code{font:9px ui-monospace,monospace;color:#77766d}.suspect-copy strong{font:19px Georgia,serif;overflow-wrap:anywhere}.suspect-copy>span{font-size:11px;color:#77766d}.detective-suspect>b{font-size:10px;font-weight:500}.detective-no-match{padding:45px 20px;text-align:center;border:1px dashed #c9c0b1}.detective-no-match strong{font:25px Georgia,serif}.detective-no-match p{font-size:12px;color:#77766d}.detective-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding-top:20px;font:9px ui-monospace,monospace;color:#77766d}
-/* COLLECTION OBSERVATORY: analytical charts tied to actual loaded records. */
-.theme-observatory{background:#101f28;color:#eff2e8;padding:clamp(18px,4vw,55px);font-family:Inter,ui-sans-serif,system-ui,sans-serif}.observatory-app{max-width:1450px;margin:auto}.observatory-header{display:flex;justify-content:space-between;align-items:end;gap:25px;flex-wrap:wrap;padding-bottom:30px;border-bottom:1px solid #344750}.observatory-header h1{font-size:clamp(38px,5vw,68px);letter-spacing:-3px}.observatory-header>div>span{color:#9aaeb1}.observatory-actions{display:flex;align-items:end;gap:12px}.theme-observatory .theme-picker{color:#9aaeb1}.theme-observatory .theme-picker select{background:#1a303a;border-color:#3d5660;color:#eff2e8}.observatory-actions>button{padding:11px 14px;background:#d6ef72;color:#101f28;border:0;font-size:11px;font-weight:700}.observatory-metrics{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #344750}.observatory-metrics article{padding:22px 16px;border-right:1px solid #344750;display:grid;gap:8px}.observatory-metrics article:first-child{padding-left:0}.observatory-metrics article:last-child{border:0}.observatory-metrics span,.observatory-metrics small{font-size:9px;letter-spacing:.7px;color:#9aaeb1}.observatory-metrics strong{font-size:36px;letter-spacing:-2px}.observatory-charts{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:28px 0}.observatory-chart{border:1px solid #344750;padding:20px;min-width:0}.observatory-chart>header{display:flex;justify-content:space-between;align-items:end;gap:10px;margin-bottom:22px}.observatory-chart>header>div>span,.observatory-records>header>div>span{font:9px ui-monospace,monospace;letter-spacing:1.2px;color:#d6ef72}.observatory-chart h2,.observatory-records h2{font-size:22px}.observatory-chart>header>small{font-size:9px;color:#9aaeb1}.observatory-bar-row{display:grid;grid-template-columns:minmax(80px,.8fr) minmax(70px,1fr) 25px;gap:10px;align-items:center;width:100%;padding:10px 0;text-align:left;background:transparent;color:#eff2e8;border:0}.observatory-bar-row>span:first-child{font-size:11px;overflow-wrap:anywhere}.observatory-bar-track{height:7px;background:#2a414a}.observatory-bar-track i{display:block;height:100%;background:#d6ef72}.observatory-bar-row>b{font:10px ui-monospace,monospace;text-align:right}.observatory-bar-row.active{color:#d6ef72}.observatory-author{width:100%;display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;background:transparent;border:0;border-bottom:1px solid #293e47;color:#eff2e8;text-align:left}.observatory-avatar{width:28px;height:28px;display:grid;place-items:center;border:1px solid #58717a;border-radius:50%;font:11px Georgia,serif}.observatory-author>span:nth-child(2){font-size:11px;overflow-wrap:anywhere}.observatory-author>b{font:9px ui-monospace,monospace;color:#9aaeb1}.observatory-author.active .observatory-avatar{background:#d6ef72;color:#101f28;border-color:#d6ef72}.observatory-tools{display:flex;gap:8px;margin:16px 0;flex-wrap:wrap}.observatory-tools input{flex:1;min-width:200px;background:#1a303a;border-color:#344750;color:#eff2e8}.observatory-tools select{background:#1a303a;border-color:#344750;color:#eff2e8}.observatory-records{padding-top:8px}.observatory-records>header{align-items:end}.observatory-records>header label{font-size:10px}.observatory-records>header select{background:#1a303a;color:#eff2e8;border-color:#344750}.observatory-record{border-bottom:1px solid #344750;color:#eff2e8}.observatory-record:hover{background:#1a303a}.observatory-record code{color:#d6ef72}.observatory-record small{color:#9aaeb1}.observatory-records>footer{padding-top:18px;font:9px ui-monospace,monospace;color:#9aaeb1}
-@media(max-width:760px){.living-header,.detective-header{grid-template-columns:1fr}.living-wordmark{display:none}.living-pulse,.observatory-metrics{grid-template-columns:repeat(2,1fr)}.living-pulse article:nth-child(2){border-right:0}.living-columns,.detective-case,.observatory-charts{grid-template-columns:1fr}.living-entry-list>button{grid-template-columns:85px 1fr}.living-entry-list i{display:none}.detective-stamp{display:none}.detective-suspect{grid-template-columns:25px minmax(0,1fr) auto}.detective-suspect code{display:none}.observatory-header h1{letter-spacing:-2px}.observatory-metrics article:nth-child(2){border-right:0}.observatory-chart>header{align-items:flex-start;flex-direction:column}}
-
-
-/* PROFESSIONAL WORKSPACE: operational three-pane architecture, persistent record inspector, restrained data-first styling. */
-.theme-professional{background:#f3f5f8;color:#202b3a;padding:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--line:#e1e6ed;--muted:#738095;--accent:#315d8b}.pro-workspace{max-width:1900px;margin:0 auto;min-height:100%;padding:0 30px 30px}.pro-topbar{min-height:76px;display:flex;justify-content:space-between;align-items:center;gap:20px;border-bottom:1px solid #dce2ea}.pro-brand{display:flex;align-items:center;gap:12px}.pro-brand-mark{width:38px;height:38px;display:grid;place-items:center;background:#233b55;color:#fff;border-radius:9px;font:700 19px Georgia,serif}.pro-brand>div{display:grid;gap:4px}.pro-brand strong{font-size:11px;letter-spacing:.8px}.pro-brand small{font-size:8px;letter-spacing:1.2px;color:#8390a2}.pro-top-actions{display:flex;align-items:center;gap:20px}.pro-live{display:flex;align-items:center;gap:7px;font-size:10px;color:#65758a}.pro-live i,.pro-result-dot{width:7px;height:7px;background:#2d9a6b;border-radius:50%;display:inline-block}.theme-professional .theme-picker{font-size:9px;color:#758196}.theme-professional .theme-picker select{background:#fff;border-color:#d7dfe8;border-radius:7px;font-size:11px}.pro-export{background:#243e59;border:1px solid #243e59;color:#fff;padding:11px 14px;border-radius:7px;font-size:10px;font-weight:700}.pro-heading{display:flex;justify-content:space-between;align-items:end;gap:20px;padding:29px 0 24px}.pro-breadcrumb{font-size:9px;letter-spacing:1px;color:#8290a2;font-weight:750;margin:0 0 12px}.pro-breadcrumb span{padding:0 8px;color:#c1c9d3}.pro-heading h1{font-size:31px;letter-spacing:-1.1px;margin:0;font-weight:700}.pro-heading p:not(.pro-breadcrumb){font-size:12px;color:#758196;margin:8px 0 0}.pro-heading-count{display:grid;gap:4px;text-align:right}.pro-heading-count strong{font-size:27px;letter-spacing:-1px}.pro-heading-count span{font-size:10px;color:#758196}.pro-commandbar{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #dce3eb;border-radius:9px;min-height:55px;padding:0 14px;box-shadow:0 2px 4px #1c30400a}.pro-command-icon{font-size:25px;color:#687c94}.pro-commandbar input{flex:1;min-width:80px;border:0;outline:0;background:transparent;font-size:12px;color:#25354a}.pro-commandbar input::placeholder{color:#9aa5b4}.pro-commandbar kbd{font:9px ui-monospace,monospace;color:#7e8b9c;background:#f2f4f7;border:1px solid #e3e7ed;border-radius:4px;padding:4px 6px}.pro-command-divider{height:27px;width:1px;background:#e2e7ed;margin:0 3px}.pro-commandbar label{display:flex;align-items:center;gap:7px;font-size:10px;color:#758196;white-space:nowrap}.pro-commandbar label select{border:0;padding:8px 20px 8px 5px;font-size:11px;background:#fff}.pro-direction{height:31px;width:31px;border:1px solid #dfe5ec;border-radius:6px;background:#fff;color:#455c76}.pro-layout{display:grid;grid-template-columns:210px minmax(340px,1fr) 280px;gap:15px;align-items:start;margin-top:17px}.pro-filters,.pro-results,.pro-inspector{background:#fff;border:1px solid #dce3eb;border-radius:9px;min-width:0}.pro-filters{padding:17px;position:sticky;top:12px}.pro-panel-title{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-bottom:15px;border-bottom:1px solid #edf0f4}.pro-panel-title>span,.pro-results-head>div>span,.pro-inspector header>div>span{font-size:9px;letter-spacing:.8px;font-weight:800;color:#667991}.pro-panel-title button{border:0;background:transparent;color:#315d8b;font-size:10px}.pro-filters>label{display:grid;gap:7px;margin-top:17px}.pro-filters>label>span{font-size:10px;color:#596b80;font-weight:650}.pro-filters select{width:100%;font-size:11px;border-color:#dce3eb;border-radius:6px;background:#fbfcfd;padding:10px 23px 10px 9px}.pro-filter-summary{display:grid;gap:6px;margin-top:24px;padding:14px;background:#f3f6fa;border-radius:7px}.pro-filter-summary>span{font-size:8px;letter-spacing:.6px;color:#8290a2;font-weight:800}.pro-filter-summary strong{font-size:28px;letter-spacing:-1px}.pro-filter-summary small{font-size:10px;color:#7c8999}.pro-filter-note{margin-top:18px;padding-top:15px;border-top:1px solid #edf0f4}.pro-filter-note strong{font-size:10px}.pro-filter-note p{font-size:10px;line-height:1.65;color:#7b8898;margin:7px 0 0}.pro-results{overflow:hidden}.pro-results-head{display:flex;justify-content:space-between;align-items:end;gap:10px;padding:18px 18px 15px;border-bottom:1px solid #e8edf2}.pro-results-head h2{font-size:16px;margin:6px 0 0;letter-spacing:-.3px}.pro-view-meta{display:flex;align-items:center;gap:7px;font-size:10px;color:#748297;white-space:nowrap}.pro-view-meta i{font-style:normal;color:#c0c8d2}.pro-record-list{min-height:220px}.pro-record{display:grid;grid-template-columns:15px minmax(0,1fr) 85px 34px 14px;gap:10px;align-items:center;width:100%;text-align:left;padding:15px 17px;border:0;border-bottom:1px solid #edf0f4;background:#fff;color:#27364a}.pro-record:hover{background:#f7f9fc}.pro-record.selected{background:#edf3fa;box-shadow:inset 3px 0 #315d8b}.pro-record-check{width:13px;height:13px;border:1px solid #c9d3df;border-radius:4px;display:grid;place-items:center}.pro-record.selected .pro-record-check{background:#315d8b;border-color:#315d8b}.pro-record.selected .pro-record-check span{width:5px;height:5px;background:#fff;border-radius:1px}.pro-record-main{display:grid;gap:5px;min-width:0}.pro-record-main>strong{font-size:12px;line-height:1.4;overflow-wrap:anywhere}.pro-record-main>small{font-size:10px;color:#78879a}.pro-record-tags{display:flex;gap:5px;flex-wrap:wrap}.pro-record-tags i{font-style:normal;font-size:8px;color:#64758a;background:#f0f3f7;border-radius:3px;padding:4px 5px}.pro-record-id{display:grid;gap:5px;min-width:0}.pro-record-id small{font-size:7px;letter-spacing:.6px;color:#94a0ae}.pro-record-id code{font-size:9px;color:#3e5c7d;overflow:hidden;text-overflow:ellipsis}.pro-record-serial{font:9px ui-monospace,monospace;color:#8c98a7;text-align:right}.pro-record-open{font-size:14px;color:#7186a0}.pro-results-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 17px;background:#fafbfd;color:#7d8999;font-size:9px}.theme-professional .pagination-controls :deep(button){border-radius:5px}.theme-professional .pagination-controls :deep(button.active){background:#315d8b}.pro-empty{padding:45px 20px;text-align:center;color:#7d8999;font-size:11px}.pro-empty strong{color:#28394d;font-size:14px}.pro-empty p{margin:8px 0 15px}.pro-empty button{border:1px solid #dce3eb;border-radius:5px;padding:8px 11px;background:#fff;color:#315d8b;font-size:10px}.pro-inspector{position:sticky;top:12px;overflow:hidden}.pro-inspector>header{display:flex;justify-content:space-between;align-items:center;padding:17px;border-bottom:1px solid #e8edf2}.pro-inspector header h2{font-size:14px;margin:6px 0 0}.pro-inspector-icon{width:30px;height:30px;border:1px solid #dce3eb;border-radius:7px;display:grid;place-items:center;color:#617892}.pro-record-stamp{display:grid;gap:7px;margin:17px;padding:13px;background:#f4f7fa;border:1px solid #e7edf3;border-radius:7px}.pro-record-stamp span{font-size:8px;letter-spacing:.8px;color:#8592a2;font-weight:800}.pro-record-stamp strong{font:600 15px ui-monospace,monospace;color:#315d8b;overflow-wrap:anywhere}.pro-record-stamp small{font-size:9px;color:#7c8999}.pro-inspector h3{font-size:20px;line-height:1.25;letter-spacing:-.5px;margin:17px 17px 6px;overflow-wrap:anywhere}.pro-inspector-author{font-size:11px;color:#78879a;margin:0 17px 20px}.pro-metadata{border-top:1px solid #edf0f4;margin:0 17px}.pro-metadata>div{display:grid;gap:5px;padding:12px 0;border-bottom:1px solid #edf0f4}.pro-metadata span{font-size:8px;letter-spacing:.7px;color:#8b98a8;font-weight:750}.pro-metadata strong{font-size:11px;font-weight:600;overflow-wrap:anywhere}.pro-open-record{display:flex;justify-content:space-between;align-items:center;width:calc(100% - 34px);margin:18px 17px 0;padding:12px;border:0;border-radius:6px;background:#243e59;color:#fff;font-size:11px;font-weight:650}.pro-open-record span{font-size:15px}.pro-inspector-footnote{margin:13px 17px 17px;font-size:9px;line-height:1.6;color:#8995a4}.pro-inspector-empty{padding:42px 20px;text-align:center;display:grid;justify-items:center;gap:10px}.pro-inspector-empty>span{font-size:25px;color:#8fa0b4}.pro-inspector-empty strong{font-size:12px}.pro-inspector-empty p{font-size:10px;line-height:1.6;color:#8491a1;margin:0}
-@media(max-width:1150px){.pro-layout{grid-template-columns:190px minmax(0,1fr)}.pro-inspector{grid-column:1/-1;position:static}.pro-inspector>template{display:block}.pro-metadata{display:grid;grid-template-columns:repeat(2,1fr);gap:0 18px}.pro-inspector h3,.pro-inspector-author{margin-left:17px}.pro-record-stamp{max-width:350px}}@media(max-width:700px){.pro-workspace{padding:0 12px 18px}.pro-topbar,.pro-top-actions{align-items:flex-start;flex-direction:column}.pro-topbar{padding:15px 0;gap:15px}.pro-top-actions{width:100%;gap:10px}.pro-heading{align-items:flex-start}.pro-heading h1{font-size:25px}.pro-heading-count{display:none}.pro-commandbar{flex-wrap:wrap;padding:12px}.pro-commandbar input{flex-basis:calc(100% - 60px)}.pro-command-divider{display:none}.pro-layout{grid-template-columns:1fr}.pro-filters,.pro-inspector{position:static}.pro-record{grid-template-columns:13px minmax(0,1fr) 14px}.pro-record-id,.pro-record-serial{display:none}.pro-record-open{grid-column:3;grid-row:1}.pro-results-head{align-items:flex-start;flex-direction:column}.pro-results-footer{align-items:flex-start}.pro-metadata{grid-template-columns:1fr}}
-
-
-/* Purpose-built dual-audience experiences */.shape-a{width:180px;height:180px;right:-22px;top:-40px;background:#d5ef73}.shape-b{width:135px;height:135px;left:12px;bottom:-48px;background:#86a68b}.cover-tone-0{background:#315943}.cover-tone-1{background:#bb603e}.cover-tone-2{background:#514c80}.cover-tone-3{background:#d6e77a;color:#26392b}.cover-tone-4{background:#397d84}.cover-tone-5{background:#9a6b83}
-.librarian-experience{min-height:100vh;display:grid;grid-template-columns:218px minmax(0,1fr);background:#f3f5f7;color:#1e2935;font-family:Inter,ui-sans-serif,system-ui,sans-serif}
-@media(max-width:760px){.librarian-experience{grid-template-columns:1fr}}
 </style>

@@ -1,909 +1,115 @@
 <template>
-  <div class="control-panel-layout">
-    <!-- LOADER -->
-    <div v-if="loading" class="vault-loader">
-      <div class="minimal-spinner"></div>
-      <span class="loading-label">RETRIEVING_WRITE_AUTHORIZATION</span>
-    </div>
+  <main class="edit-page">
+    <div v-if="loading" class="loading-state"><span class="loader"></span><p>Loading catalogue record…</p></div>
+    <template v-else-if="editableBook">
+      <header class="topbar">
+        <div class="brand-mark">C</div>
+        <div class="topbar-title"><span class="eyebrow">CATALOGUE MANAGEMENT</span><h1>Edit record</h1></div>
+        <div class="topbar-meta"><span class="record-pill">Record {{ editableBook.serial_no || editableBook.record_id || route.params.id }}</span><span class="status-dot"></span><span>Editing</span></div>
+      </header>
 
-    <!-- MAIN EDIT INTERFACE -->
-    <div v-else-if="editableBook" class="panel-container">
-      
-      <!-- 1. LEFT ANCHOR SIDEBAR -->
-      <aside class="identity-anchor-panel">
-        <div class="panel-badge-strip">
-          <span class="panel-badge">REVISION_STATION_01</span>
-          <span class="rank-badge">{{ auditData.userRole }}</span>
-        </div>
-        
-        <div class="hero-identity-block">
-          <span class="meta-label">CURRENT RECORD</span>
-          <h1 class="display-title" :title="editableBook.title">
-            {{ editableBook.title || 'UNTITLED_RECORD' }}
-          </h1>
-          <p class="display-author">
-            BY <strong>{{ editableBook.author || 'UNKNOWN AUTHOR' }}</strong>
-          </p>
+      <section class="record-identity-bar" aria-label="Read-only record identifiers">
+        <div class="identity-heading"><span class="identity-mark" aria-hidden="true">ID</span><div><strong>Record identifiers</strong><small>Reference details · read-only</small></div></div>
+        <div class="identity-value"><span>Record identifier</span><strong>{{ editableBook.serial_no || 'Not assigned' }}</strong></div>
+        <div class="identity-value"><span>Accession ID</span><strong>{{ editableBook.accession_no || 'Not assigned' }}</strong></div>
+        <div class="identity-value"><span>Record ID</span><strong>{{ editableBook.record_id || 'Not assigned' }}</strong></div>
+        <div class="identity-value"><span>Work ID</span><strong>{{ editableBook.work_id || 'Not assigned' }}</strong></div>
+      </section>
 
-          <!-- System Identifiers Mini-Dock -->
-          <div class="identity-tokens-dock">
-            <div class="token-pill">
-              <span class="t-key">SERIAL</span>
-              <span class="t-val text-magenta">#{{ editableBook.serial_no }}</span>
-            </div>
-            <div class="token-pill">
-              <span class="t-key">WORK ID</span>
-              <span class="t-val text-amber">#{{ editableBook.work_id }}</span>
-            </div>
-            <div class="token-pill">
-              <span class="t-key">ACCESSION</span>
-              <span class="t-val text-blue">{{ editableBook.accession_no }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- SECTION NAVIGATION TABS -->
-        <nav class="sidebar-tab-nav" aria-label="Edit Sections">
-          <button 
-            type="button"
-            class="tab-nav-btn"
-            :class="{ active: activeTab === 'work' && !searchQuery }"
-            @click="setTab('work')"
-          >
-            <span class="tab-indicator"></span>
-            <span class="tab-num">01</span>
-            <span class="tab-label">Core Work & Creator</span>
-            <span v-if="tabChangesCount('work')" class="tab-change-dot">
-              {{ tabChangesCount('work') }}
-            </span>
-          </button>
-
-          <button 
-            type="button"
-            class="tab-nav-btn"
-            :class="{ active: activeTab === 'taxonomy' && !searchQuery }"
-            @click="setTab('taxonomy')"
-          >
-            <span class="tab-indicator"></span>
-            <span class="tab-num">02</span>
-            <span class="tab-label">Classification & Genre</span>
-            <span v-if="tabChangesCount('taxonomy')" class="tab-change-dot">
-              {{ tabChangesCount('taxonomy') }}
-            </span>
-          </button>
-
-          <button 
-            type="button"
-            class="tab-nav-btn"
-            :class="{ active: activeTab === 'languages' && !searchQuery }"
-            @click="setTab('languages')"
-          >
-            <span class="tab-indicator"></span>
-            <span class="tab-num">03</span>
-            <span class="tab-label">Language Profiles</span>
-            <span v-if="tabChangesCount('languages')" class="tab-change-dot">
-              {{ tabChangesCount('languages') }}
-            </span>
-          </button>
-
-          <button 
-            type="button"
-            class="tab-nav-btn"
-            :class="{ active: activeTab === 'publication' && !searchQuery }"
-            @click="setTab('publication')"
-          >
-            <span class="tab-indicator"></span>
-            <span class="tab-num">04</span>
-            <span class="tab-label">Imprint & Identifiers</span>
-            <span v-if="tabChangesCount('publication')" class="tab-change-dot">
-              {{ tabChangesCount('publication') }}
-            </span>
-          </button>
-
-          <button 
-            type="button"
-            class="tab-nav-btn"
-            :class="{ active: activeTab === 'location' && !searchQuery }"
-            @click="setTab('location')"
-          >
-            <span class="tab-indicator"></span>
-            <span class="tab-num">05</span>
-            <span class="tab-label">Location & Registry Tokens</span>
-            <span v-if="tabChangesCount('location')" class="tab-change-dot">
-              {{ tabChangesCount('location') }}
-            </span>
-          </button>
-
-          <button 
-            type="button"
-            class="tab-nav-btn"
-            :class="{ active: activeTab === 'notes' && !searchQuery }"
-            @click="setTab('notes')"
-          >
-            <span class="tab-indicator"></span>
-            <span class="tab-num">06</span>
-            <span class="tab-label">Curatorial Remarks</span>
-            <span v-if="tabChangesCount('notes')" class="tab-change-dot">
-              {{ tabChangesCount('notes') }}
-            </span>
-          </button>
-        </nav>
-
-        <!-- ACTION BUTTONS -->
-        <div class="panel-actions-stack">
-          <button type="button" class="btn btn-filled" @click="triggerActionConfirm('commit')">
-            COMMIT CHANGES
-            <span v-if="modifiedFieldsList.length" class="commit-count-pill">
-              {{ modifiedFieldsList.length }}
-            </span>
-          </button>
-          <button type="button" class="btn btn-outline" @click="triggerActionConfirm('abort')">
-            ABORT TRANSACTION
-          </button>
-        </div>
-      </aside>
-
-      <!-- 2. CENTER FORM WORKSPACE -->
-      <main class="form-feed-column">
-        <!-- TOP UTILITY BAR (Quick Search & Mode Controls) -->
-        <div class="workspace-top-bar">
-          <div class="field-finder-wrap">
-            <span class="finder-icon">🔍</span>
-            <input 
-              type="text" 
-              v-model="searchQuery" 
-              placeholder="Find any field instantly (e.g. 'title', 'shelf', 'isbn', 'language')..." 
-              class="finder-input"
-            />
-            <button 
-              v-if="searchQuery" 
-              type="button" 
-              class="finder-clear-btn" 
-              @click="searchQuery = ''"
-            >
-              ✕
+      <div class="workspace">
+        <aside class="sidebar">
+          <div class="sidebar-intro"><span class="eyebrow">WORKSPACE</span><h2>Record details</h2><p>Update bibliographic information and review your changes before saving.</p></div>
+          <label class="search-label" for="field-search">Find a field</label>
+          <div class="search-wrap"><span aria-hidden="true">⌕</span><input id="field-search" v-model="searchQuery" placeholder="Search fields…" /></div>
+          <nav class="section-nav" aria-label="Edit sections">
+            <button v-for="item in [
+              {key:'work',number:'01',label:'Core details',hint:'Title and creator'},
+              {key:'taxonomy',number:'02',label:'Classification',hint:'Category and genres'},
+              {key:'languages',number:'03',label:'Languages',hint:'Text and original'},
+              {key:'publication',number:'04',label:'Publication',hint:'Publisher and ISBN'},
+              {key:'location',number:'05',label:'Location',hint:'Shelf and call number'},
+              {key:'notes',number:'06',label:'Notes',hint:'Additional details'}
+            ]" :key="item.key" type="button" class="nav-item" :class="{active: activeTab === item.key}" @click="setTab(item.key as TabKey)">
+              <span class="nav-number">{{ item.number }}</span><span class="nav-copy"><strong>{{ item.label }}</strong><small>{{ item.hint }}</small></span><span v-if="tabChangesCount(item.key as TabKey)" class="change-count">{{ tabChangesCount(item.key as TabKey) }}</span><span v-else class="nav-arrow">›</span>
             </button>
+          </nav>
+          <div class="sidebar-bottom"><div class="change-summary"><span class="summary-icon">✳</span><div><strong>{{ modifiedFieldsList.length }} changes</strong><small>Compared with original record</small></div></div><button class="text-button" type="button" :disabled="!modifiedFieldsList.length" @click="revertAllModifications">Reset all changes</button></div>
+        </aside>
+
+        <section class="editor-area">
+          <div class="editor-heading"><div><span class="eyebrow">CATALOGUE / EDIT</span><h2>{{ ({work:'Core details',taxonomy:'Classification',languages:'Languages',publication:'Publication',location:'Location',notes:'Notes'} as Record<string,string>)[activeTab] }}</h2><p>Fields marked with <span class="required-star">*</span> are required.</p></div><div class="heading-actions"><span class="change-chip" :class="{'has-changes': modifiedFieldsList.length}">{{ modifiedFieldsList.length ? `${modifiedFieldsList.length} modified` : 'No changes yet' }}</span><button class="button button-quiet" type="button" @click="showAllSections = !showAllSections; searchQuery = ''">{{ showAllSections ? 'Show one section' : 'View all sections' }}</button></div></div>
+
+          <div v-if="searchQuery.trim()" class="search-results-note">Showing fields matching “{{ searchQuery }}”. <button type="button" @click="searchQuery = ''">Clear search</button></div>
+          <div v-if="showAllSections || searchQuery.trim()" class="all-sections-note">All sections are shown. Choose a section from the left to return to focused editing.</div>
+
+          <div class="form-stack">
+            <section v-if="isSectionVisible('work',['title','author','creator','core details'])" class="form-section">
+              <div class="section-heading"><div class="section-index">01</div><div><h3>Core details</h3><p>The main identifying details for this work.</p></div></div>
+              <div class="field-grid">
+                <div id="wrap-title" class="field-block span-2" :class="{'field-modified':isFieldModified('title')}"><div class="label-line"><label for="field-title">Work title <span class="required-star">*</span></label><span v-if="isFieldModified('title')" class="modified-label">Modified</span></div><input id="field-title" v-model="editableBook.title" class="input-control" placeholder="Enter the full title" /><div v-if="isFieldModified('title')" class="field-footer"><span>Original: {{ pristineBook.title || 'Empty' }}</span><button type="button" @click="revertSingleField('title')">Undo</button></div></div>
+                <div id="wrap-author" class="field-block span-2 relative-position" :class="{'field-modified':isFieldModified('author')}"><div class="label-line"><label for="field-author">Author / creator</label><span v-if="isFieldModified('author')" class="modified-label">Modified</span></div><input id="field-author" v-model="editableBook.author" class="input-control" autocomplete="off" placeholder="Search authority names…" @input="searchAuthorsDebounced" @focus="searchAuthorsDebounced" @blur="hideSuggestionsWithDelay('author')" /><div v-if="showAuthorSuggestions && authorSuggestions.length" class="suggestion-list"><button v-for="person in authorSuggestions" :key="person.authority_id" type="button" class="suggestion-item" @mousedown.prevent="selectSuggestion('author',person)"><span class="suggestion-avatar">{{ (person.preferred_name || '?').slice(0,1) }}</span><span class="suggestion-copy"><strong>{{ person.preferred_name }}</strong><small>{{ person.authority_code }}<span v-if="person.full_name"> · {{ person.full_name }}</span></small></span><span class="suggestion-status">{{ person.status }}</span></button></div><p class="field-help">Type at least two characters to search verified authority records.</p><div v-if="isFieldModified('author')" class="field-footer"><span>Original: {{ pristineBook.author || 'Empty' }}</span><button type="button" @click="revertSingleField('author')">Undo</button></div></div>
+              </div>
+            </section>
+
+            <section v-if="isSectionVisible('taxonomy',['classification','category','ddc','genre','taxonomy'])" class="form-section">
+              <div class="section-heading"><div class="section-index">02</div><div><h3>Classification</h3><p>Organise the work for discovery and shelving.</p></div></div>
+              <div class="field-grid"><div class="field-block" :class="{'field-modified':isFieldModified('category')}"><div class="label-line"><label for="field-category">Collection category</label><span v-if="isFieldModified('category')" class="modified-label">Modified</span></div><select id="field-category" v-model="editableBook.category" class="input-control">
+                  <option value="">Choose a category</option>
+                  <option v-if="editableBook.category && !categoryOptions.includes(editableBook.category)" :value="editableBook.category">{{ editableBook.category }}</option>
+                  <option v-for="category in categoryOptions" :key="category" :value="category">{{ category }}</option>
+                </select></div><div class="field-block" :class="{'field-modified':isFieldModified('ddc')}"><div class="label-line"><label for="field-ddc">Dewey Decimal (DDC)</label><span v-if="isFieldModified('ddc')" class="modified-label">Modified</span></div><input id="field-ddc" v-model="editableBook.ddc" class="input-control" placeholder="e.g. 823.914" /></div>
+                <div class="field-block span-2" :class="{'field-modified':isFieldModified('genre')}"><div class="label-line"><label>Genre tags</label><span v-if="isFieldModified('genre')" class="modified-label">Modified</span></div><div class="genre-chips" v-if="liveCompiledGenreChips.length"><span v-for="chip in liveCompiledGenreChips" :key="chip" class="genre-chip">{{ chip }}<button type="button" :aria-label="`Remove ${chip}`" @click="removeGenreChip(chip)">×</button></span><button class="clear-genres" type="button" @click="clearAllGenres">Clear all</button></div><div class="field-grid genre-selects"><div class="field-block"><label for="genre-a">Literary genre</label><select id="genre-a" v-model="selectedGroupAGenre" class="input-control" @change="syncGenreSelection"><option value="">Choose a genre</option><option v-for="genre in genreGroupA" :key="genre" :value="genre">{{ genre }}</option></select></div><div class="field-block"><label for="genre-b">Subject / form</label><select id="genre-b" v-model="selectedGroupBGenre" class="input-control" @change="syncGenreSelection"><option value="">Choose a subject</option><option v-for="genre in genreGroupB" :key="genre" :value="genre">{{ genre }}</option></select></div><div class="field-block"><label for="genre-c">Community genre</label><select id="genre-c" v-model="selectedGroupCGenre" class="input-control" @change="syncGenreSelection"><option value="">Choose a genre</option><option v-for="genre in dynamicCommunityGenres" :key="genre" :value="genre">{{ genre }}</option><option value="CUSTOM_MANUAL_OVERRIDE">Enter manually…</option></select></div><div v-if="showCustomManualGenreField" class="field-block"><label for="genre-custom">Custom genre</label><input id="genre-custom" v-model="customManualGenreText" class="input-control" placeholder="Enter genre" @input="syncManualGenreInput" /></div></div><div v-if="isFieldModified('genre')" class="field-footer"><span>Original: {{ pristineBook.genre || 'Empty' }}</span><button type="button" @click="revertSingleField('genre')">Undo</button></div></div>
+              </div>
+            </section>
+
+            <section v-if="isSectionVisible('languages',['language','original language','languages'])" class="form-section"><div class="section-heading"><div class="section-index">03</div><div><h3>Languages</h3><p>Record the language of this edition and its source.</p></div></div><div class="field-grid"><div class="field-block" :class="{'field-modified':isFieldModified('language')}"><div class="label-line"><label for="field-language">Text language <span class="required-star">*</span></label><span v-if="isFieldModified('language')" class="modified-label">Modified</span></div><select id="field-language" v-model="editableBook.language" class="input-control" required>
+                  <option value="">Choose a language</option>
+                  <option v-if="editableBook.language && !languageOptions.includes(editableBook.language)" :value="editableBook.language">{{ editableBook.language }}</option>
+                  <option v-for="language in languageOptions" :key="language" :value="language">{{ language }}</option>
+                </select></div><div class="field-block" :class="{'field-modified':isFieldModified('original_language')}"><div class="label-line"><label for="field-original-language">Original source language</label><span v-if="isFieldModified('original_language')" class="modified-label">Modified</span></div><select id="field-original-language" v-model="editableBook.original_language" class="input-control">
+                  <option value="">Choose a language (optional)</option>
+                  <option v-if="editableBook.original_language && !languageOptions.includes(editableBook.original_language)" :value="editableBook.original_language">{{ editableBook.original_language }}</option>
+                  <option v-for="language in languageOptions" :key="language" :value="language">{{ language }}</option>
+                </select></div></div></section>
+
+            <section v-if="isSectionVisible('publication',['publication','publisher','year','isbn','imprint'])" class="form-section"><div class="section-heading"><div class="section-index">04</div><div><h3>Publication</h3><p>Edition, publisher and standard identifiers.</p></div></div><div class="field-grid"><div class="field-block relative-position" :class="{'field-modified':isFieldModified('publisher')}"><div class="label-line"><label for="field-publisher">Publisher / imprint</label><span v-if="isFieldModified('publisher')" class="modified-label">Modified</span></div><input id="field-publisher" v-model="editableBook.publisher" class="input-control" autocomplete="off" placeholder="Publisher name" @input="searchPublishersDebounced" @focus="searchPublishersDebounced" @blur="hideSuggestionsWithDelay('publisher')" /><div v-if="showPublisherSuggestions && publisherSuggestions.length" class="suggestion-list"><button v-for="publisher in publisherSuggestions" :key="publisher" type="button" class="suggestion-item" @mousedown.prevent="selectSuggestion('publisher',publisher)"><span class="suggestion-copy"><strong>{{ publisher }}</strong></span><span class="suggestion-status">Use</span></button></div></div><div class="field-block" :class="{'field-modified':isFieldModified('year')}"><div class="label-line"><label for="field-year">Publication year</label><span v-if="isFieldModified('year')" class="modified-label">Modified</span></div><input id="field-year" v-model="editableBook.year" class="input-control" type="text" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="YYYY" aria-describedby="field-year-help" @input="limitYearLength" />
+<div id="field-year-help" class="field-help">Enter a whole-number publication year (1000–{{ new Date().getFullYear() }}).</div></div><div class="field-block span-2" :class="{'field-modified':isFieldModified('isbn')}"><div class="label-line"><label for="field-isbn">ISBN</label><span v-if="isFieldModified('isbn')" class="modified-label">Modified</span></div><input id="field-isbn" v-model="editableBook.isbn" class="input-control" placeholder="ISBN-10 or ISBN-13" /></div></div></section>
+
+            <section v-if="isSectionVisible('location',['location','shelf','call number','accession'])" class="form-section"><div class="section-heading"><div class="section-index">05</div><div><h3>Location</h3><p>Where the physical item is stored.</p></div></div><div class="field-grid"><div class="field-block" :class="{'field-modified':isFieldModified('shelf')}"><div class="label-line"><label for="field-shelf">Shelf location</label><span v-if="isFieldModified('shelf')" class="modified-label">Modified</span></div><input id="field-shelf" v-model="editableBook.shelf" class="input-control" placeholder="Shelf or collection location" /></div><div class="field-block" :class="{'field-modified':isFieldModified('call_no')}"><div class="label-line"><label for="field-call-no">Call number</label><span v-if="isFieldModified('call_no')" class="modified-label">Modified</span></div><input id="field-call-no" v-model="editableBook.call_no" class="input-control" placeholder="Classification / call number" /></div></div></section>
+
+            <section v-if="isSectionVisible('notes',['notes','remarks','conservation'])" class="form-section"><div class="section-heading"><div class="section-index">06</div><div><h3>Notes</h3><p>Additional information for cataloguers and collection staff.</p></div></div><div class="field-block" :class="{'field-modified':isFieldModified('notes')}"><div class="label-line"><label for="field-notes">Catalogue notes</label><span v-if="isFieldModified('notes')" class="modified-label">Modified</span></div><textarea id="field-notes" v-model="editableBook.notes" class="input-control textarea-control" rows="5" placeholder="Add relevant notes about this item…"></textarea><div v-if="isFieldModified('notes')" class="field-footer"><span>Original: {{ pristineBook.notes || 'Empty' }}</span><button type="button" @click="revertSingleField('notes')">Undo</button></div></div></section>
           </div>
 
-          <div class="workspace-view-controls">
-            <span v-if="searchQuery" class="finder-matches-tag">
-              ⚡ FILTER ACTIVE: SHOWING SEARCH MATCHES
-            </span>
-            <button 
-              v-else 
-              type="button"
-              class="view-toggle-btn"
-              @click="showAllSections = !showAllSections"
-            >
-              {{ showAllSections ? '📑 SWITCH TO TABBED VIEW' : '📜 EXPAND ALL SECTIONS' }}
-            </button>
-          </div>
-        </div>
-
-        <div class="form-scroll-wrapper">
-          
-          <!-- TAB 1 / SECTION 01: CORE WORK & CREATOR -->
-          <section 
-            v-show="isSectionVisible('work', ['title', 'author', 'creator'])"
-            class="form-card-section"
-          >
-            <header class="section-header">
-              <div class="header-badge-row">
-                <span class="section-kicker">SECTION 01</span>
-                <span class="section-category-tag">CORE BIBLIOGRAPHIC</span>
-              </div>
-              <h2 class="section-title">Core Work & Creator</h2>
-              <p class="section-desc">Primary identification data for the intellectual work.</p>
-            </header>
-
-            <div class="form-grid">
-              <!-- Book Title -->
-              <div class="field-card col-full required-field" :class="{ 'is-edited': isFieldModified('title') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-title">Work Title</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('title')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-mandatory">REQUIRED</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-title"
-                    type="text" 
-                    v-model="editableBook.title" 
-                    class="large-input font-bold" 
-                    placeholder="Enter complete work title..."
-                  />
-                </div>
-              </div>
-
-              <!-- Author / Creator -->
-              <div class="field-card col-full relative-position" :class="{ 'is-edited': isFieldModified('author') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-author">Author / Primary Creator</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('author')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-neutral">DEFAULT: 'Unknown'</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-author"
-                    type="text" 
-                    v-model="editableBook.author" 
-                    @input="searchAuthorsDebounced"
-                    @focus="showAuthorSuggestions = true"
-                    @blur="hideSuggestionsWithDelay('author')"
-                    class="large-input" 
-                    placeholder="e.g. Leo Tolstoy, Homer, Anonymous..."
-                  />
-                </div>
-                
-                <!-- Autocomplete Tray -->
-                <div 
-                  v-if="showAuthorSuggestions && authorSuggestions.length > 0" 
-                  class="typeahead-overlay-tray"
-                >
-                  <div 
-                    v-for="suggestion in authorSuggestions" 
-                    :key="suggestion"
-                    @mousedown.prevent="selectSuggestion('author', suggestion)"
-                    class="typeahead-node"
-                  >
-                    {{ suggestion }}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- TAB 2 / SECTION 02: TAXONOMY & CLASSIFICATION -->
-          <section 
-            v-show="isSectionVisible('taxonomy', ['category', 'genre', 'ddc', 'classification'])"
-            class="form-card-section"
-          >
-            <header class="section-header">
-              <div class="header-badge-row">
-                <span class="section-kicker">SECTION 02</span>
-                <span class="section-category-tag">TAXONOMY</span>
-              </div>
-              <h2 class="section-title">Classification & Genre Taxonomy</h2>
-              <p class="section-desc">Curatorial classification, subject cataloguing, and thematic genre tags.</p>
-            </header>
-
-            <div class="form-grid">
-              <!-- Category -->
-              <div class="field-card col-half" :class="{ 'is-edited': isFieldModified('category') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-category">Collection Category</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('category')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-neutral">OPTIONAL</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <select 
-                    id="field-category"
-                    v-model="editableBook.category" 
-                    class="large-select"
-                  >
-                    <option value="">-- None / Unassigned --</option>
-                    <option value="Fiction">Fiction</option>
-                    <option value="Non-Fiction">Non-Fiction</option>
-                    <option value="Reference">Reference</option>
-                    <option value="Religious">Religious</option>
-                    <option value="Poetry">Poetry</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- DDC (Dewey Decimal) -->
-              <div class="field-card col-half" :class="{ 'is-edited': isFieldModified('ddc') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-ddc">Dewey Decimal Code (DDC)</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('ddc')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-neutral">OPTIONAL</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-ddc"
-                    type="text" 
-                    v-model="editableBook.ddc" 
-                    class="large-input font-mono" 
-                    placeholder="e.g. 823.914, 294.5..."
-                  />
-                </div>
-              </div>
-
-              <!-- Genre Active Chips Assembly -->
-              <div class="field-card col-full layout-dock" :class="{ 'is-edited': isFieldModified('genre') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-magenta"></span>
-                    <label class="prominent-label">Active Genre Tags</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('genre')" class="edited-tag">MODIFIED</span>
-                    <button 
-                      v-if="liveCompiledGenreChips.length > 0" 
-                      type="button" 
-                      class="clear-inline-btn" 
-                      @click="clearAllGenres"
-                    >
-                      RESET ALL GENRES
-                    </button>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <div class="chip-assembly-dock">
-                    <span 
-                      v-for="chip in liveCompiledGenreChips" 
-                      :key="chip" 
-                      class="active-badge-chip"
-                    >
-                      {{ chip }}
-                      <button 
-                        type="button" 
-                        class="chip-remove" 
-                        @click="removeGenreChip(chip)"
-                        title="Remove genre"
-                      >
-                        ×
-                      </button>
-                    </span>
-                    <span v-if="liveCompiledGenreChips.length === 0" class="dock-empty-text">
-                      No genre facets currently assigned to this record.
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Genre Selectors -->
-              <div class="field-card col-third">
-                <div class="field-card-header">
-                  <label class="prominent-label-sub">Creative Preset (Group A)</label>
-                </div>
-                <div class="field-card-body">
-                  <select 
-                    v-model="selectedGroupAGenre" 
-                    @change="syncGenreSelection" 
-                    class="large-select"
-                  >
-                    <option value="">-- Choose Creative --</option>
-                    <option v-for="g in genreGroupA" :key="g" :value="g">{{ g }}</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="field-card col-third">
-                <div class="field-card-header">
-                  <label class="prominent-label-sub">Factual Preset (Group B)</label>
-                </div>
-                <div class="field-card-body">
-                  <select 
-                    v-model="selectedGroupBGenre" 
-                    @change="syncGenreSelection" 
-                    class="large-select"
-                  >
-                    <option value="">-- Choose Factual --</option>
-                    <option v-for="g in genreGroupB" :key="g" :value="g">{{ g }}</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="field-card col-third">
-                <div class="field-card-header">
-                  <label class="prominent-label-sub">Community / Override (Group C)</label>
-                </div>
-                <div class="field-card-body">
-                  <select 
-                    v-model="selectedGroupCGenre" 
-                    @change="syncGenreSelection" 
-                    class="large-select"
-                  >
-                    <option value="">-- Choose or Override --</option>
-                    <option v-for="g in dynamicCommunityGenres" :key="g" :value="g">{{ g }}</option>
-                    <option disabled class="dropdown-divider-line">────────────────────</option>
-                    <option value="CUSTOM_MANUAL_OVERRIDE">✍ Type Custom Manual Tag</option>
-                  </select>
-                </div>
-              </div>
-
-              <!-- Custom Manual Input -->
-              <div v-if="showCustomManualGenreField" class="field-card col-full border-highlight-amber">
-                <div class="field-card-header">
-                  <label class="prominent-label text-amber">
-                    Custom Manual Genre (Separate Multiples With '/')
-                  </label>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    type="text" 
-                    v-model="customManualGenreText" 
-                    @input="syncManualGenreInput"
-                    placeholder="e.g. PHILOSOPHY/HERMETICISM/ANCIENT" 
-                    class="large-input font-mono" 
-                  />
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- TAB 3 / SECTION 03: LANGUAGE PROFILES -->
-          <section 
-            v-show="isSectionVisible('languages', ['language', 'text language', 'original language', 'translation'])"
-            class="form-card-section"
-          >
-            <header class="section-header">
-              <div class="header-badge-row">
-                <span class="section-kicker">SECTION 03</span>
-                <span class="section-category-tag">LINGUISTICS</span>
-              </div>
-              <h2 class="section-title">Language Profiles</h2>
-              <p class="section-desc">Script language of the holding and source language of original composition.</p>
-            </header>
-
-            <div class="form-grid">
-              <!-- Text Language (Required) -->
-              <div class="field-card col-half required-field" :class="{ 'is-edited': isFieldModified('language') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-text-lang">Text Language (Physical Copy)</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('language')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-mandatory">REQUIRED</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-text-lang"
-                    type="text" 
-                    v-model="editableBook.language" 
-                    class="large-input font-bold" 
-                    placeholder="e.g. English, Latin, Malayalam..."
-                  />
-                  <span class="field-note">
-                    Mandatory archive attribute. Cannot be left blank.
-                  </span>
-                </div>
-              </div>
-
-              <!-- Original Language (Optional) -->
-              <div class="field-card col-half" :class="{ 'is-edited': isFieldModified('original_language') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-orig-lang">Original Source Language</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('original_language')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-neutral">OPTIONAL</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-orig-lang"
-                    type="text" 
-                    v-model="editableBook.original_language" 
-                    class="large-input" 
-                    placeholder="Leave blank if not a translation..."
-                  />
-                  <span class="field-note">
-                    Specify only for translations. Leave empty for native compositions.
-                  </span>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- TAB 4 / SECTION 04: IMPRINT & IDENTIFIERS -->
-          <section 
-            v-show="isSectionVisible('publication', ['publisher', 'year', 'isbn'])"
-            class="form-card-section"
-          >
-            <header class="section-header">
-              <div class="header-badge-row">
-                <span class="section-kicker">SECTION 04</span>
-                <span class="section-category-tag">IMPRINT</span>
-              </div>
-              <h2 class="section-title">Imprint & Identifiers</h2>
-              <p class="section-desc">Publisher provenance, release epoch, and standard ISBN serial identifiers.</p>
-            </header>
-
-            <div class="form-grid">
-              <!-- Publisher -->
-              <div class="field-card col-half relative-position" :class="{ 'is-edited': isFieldModified('publisher') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-publisher">Imprint Publisher</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('publisher')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-neutral">OPTIONAL</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-publisher"
-                    type="text" 
-                    v-model="editableBook.publisher" 
-                    @input="searchPublishersDebounced"
-                    @focus="showPublisherSuggestions = true"
-                    @blur="hideSuggestionsWithDelay('publisher')"
-                    class="large-input" 
-                    placeholder="e.g. Oxford University Press, DC Books..."
-                  />
-                </div>
-                
-                <!-- Autocomplete Tray -->
-                <div 
-                  v-if="showPublisherSuggestions && publisherSuggestions.length > 0" 
-                  class="typeahead-overlay-tray"
-                >
-                  <div 
-                    v-for="suggestion in publisherSuggestions" 
-                    :key="suggestion"
-                    @mousedown.prevent="selectSuggestion('publisher', suggestion)"
-                    class="typeahead-node"
-                  >
-                    {{ suggestion }}
-                  </div>
-                </div>
-              </div>
-
-              <!-- Year -->
-              <div class="field-card col-quarter" :class="{ 'is-edited': isFieldModified('year') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-year">Publication Year</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('year')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-neutral">OPTIONAL</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-year"
-                    type="text" 
-                    v-model="editableBook.year" 
-                    class="large-input font-mono" 
-                    placeholder="e.g. 1984"
-                  />
-                </div>
-              </div>
-
-              <!-- ISBN -->
-              <div class="field-card col-quarter" :class="{ 'is-edited': isFieldModified('isbn') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-isbn">ISBN Code</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('isbn')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-neutral">OPTIONAL</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-isbn"
-                    type="text" 
-                    v-model="editableBook.isbn" 
-                    class="large-input font-mono" 
-                    placeholder="e.g. 9780141036137"
-                  />
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- TAB 5 / SECTION 05: LOCATION & REGISTRY TOKENS -->
-          <section 
-            v-show="isSectionVisible('location', ['shelf', 'call number', 'call_no', 'record id', 'serial', 'accession'])"
-            class="form-card-section"
-          >
-            <header class="section-header">
-              <div class="header-badge-row">
-                <span class="section-kicker">SECTION 05</span>
-                <span class="section-category-tag">STORAGE & LEDGER</span>
-              </div>
-              <h2 class="section-title">Physical Location & Registry Tokens</h2>
-              <p class="section-desc">Physical shelf stack placement, call signature, and immutable registry ledger IDs.</p>
-            </header>
-
-            <div class="form-grid">
-              <!-- Shelf -->
-              <div class="field-card col-half contextual-highlight" :class="{ 'is-edited': isFieldModified('shelf') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-shelf">Shelf Location</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('shelf')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-highlight">EDITABLE</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-shelf"
-                    type="text" 
-                    v-model="editableBook.shelf" 
-                    class="large-input font-mono font-bold" 
-                    placeholder="e.g. FL-01-SH-04"
-                  />
-                </div>
-              </div>
-
-              <!-- Call Number -->
-              <div class="field-card col-half contextual-highlight" :class="{ 'is-edited': isFieldModified('call_no') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-call-no">Call Signature Number</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('call_no')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-highlight">EDITABLE</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <input 
-                    id="field-call-no"
-                    type="text" 
-                    v-model="editableBook.call_no" 
-                    class="large-input font-mono font-bold" 
-                    placeholder="e.g. EN-FIC-12.0"
-                  />
-                </div>
-              </div>
-
-              <!-- System Tokens (Read-Only) -->
-              <div class="field-card col-quarter locked-field">
-                <div class="field-card-header">
-                  <label class="prominent-label-sub">System Record ID</label>
-                </div>
-                <div class="field-card-body">
-                  <div class="static-value font-mono">{{ editableBook.record_id }}</div>
-                </div>
-              </div>
-
-              <div class="field-card col-quarter locked-field">
-                <div class="field-card-header">
-                  <label class="prominent-label-sub">Work Matrix ID</label>
-                </div>
-                <div class="field-card-body">
-                  <div class="static-value font-mono text-amber">#{{ editableBook.work_id }}</div>
-                </div>
-              </div>
-
-              <div class="field-card col-quarter locked-field">
-                <div class="field-card-header">
-                  <label class="prominent-label-sub">Accession No</label>
-                </div>
-                <div class="field-card-body">
-                  <div class="static-value font-mono text-blue">{{ editableBook.accession_no }}</div>
-                </div>
-              </div>
-
-              <div class="field-card col-quarter locked-field">
-                <div class="field-card-header">
-                  <label class="prominent-label-sub">Serial No</label>
-                </div>
-                <div class="field-card-body">
-                  <div class="static-value font-mono text-magenta">#{{ editableBook.serial_no }}</div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- TAB 6 / SECTION 06: CURATORIAL REMARKS -->
-          <section 
-            v-show="isSectionVisible('notes', ['notes', 'remarks', 'curatorial'])"
-            class="form-card-section"
-          >
-            <header class="section-header">
-              <div class="header-badge-row">
-                <span class="section-kicker">SECTION 06</span>
-                <span class="section-category-tag">ARCHIVAL LOG</span>
-              </div>
-              <h2 class="section-title">Curatorial Remarks & Log</h2>
-              <p class="section-desc">Preservation history, physical condition notes, and acquisition backstory.</p>
-            </header>
-
-            <div class="form-grid">
-              <div class="field-card col-full" :class="{ 'is-edited': isFieldModified('notes') }">
-                <div class="field-card-header">
-                  <div class="heading-cluster">
-                    <span class="heading-dot dot-amber"></span>
-                    <label class="prominent-label" for="field-notes">Conservation Notes & Remarks</label>
-                  </div>
-                  <div class="badge-cluster">
-                    <span v-if="isFieldModified('notes')" class="edited-tag">MODIFIED</span>
-                    <span class="status-badge badge-neutral">OPTIONAL</span>
-                  </div>
-                </div>
-                <div class="field-card-body">
-                  <textarea 
-                    id="field-notes"
-                    v-model="editableBook.notes" 
-                    class="large-textarea" 
-                    rows="6"
-                    placeholder="Record binding condition, preservation context, or curatorial restrictions..."
-                  ></textarea>
-                </div>
-              </div>
-            </div>
-          </section>
-
-        </div>
-      </main>
-
-      <!-- 3. RIGHT VIEW PANE: LIVE MODIFICATION INSPECTOR (TABBED MODE ONLY) -->
-      <aside v-if="!showAllSections" class="modification-audit-pane">
-        <header class="audit-pane-header">
-          <div class="audit-pane-title-group">
-            <span class="audit-kicker">CHANGE DETECTOR</span>
-            <h3 class="audit-heading">Active Modifications</h3>
-          </div>
-          <span 
-            class="audit-count-badge" 
-            :class="modifiedFieldsList.length ? 'has-changes' : 'no-changes'"
-          >
-            {{ modifiedFieldsList.length }} {{ modifiedFieldsList.length === 1 ? 'FIELD' : 'FIELDS' }}
-          </span>
-        </header>
-
-        <!-- No Changes Empty State -->
-        <div v-if="modifiedFieldsList.length === 0" class="audit-empty-state">
-          <div class="audit-pulse-icon">✓</div>
-          <h4 class="empty-state-title">All Fields Pristine</h4>
-          <p class="empty-state-copy">
-            No uncommitted modifications detected. As you alter any field across the 6 sections, changes will be tracked here in real time.
-          </p>
-        </div>
-
-        <!-- Live Changes List -->
-        <div v-else class="audit-feed-scroll">
-          <div class="audit-feed-summary-bar">
-            <span>UNCOMMITTED SESSION DIFF</span>
-            <button type="button" class="revert-all-btn" @click="revertAllModifications">
-              REVERT ALL
-            </button>
-          </div>
-
-          <div 
-            v-for="item in modifiedFieldsList" 
-            :key="item.key"
-            class="diff-card"
-            @click="jumpToField(item.tab, item.key)"
-          >
-            <div class="diff-card-top">
-              <div class="diff-field-name">
-                <span class="diff-bullet"></span>
-                <strong>{{ item.label }}</strong>
-              </div>
-              <span class="diff-tab-tag">{{ item.tabLabel }}</span>
-            </div>
-
-            <div class="diff-values-matrix">
-              <div class="diff-row diff-before">
-                <span class="diff-label">PREV:</span>
-                <span class="diff-content" :title="item.oldValue">
-                  {{ item.oldValue || '[EMPTY / UNSET]' }}
-                </span>
-              </div>
-              <div class="diff-row diff-after">
-                <span class="diff-label">NEW:</span>
-                <span class="diff-content" :title="item.newValue">
-                  {{ item.newValue || '[CLEARED / EMPTY]' }}
-                </span>
-              </div>
-            </div>
-
-            <div class="diff-card-footer">
-              <span class="diff-jump-hint">Click to inspect</span>
-              <button 
-                type="button" 
-                class="diff-single-revert" 
-                @click.stop="revertSingleField(item.key)"
-                title="Revert this field to saved state"
-              >
-                Undo
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <footer class="audit-pane-footer">
-          <button 
-            type="button" 
-            class="btn btn-filled commit-audit-btn" 
-            :disabled="modifiedFieldsList.length === 0"
-            @click="triggerActionConfirm('commit')"
-          >
-            COMMIT ({{ modifiedFieldsList.length }})
-          </button>
-        </footer>
-      </aside>
-
-    </div>
-
-    <!-- TOAST NOTIFICATION -->
-    <div v-if="toast" class="toast-banner-notification" :class="toast.type">
-      <span class="toast-indicator"></span>
-      <span class="toast-message-label">{{ toast.message }}</span>
-    </div>
-
-    <!-- CONFIRMATION / REASON MODAL -->
-    <div v-if="activeModalType" class="modal-overlay-shroud">
-      <div 
-        class="modal-alert-box" 
-        :class="activeModalType === 'commit' ? 'border-emerald' : 'border-crimson'"
-      >
-        <div class="modal-tag">SYSTEM_TRANSACTION_ALERT</div>
-        
-        <h3 class="modal-heading">
-          {{ activeModalType === 'commit' ? 'CONFIRM WRITE OPERATION?' : 'ABORT CURRENT TRANSACTION?' }}
-        </h3>
-        
-        <p class="modal-body-text">
-          {{ activeModalType === 'commit' 
-              ? 'You are committing new modifications to the centralized database matrix. This record will update across all client node networks.' 
-              : 'You are abandoning all pending modifications. Uncommitted form changes will be completely deleted from temporary session memory.' 
-          }}
-        </p>
-
-        <div v-if="activeModalType === 'commit'" class="modal-input-field-block">
-          <label class="modal-input-label">SPECIFY OPERATIONAL CHANGE JUSTIFICATION</label>
-          <input 
-            type="text" 
-            v-model="changeReason" 
-            placeholder="e.g., Fixing spelling error / Updating shelf vectors..." 
-            class="modal-reason-input"
-          />
-        </div>
-
-        <div class="countdown-ticker-bar">
-          AUTO-RESOLVING IN: <span class="ticker-value">{{ countdownTimerSeconds }}s</span>
-        </div>
-
-        <div class="modal-button-row">
-          <button 
-            type="button"
-            class="m-btn m-btn-confirm" 
-            :class="activeModalType === 'commit' ? 'bg-emerald' : 'bg-crimson'"
-            @click="executeConfirmedAction"
-          >
-            EXECUTE
-          </button>
-          <button type="button" class="m-btn m-btn-dismiss" @click="closeModalPrompt">
-            DISMISS
-          </button>
-        </div>
+          <section v-if="modifiedFieldsList.length" class="review-panel"><div class="review-heading"><div><span class="eyebrow">REVIEW</span><h3>Changes in this session</h3></div><button class="text-button" type="button" @click="revertAllModifications">Discard all</button></div><div v-for="change in modifiedFieldsList" :key="change.key" class="review-row"><div><strong>{{ change.label }}</strong><small>{{ change.tabLabel }}</small></div><div class="review-values"><span>{{ change.oldValue || 'Empty' }}</span><span class="review-arrow">→</span><span>{{ change.newValue || 'Empty' }}</span></div><button type="button" class="undo-icon" :aria-label="`Undo ${change.label}`" @click="revertSingleField(change.key)">↶</button></div></section>
+        </section>
       </div>
+
+      <footer class="savebar"><div class="savebar-info"><span class="save-indicator" :class="{'dirty':modifiedFieldsList.length}"></span><span>{{ modifiedFieldsList.length ? `${modifiedFieldsList.length} unsaved field changes` : 'No unsaved changes' }}</span></div><div class="savebar-actions"><button class="button button-quiet" type="button" @click="previewOpen = true">Preview document</button><button class="button button-quiet" type="button" @click="triggerActionConfirm('abort')">Cancel</button><button class="button button-save-action" type="button" :disabled="!modifiedFieldsList.length" :aria-disabled="!modifiedFieldsList.length" @click="triggerActionConfirm('commit')">{{ modifiedFieldsList.length ? 'Review & save' : 'No changes to save' }} <span aria-hidden="true">→</span></button></div></footer>
+    </template>
+
+    <div v-if="previewOpen && editableBook" class="preview-backdrop" @click.self="previewOpen = false">
+      <section class="document-preview" role="dialog" aria-modal="true" aria-labelledby="preview-title">
+        <header class="preview-toolbar"><div><span class="eyebrow">CATALOGUE / DOCUMENT PREVIEW</span><h2 id="preview-title">Review edited record</h2><p>Changed fields are highlighted. Review the full record before saving.</p></div><button type="button" class="preview-close" aria-label="Close preview" @click="previewOpen = false">×</button></header>
+        <article class="document-sheet">
+          <div class="document-brand"><span class="document-monogram">C</span><div><strong>CATALOGUE RECORD</strong><small>Bibliographic record · edit preview</small></div><span class="document-record-id">Record {{ editableBook.serial_no || editableBook.record_id || route.params.id }}</span></div>
+          <h1 class="document-title">{{ editableBook.title || 'Untitled work' }}</h1>
+          <p class="document-subtitle">{{ editableBook.author || 'Creator not specified' }}</p>
+          <div class="document-rule"></div>
+          <section class="document-group"><h3>01 · Core details</h3><div class="document-fields"><div v-for="field in [{key:'title',label:'Work title'},{key:'author',label:'Author / creator'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
+          <section class="document-group"><h3>02 · Classification</h3><div class="document-fields"><div v-for="field in [{key:'category',label:'Collection category'},{key:'ddc',label:'Dewey Decimal (DDC)'},{key:'genre',label:'Genre tags'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
+          <section class="document-group"><h3>03 · Languages</h3><div class="document-fields"><div v-for="field in [{key:'language',label:'Text language'},{key:'original_language',label:'Original source language'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
+          <section class="document-group"><h3>04 · Publication</h3><div class="document-fields"><div v-for="field in [{key:'publisher',label:'Publisher / imprint'},{key:'year',label:'Publication year'},{key:'isbn',label:'ISBN'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
+          <section class="document-group"><h3>05 · Location</h3><div class="document-fields"><div v-for="field in [{key:'shelf',label:'Shelf location'},{key:'call_no',label:'Call number'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
+          <section class="document-group"><h3>06 · Notes</h3><div class="document-fields"><div class="document-field" :class="{'document-field-changed':isFieldModified('notes')}"><span class="document-field-label">Catalogue notes</span><div v-if="isFieldModified('notes')" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong class="document-long-value">{{ pristineBook.notes || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong class="document-long-value">{{ editableBook.notes || '—' }}</strong></div></div><strong v-else class="document-long-value document-current-value">{{ editableBook.notes || '—' }}</strong><em v-if="isFieldModified('notes')">EDITED</em></div></div></section>
+          <footer class="document-footer"><span>{{ modifiedFieldsList.length }} field(s) changed</span><span>Preview only · not yet saved</span></footer>
+        </article>
+        <footer class="preview-actions"><span class="preview-legend"><i></i> Highlighted fields have unsaved edits</span><button type="button" class="button button-quiet" @click="previewOpen = false">Continue editing</button><button type="button" class="button button-save-action" :disabled="!modifiedFieldsList.length" @click="previewOpen = false; triggerActionConfirm('commit')">Review & save →</button></footer>
+      </section>
     </div>
 
-  </div>
+    <div v-if="toast" class="toast-message" :class="toast.type" role="status">{{ toast.message }}</div>
+    <div v-if="activeModalType" class="modal-backdrop" @click.self="closeModalPrompt"><section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><div class="modal-mark">{{ activeModalType === 'commit' ? '✓' : '↶' }}</div><span class="eyebrow">CONFIRM ACTION</span><h2 id="confirm-title">{{ activeModalType === 'commit' ? 'Save record changes?' : 'Cancel editing?' }}</h2><p>{{ activeModalType === 'commit' ? 'Your updates will be sent to the catalogue and recorded in the audit trail.' : 'You will leave this page. Any unsaved edits will be discarded.' }}</p><template v-if="activeModalType === 'commit'"><label for="change-reason">Reason for change <span class="optional-label">(optional)</span></label><textarea id="change-reason" v-model="changeReason" class="input-control textarea-control" rows="3" placeholder="Briefly describe why this record is being updated…"></textarea></template><div class="countdown-note">{{ countdownTimerSeconds > 0 ? `Confirming automatically in ${countdownTimerSeconds}s` : 'Processing…' }}</div><div class="modal-actions"><button class="button button-quiet" type="button" @click="closeModalPrompt">Go back</button><button class="button" :class="activeModalType === 'commit' ? 'button-save-action' : 'button-primary'" type="button" :disabled="activeModalType === 'commit' && !modifiedFieldsList.length" @click="executeConfirmedAction">{{ activeModalType === 'commit' ? 'Confirm save' : 'Discard edits' }}</button></div></section></div>
+  </main>
 </template>
 
 <script setup lang="ts">
@@ -926,17 +132,35 @@ type TabKey = 'work' | 'taxonomy' | 'languages' | 'publication' | 'location' | '
 const activeTab = ref<TabKey>('work')
 const searchQuery = ref('')
 const showAllSections = ref(false)
+const previewOpen = ref(false)
 
 const activeModalType = ref<'commit' | 'abort' | null>(null)
 const changeReason = ref<string>("")
 const countdownTimerSeconds = ref<number>(0)
 let nativeIntervalReference: any = null
 
+const selectedAuthority = ref<AuthoritySuggestion | null>(null)
+
 interface ToastNotification {
   message: string
   type: 'success' | 'error'
 }
 const toast = ref<ToastNotification | null>(null)
+
+const categoryOptions = ["Fiction", "Non-Fiction", "Reference", "Religious", "Poetry"]
+const languageOptions = [
+  "Assamese", "Arabic", "Bengali", "Chinese", "English", "French", "German",
+  "Gujarati", "Hindi", "Japanese", "Kannada", "Latin", "Malayalam", "Marathi",
+  "Nepali", "Odia", "Pali", "Persian", "Prakrit", "Punjabi", "Sanskrit", "Spanish",
+  "Tamil", "Telugu", "Urdu", "Other"
+]
+
+function limitYearLength(event: Event) {
+  const input = event.target as HTMLInputElement
+  const digits = input.value.replace(/\D/g, "").slice(0, 4)
+  editableBook.value.year = digits
+  input.value = digits
+}
 
 // Taxonomy Presets
 const genreGroupA = ref([
@@ -962,20 +186,26 @@ const showCustomManualGenreField = ref(false)
 const customManualGenreText = ref("")
 
 // Typeahead suggestions
-const authorSuggestions = ref<string[]>([])
+
+interface AuthoritySuggestion {
+  authority_id: number
+  authority_code: string
+  preferred_name: string
+  full_name?: string
+  authority_type?: string
+  status: string
+}
+
+const authorSuggestions = ref<AuthoritySuggestion[]>([])
 const publisherSuggestions = ref<string[]>([])
+
 const showAuthorSuggestions = ref(false)
 const showPublisherSuggestions = ref(false)
 
 let debounceAuthorTimeout: any = null
 let debouncePublisherTimeout: any = null
 
-const auditData = ref({
-  deviceID: "EDITORIAL-CARDS-STATION-01",
-  ip: "192.168.1.105", 
-  userName: "System Archivist",
-  userRole: "The Chief" 
-})
+
 
 // Active compiled chips from book genre string - explicitly typed string[]
 const liveCompiledGenreChips = computed<string[]>(() => {
@@ -1079,6 +309,60 @@ function setTab(tabKey: TabKey) {
   searchQuery.value = ''
 }
 
+const sectionOrder: TabKey[] = ['work', 'taxonomy', 'languages', 'publication', 'location', 'notes']
+
+function handleEditorKeyboard(event: KeyboardEvent) {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return
+
+  const target = event.target as HTMLElement | null
+  const tagName = target?.tagName?.toLowerCase()
+  const isTyping = !!target && (
+    tagName === 'input' ||
+    tagName === 'textarea' ||
+    tagName === 'select' ||
+    target.isContentEditable
+  )
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    if (activeModalType.value) {
+      closeModalPrompt()
+    } else {
+      triggerActionConfirm('abort')
+    }
+    return
+  }
+
+  if (event.key === 'Enter' && activeModalType.value) {
+    event.preventDefault()
+    executeConfirmedAction()
+    return
+  }
+
+  const isMultilineOrSelect = tagName === 'textarea' || tagName === 'select' || !!target?.isContentEditable
+  const suggestionsOpen = showAuthorSuggestions.value || showPublisherSuggestions.value
+  if (event.key === 'Enter' && !isMultilineOrSelect && !suggestionsOpen) {
+    event.preventDefault()
+    triggerActionConfirm('commit')
+    return
+  }
+
+  // Keep normal cursor movement and text editing intact inside form controls.
+  if (isTyping || activeModalType.value) return
+
+  if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+    event.preventDefault()
+    const currentIndex = sectionOrder.indexOf(activeTab.value)
+    const direction = event.key === 'ArrowRight' ? 1 : -1
+    const nextIndex = Math.min(sectionOrder.length - 1, Math.max(0, currentIndex + direction))
+    if (nextIndex !== currentIndex) {
+      setTab(sectionOrder[nextIndex])
+      showAllSections.value = false
+      nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
+    }
+  }
+}
+
 // Determines if a section card should be shown given the current tab or active search
 function isSectionVisible(sectionKey: string, fieldKeywords: string[]): boolean {
   if (searchQuery.value.trim() !== '') {
@@ -1169,43 +453,113 @@ function clearAllGenres() {
   showCustomManualGenreField.value = false
 }
 
+interface CatalogueGenreRecord {
+  id?: number | string
+  work_id?: number | string
+  serial_no?: number | string
+  title?: string
+  author?: string
+  genre?: string | null
+}
+
 async function harvestSystemGenresMatrix() {
   try {
-    const response = await axios.get('/catalogue?limit=1000')
-    const items = response.data?.data || []
+    const pageSize = 100
+    let offset = 0
     const genresFound = new Set<string>()
-    items.forEach((item: any) => {
-      if (item.genre) {
-        item.genre.split('/').forEach((g: string) => {
-          const clean = g.trim().toUpperCase()
-          if (clean && !genreGroupA.value.includes(clean) && !genreGroupB.value.includes(clean)) {
-            genresFound.add(clean)
-          }
-        })
+    const seenPageSignatures = new Set<string>()
+
+    while (true) {
+      const response = await axios.get('/catalogue', {
+        params: { limit: pageSize, offset }
+      })
+
+      const rawItems: unknown = response.data?.data ?? response.data
+      const items: CatalogueGenreRecord[] = Array.isArray(rawItems)
+        ? rawItems as CatalogueGenreRecord[]
+        : []
+
+      if (items.length === 0) break
+
+      const pageSignature = JSON.stringify(
+        items.map((item: CatalogueGenreRecord) =>
+          item.id ??
+          item.work_id ??
+          item.serial_no ??
+          `${item.title ?? ''}|${item.author ?? ''}`
+        )
+      )
+
+      if (seenPageSignatures.has(pageSignature)) {
+        console.warn(
+          'Catalogue pagination appears not to advance; stopping genre harvest.'
+        )
+        break
       }
-    })
+      seenPageSignatures.add(pageSignature)
+
+      items.forEach((item: CatalogueGenreRecord) => {
+        if (typeof item.genre === 'string' && item.genre.trim()) {
+          item.genre.split('/').forEach((g: string) => {
+            const clean = g.trim().toUpperCase()
+            if (
+              clean &&
+              !genreGroupA.value.includes(clean) &&
+              !genreGroupB.value.includes(clean)
+            ) {
+              genresFound.add(clean)
+            }
+          })
+        }
+      })
+
+      if (items.length < pageSize) break
+      offset += items.length
+    }
+
     dynamicCommunityGenres.value = Array.from(genresFound)
+      .sort((a: string, b: string) => a.localeCompare(b))
   } catch (err) {
-    console.error("Failed to dynamically harvest taxonomy metrics:", err)
+    console.error(
+      'Failed to dynamically harvest taxonomy metrics:', err
+    )
   }
 }
 
+
 function searchAuthorsDebounced() {
   if (debounceAuthorTimeout) clearTimeout(debounceAuthorTimeout)
+
   debounceAuthorTimeout = setTimeout(async () => {
-    const query = editableBook.value.author?.trim() || ""
+    const query = editableBook.value?.author?.trim() || ""
+
     if (query.length < 2) {
       authorSuggestions.value = []
+      showAuthorSuggestions.value = false
       return
     }
+
     try {
-      const response = await axios.get(`/catalogue/authors/search?q=${encodeURIComponent(query)}`)
-      authorSuggestions.value = response.data || []
+      const response = await axios.get('/authority/search', {
+        params: {
+          q: query,
+          usable_only: true,
+          limit: 10
+        }
+      })
+
+      authorSuggestions.value = Array.isArray(response.data)
+      ? response.data
+      : []
+
+      showAuthorSuggestions.value = authorSuggestions.value.length > 0
     } catch (err) {
-      console.error("Author micro-lookup breakdown:", err)
+      console.error("Authority search failed:", err)
+      authorSuggestions.value = []
     }
   }, 200)
 }
+
 
 function searchPublishersDebounced() {
   if (debouncePublisherTimeout) clearTimeout(debouncePublisherTimeout)
@@ -1213,28 +567,39 @@ function searchPublishersDebounced() {
     const query = editableBook.value.publisher?.trim() || ""
     if (query.length < 2) {
       publisherSuggestions.value = []
+      showPublisherSuggestions.value = false
       return
     }
     try {
       const response = await axios.get(`/catalogue/publishers/search?q=${encodeURIComponent(query)}`)
       publisherSuggestions.value = response.data || []
+      showPublisherSuggestions.value = publisherSuggestions.value.length > 0
     } catch (err) {
       console.error("Publisher micro-lookup breakdown:", err)
     }
   }, 200)
 }
 
-function selectSuggestion(type: 'author' | 'publisher', value: string) {
-  if (type === 'author') {
-    editableBook.value.author = value
+
+function selectSuggestion(
+  type: 'author' | 'publisher',
+  value: AuthoritySuggestion | string
+) {
+  if (type === 'author' && typeof value !== 'string') {
+    editableBook.value.author = value.preferred_name
+
+    // Keep the selected registry record available for the next step.
+    selectedAuthority.value = value
+
     authorSuggestions.value = []
     showAuthorSuggestions.value = false
-  } else {
+  } else if (type === 'publisher' && typeof value === 'string') {
     editableBook.value.publisher = value
     publisherSuggestions.value = []
     showPublisherSuggestions.value = false
   }
 }
+
 
 function hideSuggestionsWithDelay(type: 'author' | 'publisher') {
   setTimeout(() => {
@@ -1264,7 +629,22 @@ async function fetchRecordData() {
 }
 
 function triggerActionConfirm(actionType: 'commit' | 'abort') {
+  // Saving is only allowed when at least one tracked field differs from the original record.
+  if (actionType === 'commit' && modifiedFieldsList.value.length === 0) {
+    triggerToastNotification('No changes to save.', 'error')
+    return
+  }
+
   if (actionType === 'commit') {
+    const year = Number(editableBook.value?.year)
+    const currentYear = new Date().getFullYear()
+    if (editableBook.value?.year !== null && editableBook.value?.year !== undefined && String(editableBook.value.year).trim() !== '' && (!/^\d{4}$/.test(String(editableBook.value.year)) || !Number.isInteger(year) || year < 1000 || year > currentYear)) {
+      triggerToastNotification(`Year must be between 1000 and ${currentYear}.`, 'error')
+      setTab('publication')
+      nextTick(() => document.getElementById('field-year')?.focus())
+      return
+    }
+
     // Validate mandatory Text Language
     if (!editableBook.value?.language || !editableBook.value.language.trim()) {
       triggerToastNotification("Validation Error: Text Language is required.", "error")
@@ -1312,6 +692,12 @@ function closeModalPrompt() {
 }
 
 async function saveRecord() {
+  // Guard against saving unchanged data, including calls outside the disabled button.
+  if (modifiedFieldsList.value.length === 0) {
+    triggerToastNotification('No changes to save.', 'error')
+    return
+  }
+
   const id = route.params.id || editableBook.value?.serial_no
 
   if (!editableBook.value?.language || !editableBook.value.language.trim()) {
@@ -1324,6 +710,20 @@ async function saveRecord() {
     triggerToastNotification("Validation Error: Book Title cannot be empty.", "error")
     setTab('work')
     return
+  }
+
+  // Publication year is optional, but must be valid when provided.
+  const yearValue = editableBook.value.year
+  const currentYear = new Date().getFullYear()
+  if (yearValue !== null && yearValue !== undefined && String(yearValue).trim() !== '') {
+    const year = Number(yearValue)
+    if (!/^\d{4}$/.test(String(editableBook.value.year)) || !Number.isInteger(year) || year < 1000 || year > currentYear) {
+      triggerToastNotification(`Year must be between 1000 and ${currentYear}.`, 'error')
+      setTab('publication')
+      nextTick(() => document.getElementById('field-year')?.focus())
+      return
+    }
+    editableBook.value.year = year
   }
 
   try {
@@ -1369,1305 +769,517 @@ function cancelEdit() {
 }
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleEditorKeyboard)
   if (nativeIntervalReference) clearInterval(nativeIntervalReference)
   if (debounceAuthorTimeout) clearTimeout(debounceAuthorTimeout)
   if (debouncePublisherTimeout) clearTimeout(debouncePublisherTimeout)
 })
 
-onMounted(() => fetchRecordData())
+onMounted(() => {
+  window.addEventListener('keydown', handleEditorKeyboard)
+  fetchRecordData()
+})
 </script>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+/* ==========================================================================
+   1. CORE PAGE VARIABLES & LAYOUT BASICS
+   ================================================================---------- */
+:global(*) { box-sizing: border-box; }
 
-/* =========================================================
-   BASE LAYOUT
-========================================================= */
-.control-panel-layout {
-  background-color: #0b0c10;
-  color: #f1f5f9;
-  position: fixed !important;
-  top: 0 !important; left: 0 !important;
-  width: 100vw !important; height: 100vh !important;
-  z-index: 9999 !important;
-  display: flex; 
-  overflow: hidden;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  margin: 0 !important; 
-  padding: 0 !important;
+.edit-page {
+  --page: #f1f5f9;
+  --surface: #ffffff;
+  --surface-soft: #f8fafc;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --accent: #2563eb;
+  --accent-dark: #1d4ed8;
+  --accent-pale: #eff6ff;
+  --rose: #e0e7ff;
+  min-height: 100vh;
+  background: var(--page);
+  color: var(--ink);
+  font-family: "Noto Sans Malayalam", "Noto Sans", "Nirmala UI", "Kartika", "Arial Unicode MS", sans-serif;
+  padding-bottom: 84px;
 }
 
-.panel-container {
-  display: flex;
-  width: 100% !important; 
-  height: 100% !important;
-  margin: 0 !important; 
-  padding: 0 !important;
+/* ==========================================================================
+   2. TYPOGRAPHY HIERARCHY (Headings, Inputs, and Field Values)
+   ================================================================---------- */
+/* Field Headings & Labels */
+.label-line label, 
+.field-block > label, 
+.confirm-modal label, 
+.search-label,
+.document-field > .document-field-label,
+.section-heading h3,
+.topbar h1 {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
+  font-weight: 800 !important;
+  color: #7b586d !important;
+  font-size: 14px;
+  letter-spacing: .025em;
 }
 
-/* =========================================================
-   1. LEFT IDENTITY & NAVIGATION SIDEBAR
-========================================================= */
-.identity-anchor-panel {
-  width: 330px;
-  background-color: #07080b !important;
-  border-right: 1px solid #1e222b !important;
-  padding: 28px 20px;
+/* Field Values & Inputs */
+.input-control,
+.search-wrap input,
+.textarea-control,
+.read-only-value,
+.document-field > strong, 
+.document-value-comparison strong,
+.document-current-value,
+.review-values span {
+  font-family: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif !important;
+  font-size: 15px !important;
+  font-weight: 500;
+  color: #20131b !important;
+}
+
+.input-control {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #f7f0ed;
+  padding: 10px 12px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.input-control::placeholder { color: #b0a1a8; }
+.input-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #94678320; }
+.textarea-control { resize: vertical; min-height: 115px; line-height: 1.7; }
+
+/* ==========================================================================
+   3. PLAYFUL SIDEBAR STYLING
+   ================================================================---------- */
+.sidebar {
+  align-self: start;
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
-  flex-shrink: 0;
+  gap: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  position: sticky;
+  top: 178px;
+  max-height: calc(100vh - 198px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
-.panel-badge-strip {
+.sidebar,
+.sidebar-intro h2,
+.sidebar-intro p,
+.search-label,
+.search-wrap input {
+  font-family: 'Comic Sans MS', 'Chalkboard SE', 'Comic Neue', 'Bubblegum Sans', 'Trebuchet MS', sans-serif !important;
+}
+
+.sidebar-intro {
+  width: 100%;
+  margin: 0 0 20px;
+  padding: 0 0 18px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+}
+.sidebar-intro h2 { font: 700 20px Manrope, sans-serif; letter-spacing: -.04em; margin: 8px 0; }
+.sidebar-intro p, .editor-heading p, .section-heading p { font-size: 13px; line-height: 1.6; color: var(--muted); margin: 0; }
+
+.search-wrap {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 10px;
+  background: #f0e7e4;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  padding: 0 12px;
   margin-bottom: 18px;
-}
-
-.panel-badge {
-  font-size: 10px;
-  font-weight: 700;
-  color: #64748b;
-  letter-spacing: 1.8px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.rank-badge {
-  color: #34d399;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  background: rgba(16, 185, 129, 0.15);
-  padding: 4px 10px;
-  border-radius: 4px;
-  border: 1px solid rgba(16, 185, 129, 0.3);
-}
-
-.hero-identity-block {
-  margin-bottom: 20px;
-  border-bottom: 1px solid #1e222b;
-  padding-bottom: 18px;
-}
-
-.meta-label {
-  font-size: 10px;
-  color: #94a3b8;
-  letter-spacing: 1.2px;
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 600;
-}
-
-.display-title {
-  font-family: 'Cinzel', serif;
+  color: var(--accent);
   font-size: 20px;
-  font-weight: 800;
-  line-height: 1.3;
-  color: #ffffff;
-  margin: 0 0 8px 0;
-  word-break: break-word;
+  min-height: 44px;
 }
+.search-wrap input { width: 100%; height: 42px; border: 0; outline: 0; background: transparent; color: var(--ink); }
 
-.display-author {
-  font-size: 12px;
-  color: #94a3b8;
-  margin: 0 0 14px 0;
-}
-
-.display-author strong {
-  color: #f1f5f9;
-}
-
-.identity-tokens-dock {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-
-.token-pill {
-  background: #11131a;
-  border: 1px solid #232834;
-  padding: 6px 8px;
-  border-radius: 6px;
+.section-nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.t-key {
-  font-size: 8px;
-  color: #64748b;
-  font-weight: 700;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.t-val {
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-/* Tab Navigation Buttons */
-.sidebar-tab-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: auto;
-}
-
-.tab-nav-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 10px 14px;
-  color: #94a3b8;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  text-align: left;
-  position: relative;
-  transition: all 0.15s ease;
-}
-
-.tab-indicator {
-  width: 4px;
-  height: 0;
-  border-radius: 99px;
-  background-color: #38bdf8;
-  position: absolute;
-  left: 4px;
-  transition: height 0.2s ease;
-}
-
-.tab-nav-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #ffffff;
-}
-
-.tab-nav-btn.active {
-  background: #171b24;
-  border-color: #2b3242;
-  color: #ffffff;
-  font-weight: 700;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-.tab-nav-btn.active .tab-indicator {
-  height: 18px;
-}
-
-.tab-num {
-  font-size: 10px;
-  color: #64748b;
-  font-weight: 700;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.tab-nav-btn.active .tab-num {
-  color: #38bdf8;
-}
-
-.tab-label {
-  flex-grow: 1;
-}
-
-.tab-change-dot {
-  background: #fbbf24;
-  color: #0b0c10;
-  font-size: 10px;
-  font-weight: 800;
-  border-radius: 99px;
-  padding: 2px 6px;
-  line-height: 1;
-}
-
-/* Actions */
-.panel-actions-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 18px;
-  border-top: 1px solid #1e222b;
-}
-
-.commit-count-pill {
-  background: #0b0c10;
-  color: #34d399;
-  font-size: 11px;
-  font-weight: 800;
-  padding: 2px 7px;
-  border-radius: 99px;
-  margin-left: 6px;
-}
-
-.btn {
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  padding: 12px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: center;
-  transition: all 0.15s ease;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-filled {
-  background-color: #f1f5f9;
-  color: #0b0c10;
-}
-
-.btn-filled:hover {
-  background-color: #ffffff;
-  box-shadow: 0 4px 14px rgba(255, 255, 255, 0.2);
-}
-
-.btn-outline {
-  border: 1px solid #333a4a;
-  color: #cbd5e1;
-  background: transparent;
-}
-
-.btn-outline:hover {
-  background-color: rgba(255, 255, 255, 0.05);
-  color: #ffffff;
-  border-color: #64748b;
-}
-
-/* =========================================================
-   2. CENTER FORM WORKSPACE
-========================================================= */
-.form-feed-column {
-  flex-grow: 1;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background-color: #0d0f14;
-  overflow: hidden;
-}
-
-/* TOP SEARCH / UTILITY BAR */
-.workspace-top-bar {
-  padding: 14px 32px;
-  border-bottom: 1px solid #1e222b;
-  background-color: #10121a;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-}
-
-.field-finder-wrap {
-  position: relative;
-  max-width: 440px;
+  align-items: stretch;
+  gap: 5px;
   width: 100%;
-  display: flex;
-  align-items: center;
-}
-
-.finder-icon {
-  position: absolute;
-  left: 14px;
-  font-size: 13px;
-  opacity: 0.7;
-}
-
-.finder-input {
-  width: 100%;
-  background: #171a23;
-  border: 1px solid #282e3c;
-  border-radius: 6px;
-  padding: 10px 38px;
-  color: #ffffff;
-  font-family: inherit;
-  font-size: 13px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.finder-input:focus {
-  outline: none;
-  border-color: #38bdf8;
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
-}
-
-.finder-clear-btn {
-  position: absolute;
-  right: 12px;
-  background: transparent;
-  border: none;
-  color: #64748b;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.finder-clear-btn:hover {
-  color: #ffffff;
-}
-
-.workspace-view-controls {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.finder-matches-tag {
-  font-size: 11px;
-  font-weight: 700;
-  color: #38bdf8;
-  letter-spacing: 0.5px;
-}
-
-.view-toggle-btn {
-  background: #171a23;
-  border: 1px solid #282e3c;
-  color: #cbd5e1;
-  border-radius: 6px;
-  padding: 8px 14px;
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  letter-spacing: 0.5px;
-  transition: all 0.15s ease;
-}
-
-.view-toggle-btn:hover {
-  border-color: #475569;
-  color: #ffffff;
-  background-color: #1f2330;
-}
-
-/* SCROLL WRAPPER */
-.form-scroll-wrapper {
-  flex-grow: 1;
-  overflow-y: auto;
-  padding: 28px 32px 80px 32px;
-  max-width: 900px;
-  box-sizing: border-box;
-}
-
-.form-scroll-wrapper::-webkit-scrollbar {
-  width: 6px;
-}
-.form-scroll-wrapper::-webkit-scrollbar-track {
-  background: #0d0f14;
-}
-.form-scroll-wrapper::-webkit-scrollbar-thumb {
-  background: #232834;
-  border-radius: 3px;
-}
-
-/* =========================================================
-   FORM SECTION CARDS
-========================================================= */
-.form-card-section {
-  background-color: #13161f;
-  border: 1px solid #232733;
-  border-radius: 12px;
-  padding: 24px 28px;
-  margin-bottom: 24px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
-}
-
-.section-header {
-  border-bottom: 1px solid #232733;
-  padding-bottom: 14px;
-  margin-bottom: 20px;
-}
-
-.header-badge-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
-}
-
-.section-kicker {
-  font-size: 10px;
-  font-weight: 800;
-  color: #34d399;
-  letter-spacing: 1.8px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.section-category-tag {
-  font-size: 10px;
-  font-weight: 700;
-  color: #94a3b8;
-  letter-spacing: 1px;
-  background: #1a1e2a;
-  padding: 3px 8px;
-  border-radius: 4px;
-}
-
-.section-title {
-  font-size: 19px;
-  font-weight: 700;
-  color: #ffffff;
-  margin: 0 0 6px 0;
-  letter-spacing: -0.2px;
-}
-
-.section-desc {
-  font-size: 12px;
-  color: #94a3b8;
   margin: 0;
-  line-height: 1.4;
-}
-
-/* FORM GRID */
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  gap: 18px;
-}
-
-.col-full { grid-column: span 12; }
-.col-half { grid-column: span 6; }
-.col-third { grid-column: span 4; }
-.col-quarter { grid-column: span 3; }
-
-/* =========================================================
-   TWO-TIER FIELD CARD (VIBRANT GOLD HEADINGS)
-========================================================= */
-.field-card {
-  display: flex;
-  flex-direction: column;
-  background-color: #161a25;
-  border: 1px solid #293042;
-  border-radius: 8px;
-  overflow: hidden;
-  box-sizing: border-box;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.field-card:focus-within {
-  border-color: #fbbf24 !important;
-  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.2);
-}
-
-.field-card.required-field {
-  border-left: 5px solid #fbbf24;
-}
-
-.field-card.contextual-highlight {
-  border-left: 5px solid #38bdf8;
-}
-
-.field-card.is-edited {
-  border-color: #fbbf24;
-  box-shadow: 0 0 12px rgba(251, 191, 36, 0.15);
-}
-
-.field-card.locked-field {
-  background-color: #10121a;
-  border-color: #1e2330;
-}
-
-.border-highlight-amber {
-  border-color: rgba(245, 158, 11, 0.5) !important;
-}
-
-/* HEADER STRIP */
-.field-card-header {
-  background-color: #181c28;
-  border-bottom: 1px solid #283042;
-  padding: 10px 14px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.heading-cluster {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.badge-cluster {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.edited-tag {
-  background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
-  border: 1px solid rgba(251, 191, 36, 0.4);
-  font-size: 9px;
-  font-weight: 800;
-  padding: 2px 6px;
-  border-radius: 3px;
-  letter-spacing: 0.5px;
-}
-
-.heading-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.dot-amber {
-  background-color: #fbbf24;
-  box-shadow: 0 0 8px rgba(251, 191, 36, 0.7);
-}
-
-.dot-magenta {
-  background-color: #f472b6;
-  box-shadow: 0 0 8px rgba(244, 114, 182, 0.7);
-}
-
-/* PROMINENT HEADING LABELS (15px BOLD ELECTRIC AMBER) */
-.prominent-label {
-  font-size: 15px;
-  font-weight: 800;
-  color: #fbbf24 !important;
-  letter-spacing: 0.2px;
-  cursor: pointer;
-  line-height: 1.2;
-}
-
-.prominent-label-sub {
-  font-size: 13px;
-  font-weight: 800;
-  color: #fbbf24 !important;
-  letter-spacing: 0.2px;
-}
-
-/* STATUS BADGES */
-.status-badge {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 3px 7px;
-  border-radius: 4px;
-  letter-spacing: 0.5px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.badge-mandatory {
-  background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
-  border: 1px solid rgba(251, 191, 36, 0.35);
-}
-
-.badge-neutral {
-  background: #252c3c;
-  color: #94a3b8;
-  border: 1px solid #333c50;
-}
-
-.badge-highlight {
-  background: rgba(56, 189, 248, 0.25);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.4);
-}
-
-/* INPUT BODY STRIP */
-.field-card-body {
-  background-color: #0f121a;
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-}
-
-.field-note {
-  font-size: 11px;
-  color: #94a3b8;
-  margin-top: 6px;
-  line-height: 1.4;
-}
-
-/* INPUT CONTROLS */
-.large-input {
-  background: transparent;
-  border: none;
-  color: #ffffff;
-  font-family: inherit;
-  font-size: 15px;
-  padding: 4px 0;
-  width: 100%;
-}
-
-.large-input:focus {
-  outline: none;
-}
-
-.large-select {
-  background: transparent;
-  border: none;
-  color: #ffffff;
-  font-family: inherit;
-  font-size: 15px;
-  width: 100%;
-  padding: 4px 0;
-  cursor: pointer;
-}
-
-.large-select:focus {
-  outline: none;
-}
-
-.large-select option {
-  background-color: #171b26;
-  color: #ffffff;
-}
-
-.large-textarea {
-  background: transparent;
-  border: none;
-  color: #f1f5f9;
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1.6;
-  resize: vertical;
-  min-height: 120px;
-  width: 100%;
-  box-sizing: border-box;
-  padding-top: 4px;
-}
-
-.large-textarea:focus {
-  outline: none;
-}
-
-.static-value {
-  font-size: 13px;
-  font-weight: 700;
-  padding: 4px 0;
-}
-
-/* GENRE CHIP ASSEMBLY DOCK */
-.layout-dock {
-  background-color: transparent;
-}
-
-.chip-assembly-dock {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-height: 30px;
-  align-items: center;
-}
-
-.active-badge-chip {
-  font-size: 11px;
-  font-weight: 700;
-  background-color: rgba(236, 72, 153, 0.18);
-  border: 1px solid rgba(236, 72, 153, 0.4);
-  color: #f472b6;
-  padding: 4px 10px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.chip-remove {
-  background: transparent;
-  border: none;
-  color: #f472b6;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
   padding: 0;
 }
 
-.chip-remove:hover {
-  color: #ffffff;
-}
-
-.clear-inline-btn {
+.section-nav .nav-item {
+  font-family: 'Comic Sans MS', 'Chalkboard SE', 'Comic Neue', 'Trebuchet MS', sans-serif !important;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 14px !important;
   background: transparent;
-  border: none;
-  color: #f472b6;
-  font-size: 10px;
-  font-weight: 700;
+  color: var(--ink);
   cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.15s ease !important;
 }
+.section-nav .nav-item:hover { transform: translateX(4px) scale(1.02); background: #e5d8dc; }
+.section-nav .nav-item.active { background-color: #f7d6e0 !important; border-color: #e0b1c5 !important; box-shadow: 0 4px 12px rgba(129, 87, 111, 0.15) !important; }
+.nav-number { font-family: 'Comic Sans MS', 'Chalkboard SE', 'Trebuchet MS', sans-serif !important; font-weight: 700; letter-spacing: -0.05em; color: #a18b96; }
+.section-nav .nav-item.active .nav-number { color: var(--accent); }
+.nav-copy { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; align-self: center; }
+.nav-copy strong { font-size: 13px; font-weight: 700; line-height: 1.4; }
+.nav-copy small { font-size: 11px; color: var(--muted); line-height: 1.4; }
+.nav-arrow, .change-count { justify-self: end; }
+.change-count { min-width: 20px; height: 20px; border-radius: 7px; display: grid; place-items: center; background: #e7cbd6; color: #704258; font-size: 10px; font-weight: 700; }
 
-.dock-empty-text {
-  font-size: 12px;
-  color: #64748b;
-  font-style: italic;
-}
+.sidebar-bottom { margin-top: 22px; padding: 16px 0 0; border-top: 1px solid var(--line); width: 100%; }
+.change-summary { display: flex; align-items: center; gap: 10px; }
+.summary-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; background: #e2d1da; color: var(--accent); font-size: 16px; }
+.change-summary div { display: grid; gap: 3px; }
+.change-summary strong { font-size: 13px; }
+.change-summary small { font-size: 11px; color: var(--muted); }
+.text-button { border: 0; background: transparent; color: var(--accent-dark); font: 600 11px 'DM Sans', sans-serif; padding: 9px 0; cursor: pointer; }
+.text-button:disabled { opacity: .35; cursor: default; }
+.sidebar-bottom > .text-button { margin-left: 42px; }
 
-/* TYPEAHEAD DROPDOWN */
-.relative-position {
-  position: relative;
-}
-
-.typeahead-overlay-tray {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  width: 100%;
-  background-color: #131722;
-  border: 1px solid #333a4d;
-  border-radius: 6px;
-  margin-top: 6px;
-  max-height: 180px;
-  overflow-y: auto;
-  z-index: 99;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
-}
-
-.typeahead-node {
-  padding: 10px 14px;
-  font-size: 13px;
-  color: #f1f5f9;
-  cursor: pointer;
-  transition: background 0.15s ease;
-  text-align: left;
-}
-
-.typeahead-node:hover {
-  background-color: rgba(56, 189, 248, 0.15);
-  color: #38bdf8;
-}
-
-/* =========================================================
-   3. RIGHT VIEW PANE: MODIFICATION AUDITOR
-========================================================= */
-.modification-audit-pane {
-  width: 320px;
-  background-color: #08090d;
-  border-left: 1px solid #1e222b;
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  height: 100%;
-  overflow: hidden;
-  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
-}
-
-.audit-pane-header {
-  padding: 20px 20px 16px 20px;
-  border-bottom: 1px solid #1e222b;
-  background: #0d0f15;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.audit-kicker {
-  font-size: 9px;
-  font-weight: 800;
-  color: #fbbf24;
-  letter-spacing: 1.5px;
-  display: block;
-  margin-bottom: 3px;
-}
-
-.audit-heading {
-  font-size: 15px;
-  font-weight: 700;
-  color: #ffffff;
-  margin: 0;
-  letter-spacing: -0.2px;
-}
-
-.audit-count-badge {
-  font-size: 10px;
-  font-weight: 800;
-  padding: 3px 8px;
-  border-radius: 99px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.audit-count-badge.has-changes {
-  background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
-  border: 1px solid rgba(251, 191, 36, 0.4);
-}
-
-.audit-count-badge.no-changes {
-  background: rgba(100, 116, 139, 0.15);
-  color: #64748b;
-  border: 1px solid rgba(100, 116, 139, 0.25);
-}
-
-/* EMPTY STATE */
-.audit-empty-state {
-  flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 32px 24px;
-  text-align: center;
-}
-
-.audit-pulse-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #34d399;
+/* ==========================================================================
+   4. TOPBAR & RECORD IDENTIFIER BAR
+   ================================================================---------- */
+.topbar {
+  height: 82px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 800;
-  margin-bottom: 16px;
-}
-
-.empty-state-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: #ffffff;
-  margin: 0 0 8px 0;
-}
-
-.empty-state-copy {
-  font-size: 12px;
-  color: #64748b;
-  line-height: 1.5;
-  margin: 0;
-}
-
-/* FEED OF MODIFICATIONS */
-.audit-feed-scroll {
-  flex-grow: 1;
-  overflow-y: auto;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.audit-feed-scroll::-webkit-scrollbar {
-  width: 5px;
-}
-.audit-feed-scroll::-webkit-scrollbar-track {
-  background: #08090d;
-}
-.audit-feed-scroll::-webkit-scrollbar-thumb {
-  background: #232834;
-  border-radius: 3px;
-}
-
-.audit-feed-summary-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 10px;
-  font-weight: 800;
-  color: #64748b;
-  letter-spacing: 0.8px;
-  padding-bottom: 4px;
-}
-
-.revert-all-btn {
-  background: transparent;
-  border: none;
-  color: #f87171;
-  font-size: 10px;
-  font-weight: 800;
-  cursor: pointer;
-  letter-spacing: 0.5px;
-}
-
-.revert-all-btn:hover {
-  text-decoration: underline;
-  color: #ef4444;
-}
-
-/* INDIVIDUAL DIFF CARD */
-.diff-card {
-  background: #11141c;
-  border: 1px solid #232836;
-  border-radius: 8px;
-  padding: 12px 14px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.diff-card:hover {
-  border-color: #fbbf24;
-  background: #151922;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  transform: translateY(-1px);
-}
-
-.diff-card-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.diff-field-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: #f8fafc;
-}
-
-.diff-bullet {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #fbbf24;
-  box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
-}
-
-.diff-tab-tag {
-  font-size: 9px;
-  font-weight: 700;
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.12);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.diff-values-matrix {
-  background: #090a0f;
-  border: 1px solid #1c202a;
-  border-radius: 6px;
-  padding: 6px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.diff-row {
-  display: flex;
-  gap: 6px;
-  font-size: 11px;
-  line-height: 1.4;
-  align-items: baseline;
-}
-
-.diff-label {
-  font-size: 9px;
-  font-weight: 800;
-  font-family: 'JetBrains Mono', monospace;
-  width: 38px;
-  flex-shrink: 0;
-}
-
-.diff-content {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex-grow: 1;
-}
-
-.diff-before {
-  color: #94a3b8;
-}
-
-.diff-before .diff-label {
-  color: #64748b;
-}
-
-.diff-before .diff-content {
-  text-decoration: line-through;
-  opacity: 0.8;
-}
-
-.diff-after {
-  color: #fbbf24;
-  font-weight: 600;
-}
-
-.diff-after .diff-label {
-  color: #fbbf24;
-}
-
-.diff-card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 2px;
-}
-
-.diff-jump-hint {
-  font-size: 10px;
-  color: #64748b;
-  font-style: italic;
-}
-
-.diff-single-revert {
-  background: transparent;
-  border: 1px solid #283042;
-  color: #94a3b8;
-  border-radius: 4px;
-  padding: 2px 7px;
-  font-size: 10px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.diff-single-revert:hover {
-  border-color: #f87171;
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.1);
-}
-
-.audit-pane-footer {
-  padding: 16px 20px;
-  border-top: 1px solid #1e222b;
-  background: #0d0f15;
-}
-
-.commit-audit-btn {
-  width: 100%;
-}
-
-.commit-audit-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-/* =========================================================
-   COLOR UTILITIES
-========================================================= */
-.text-amber { color: #fbbf24 !important; }
-.text-blue { color: #38bdf8 !important; }
-.text-magenta { color: #f472b6 !important; }
-.font-mono { font-family: 'JetBrains Mono', monospace; }
-.font-bold { font-weight: 700; }
-
-/* =========================================================
-   MODAL & TOAST
-========================================================= */
-.toast-banner-notification {
-  position: fixed;
-  top: 24px;
-  right: 24px;
-  padding: 14px 22px;
-  border-radius: 6px;
-  background-color: #171a23;
-  border: 1px solid #282e3c;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  z-index: 20000;
-  font-size: 13px;
-  font-weight: 600;
-  animation: slideInToast 0.3s cubic-bezier(0.1, 0.8, 0.3, 1);
-}
-
-.toast-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.toast-banner-notification.success {
-  border-left: 4px solid #34d399;
-}
-.toast-banner-notification.success .toast-indicator {
-  background-color: #34d399;
-}
-
-.toast-banner-notification.error {
-  border-left: 4px solid #ef4444;
-}
-.toast-banner-notification.error .toast-indicator {
-  background-color: #ef4444;
-}
-
-.toast-message-label {
-  color: #ffffff;
-}
-
-@keyframes slideInToast {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-
-.modal-overlay-shroud {
-  position: fixed;
-  top: 0; left: 0;
-  width: 100vw; height: 100vh;
-  background-color: rgba(7, 8, 11, 0.85);
-  backdrop-filter: blur(4px);
-  z-index: 10000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.modal-alert-box {
-  background-color: #141722;
-  border-top: 4px solid #282e3c;
-  padding: 36px;
-  border-radius: 8px;
-  width: 100%;
-  max-width: 480px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7);
-  display: flex;
-  flex-direction: column;
-}
-
-.border-emerald { border-top-color: #34d399; }
-.border-crimson { border-top-color: #ef4444; }
-
-.modal-tag {
-  font-size: 10px;
-  font-weight: 700;
-  color: #64748b;
-  letter-spacing: 2px;
-  margin-bottom: 12px;
-  font-family: 'JetBrains Mono', monospace;
-}
-
-.modal-heading {
-  font-size: 18px;
-  font-weight: 700;
-  color: #ffffff;
-  margin: 0 0 14px 0;
-}
-
-.modal-body-text {
-  font-size: 13px;
-  line-height: 1.6;
-  color: #94a3b8;
-  margin: 0 0 20px 0;
-}
-
-.modal-input-field-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-.modal-input-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: #f59e0b;
-  letter-spacing: 1px;
-}
-
-.modal-reason-input {
-  background-color: #0d0f15;
-  border: 1px solid #282e3c;
-  border-radius: 4px;
-  padding: 11px 14px;
-  font-family: inherit;
-  font-size: 14px;
-  color: #ffffff;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.modal-reason-input:focus {
-  outline: none;
-  border-color: #f59e0b;
-}
-
-.countdown-ticker-bar {
-  background-color: #0d0f15;
-  border: 1px solid #1e2330;
-  padding: 10px;
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #64748b;
-  text-align: center;
-  margin-bottom: 24px;
-  letter-spacing: 0.5px;
-}
-
-.ticker-value {
-  color: #ffffff;
-}
-
-.modal-button-row {
-  display: flex;
-  justify-content: flex-end;
   gap: 14px;
+  padding: 0 clamp(20px, 4vw, 64px);
+  background: #eee5e2;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 130;
+}
+.brand-mark { width: 38px; height: 38px; display: grid; place-items: center; background: var(--accent); color: white; border-radius: 12px; font: 800 19px Manrope, sans-serif; }
+.topbar-title { display: flex; flex-direction: column; gap: 2px; }
+.eyebrow { font-size: 11px; letter-spacing: .15em; font-weight: 700; color: var(--accent); display: block; }
+.topbar h1 { margin: 0; letter-spacing: -.03em; }
+.topbar-meta { margin-left: auto; display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+.record-pill { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f0e7e4; color: var(--ink); }
+.status-dot, .save-indicator { width: 7px; height: 7px; border-radius: 50%; background: #b7a3ad; display: inline-block; }
+
+/* Record Identifier Bar */
+.record-identity-bar {
+  position: sticky;
+  top: 82px;
+  z-index: 120;
+  display: grid;
+  grid-template-columns: minmax(190px, 1.15fr) repeat(4, minmax(120px, 1fr));
+  align-items: stretch;
+  margin: 0;
+  padding: 12px clamp(20px, 3vw, 44px);
+  background: #eee2e5f5;
+  border-top: 1px solid #d9c4cc;
+  border-bottom: 1px solid #d2b7c2;
+  box-shadow: 0 5px 16px rgba(73, 62, 67, .09);
+  backdrop-filter: blur(12px);
+}
+.identity-heading { display: flex; align-items: center; gap: 11px; min-width: 0; padding-right: 16px; }
+.identity-mark { display: grid; place-items: center; flex: 0 0 38px; height: 38px; border-radius: 11px; background: #946783; color: #fff; font: 800 11px 'DM Sans', sans-serif; letter-spacing: .04em; }
+.identity-heading > div { display: grid; gap: 4px; min-width: 0; }
+.identity-heading strong { font-family: 'Trebuchet MS', 'Segoe UI', sans-serif !important; font-weight: 700 !important; font-size: 12px !important; color: #493e43 !important; }
+.identity-heading small { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; font-size: 10px !important; letter-spacing: 0.1em !important; color: #7b4f69 !important; }
+.identity-value { display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 0; padding: 3px 15px; border-left: 1px solid #d5c0c8; }
+.identity-value span { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; font-size: 10px !important; font-weight: 800; letter-spacing: 0.1em !important; text-transform: uppercase; color: #7b4f69 !important; }
+
+/* Unique Selector Rule for Identifier Bar Values Color & Font */
+.record-identity-bar .identity-value strong {
+  font-family: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif !important;
+  font-size: 14px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em !important;
+  color: #20131b !important;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
-.m-btn {
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  padding: 11px 22px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.bg-emerald {
-  background-color: #34d399;
-  color: #0b0c10;
-}
-.bg-emerald:hover {
-  background-color: #10b981;
-}
-
-.bg-crimson {
-  background-color: #ef4444;
-  color: #ffffff;
-}
-.bg-crimson:hover {
-  background-color: #dc2626;
-}
-
-.m-btn-dismiss {
-  background-color: transparent;
-  border: 1px solid #333a4d;
-  color: #cbd5e1;
-}
-
-.vault-loader {
+/* ==========================================================================
+   5. WORKSPACE & EDITOR CONTENT AREA
+   ================================================================---------- */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(230px, 250px) minmax(0, 1fr);
+  column-gap: 28px;
+  align-items: start;
   width: 100%;
-  height: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 28px clamp(20px, 3vw, 44px) 42px;
+}
+
+.editor-area { width: 100%; min-width: 0; margin: 0; }
+.editor-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; margin: 0 0 24px; }
+.editor-heading h2 { font: 800 clamp(25px, 3vw, 32px) Manrope, sans-serif; letter-spacing: -.055em; margin: 7px 0 6px; }
+.required-star { color: #a94e6c; }
+
+.heading-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.change-chip { font-size: 11px; color: var(--muted); padding: 8px 10px; border: 1px solid var(--line); background: #f0e7e4; border-radius: 8px; white-space: nowrap; }
+.change-chip.has-changes { background: #ead3dc; border-color: #ebcbd6; color: #87465f; }
+
+.button { min-height: 39px; border-radius: 9px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; font: 700 12px 'DM Sans', sans-serif; cursor: pointer; transition: background .15s, border-color .15s; }
+.button-quiet { border: 1px solid var(--line-strong); background: #f0e7e4; color: #6d5963; }
+.button-quiet:hover { background: #f7eef2; }
+.button-primary { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+.button-primary:hover { background: var(--accent-dark); }
+
+.form-stack { display: grid; gap: 18px; }
+.form-section, .review-panel { background: #f0e7e4; border: 1px solid var(--line); border-radius: 14px; padding: 24px clamp(18px, 3vw, 30px); box-shadow: 0 3px 12px #5f40500a; min-width: 0; }
+.section-heading { display: flex; align-items: center; gap: 15px; padding-bottom: 19px; margin-bottom: 20px; border-bottom: 1px solid #eee4e7; }
+.section-index { flex: 0 0 36px; width: 36px; height: 36px; display: grid; place-items: center; background: #e2d1da; border-radius: 9px; color: var(--accent-dark); font: 800 11px Manrope, sans-serif; }
+.section-heading h3 { line-height: 1.35; margin: 0 0 4px; }
+.section-heading p { line-height: 1.5; }
+
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 18px; }
+.field-block { min-width: 0; position: relative; }
+.span-2 { grid-column: span 2; }
+.label-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.label-line label { margin-bottom: 8px; }
+
+.field-help { font-size: 13px; color: var(--muted); margin: 9px 0 0; line-height: 1.5; }
+.read-only-value { min-height: 43px; height: 43px; display: flex; align-items: center; border: 1px dashed var(--line-strong); border-radius: 8px; background: #e8ddda; padding: 10px 12px; font-size: 12px; }
+.field-modified { padding: 10px; border: 1px solid #d6b2c1; background: #f0e1e5; border-radius: 10px; margin: -10px; }
+.modified-label { font-size: 9px; font-weight: 700; color: #704258; background: #e7cbd6; padding: 4px 7px; border-radius: 5px; margin-bottom: 7px; }
+.field-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; font-size: 10px; color: var(--muted); }
+.field-footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.field-footer button { border: 0; background: transparent; color: var(--accent-dark); font-size: 10px; font-weight: 700; cursor: pointer; }
+
+#wrap-author { display: flex; flex-direction: column; gap: 0; padding-bottom: 2px; }
+#wrap-author .input-control { flex: 0 0 auto; }
+#wrap-author .field-footer { margin-top: 8px; }
+#wrap-title .input-control { font-size: 14px; line-height: 1.5; }
+
+.genre-chips { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+.genre-chip { display: inline-flex; align-items: center; gap: 8px; background: #e5d4de; border: 1px solid #cdb6c3; border-radius: 7px; padding: 6px 8px; color: #684257; font-size: 10px; font-weight: 700; }
+.genre-chip button { border: 0; background: transparent; color: #684257; font-size: 15px; line-height: 1; cursor: pointer; padding: 0; }
+.clear-genres { border: 0; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
+.genre-selects { gap: 14px; }
+.genre-selects .field-block label { font-size: 10px; }
+
+.suggestion-list { position: absolute; top: calc(100% + 5px); left: 0; right: 0; z-index: 1000; background: #f0e7e4; border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 12px 28px #493e4320; overflow: hidden; max-height: 270px; overflow-y: auto; }
+.suggestion-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 0; border-bottom: 1px solid #f0e7eb; background: #f0e7e4; text-align: left; cursor: pointer; color: var(--ink); }
+.suggestion-item:last-child { border-bottom: 0; }
+.suggestion-item:hover { background: #f8edf3; }
+.suggestion-avatar { width: 30px; height: 30px; border-radius: 9px; background: #e2d1da; color: var(--accent-dark); display: grid; place-items: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.suggestion-copy { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.suggestion-copy strong { font-size: 12px; overflow-wrap: anywhere; }
+.suggestion-copy small { font-size: 10px; color: var(--muted); }
+.suggestion-status { font-size: 9px; text-transform: uppercase; letter-spacing: .04em; color: #806274; background: #f3e9ef; border-radius: 5px; padding: 4px 6px; }
+
+.review-panel { margin-top: 18px; }
+.review-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.review-row { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(0, 1.5fr) 28px; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid #eee4e7; }
+.review-row > div:first-child { display: grid; gap: 4px; }
+.review-row strong { font-size: 11px; }
+.review-row small { font-size: 9px; color: var(--muted); }
+.review-values { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 10px; }
+.review-values span:not(.review-arrow) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; color: #887780; }
+.review-values span:last-child { color: #704a68; font-weight: 700; }
+.review-arrow { color: #b69eaa; }
+.undo-icon { width: 27px; height: 27px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--accent); font-size: 16px; cursor: pointer; }
+
+/* ==========================================================================
+   6. SAVE BAR & ACTION BUTTONS
+   ================================================================---------- */
+.savebar {
+  position: fixed;
+  z-index: 20;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  min-height: 68px;
+  padding: 12px clamp(16px, 3vw, 44px);
   display: flex;
-  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
-  background-color: #0b0c10;
+  justify-content: space-between;
+  gap: 15px;
+  background: #eee5e2;
+  backdrop-filter: blur(14px);
+  border-top: 1px solid var(--line);
+}
+.savebar-info { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; min-width: 0; flex: 1 1 auto; overflow: hidden; }
+.savebar-info .save-indicator { flex: 0 0 7px; }
+.savebar-info > span:last-child { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.save-indicator.dirty { background: #b85b79; box-shadow: 0 0 0 4px #f8e8ed; }
+.savebar-actions { display: flex; gap: 9px; flex: 0 0 auto; min-width: 0; }
+
+.button-save-action {
+  color: #ffffff;
+  background: #176b67;
+  border: 1px solid #176b67;
+  box-shadow: 0 3px 8px rgba(23, 107, 103, 0.18);
+}
+.button-save-action:hover:not(:disabled) { background: #10534f; border-color: #10534f; }
+.button-save-action:focus-visible { outline: 3px solid rgba(23, 107, 103, 0.28); outline-offset: 2px; }
+.button-save-action:disabled { color: #777b7b; background: #e3e5e4; border-color: #d4d8d6; box-shadow: none; cursor: not-allowed; opacity: 1; }
+
+/* ==========================================================================
+   7. MODALS, TOASTS & PREVIEW WINDOW
+   ================================================================---------- */
+.loading-state { min-height: 70vh; display: grid; align-content: center; justify-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
+.loader { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.toast-message { position: fixed; z-index: 10002; top: 20px; right: 22px; max-width: min(420px, calc(100vw - 40px)); padding: 14px 18px; border-radius: 10px; background: #f0e7e4; border: 1px solid var(--line-strong); box-shadow: 0 10px 30px #493e4320; font-size: 12px; }
+.toast-message.success { border-left: 4px solid #946783; }
+.toast-message.error { border-left: 4px solid #ad526c; }
+
+.modal-backdrop { position: fixed; inset: 0; z-index: 10001; background: #352a31a6; display: grid; place-items: center; padding: 20px; }
+.confirm-modal { width: min(460px, 100%); background: #f0e7e4; border: 1px solid var(--line); border-radius: 16px; padding: 28px; box-shadow: 0 24px 70px #26172040; }
+.modal-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; background: #e2d1da; color: var(--accent-dark); font-size: 20px; margin-bottom: 17px; }
+.confirm-modal h2 { font: 800 23px Manrope, sans-serif; letter-spacing: -.04em; margin: 8px 0; }
+.confirm-modal p { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 0 0 20px; }
+.optional-label { font-weight: 400; color: var(--muted); }
+.countdown-note { font-size: 10px; color: var(--muted); margin-top: 10px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
+
+.search-results-note, .all-sections-note { background: #e6d8df; border: 1px solid #d0bbc6; border-radius: 9px; padding: 10px 13px; font-size: 11px; color: #5e4b55; margin: -10px 0 18px; }
+.search-results-note button { border: 0; background: transparent; color: var(--accent-dark); font-weight: 700; cursor: pointer; }
+.all-sections-note { background: #f0e7e4; color: var(--muted); }
+
+/* Document Preview Styles */
+.preview-backdrop { position: fixed; inset: 0; z-index: 10000; background: rgba(35, 26, 32, .72); display: grid; place-items: center; padding: 18px; }
+.document-preview { width: min(1050px, 100%); max-height: calc(100vh - 36px); display: flex; flex-direction: column; overflow: hidden; border-radius: 16px; background: #e8dfdc; box-shadow: 0 24px 80px rgba(20, 10, 18, .35); }
+.preview-toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 20px 26px; border-bottom: 1px solid #d0c0c5; background: #f2eae7; }
+.preview-toolbar h2 { margin: 5px 0; font: 800 22px Manrope, sans-serif; color: #40363b; }
+.preview-toolbar p { margin: 0; color: #76676e; font-size: 13px; }
+.preview-close { width: 36px; height: 36px; flex: 0 0 auto; border: 1px solid #cbb8c1; border-radius: 9px; background: #f8f1ee; color: #684257; font-size: 25px; cursor: pointer; }
+.document-sheet { width: min(820px, calc(100% - 32px)); margin: 22px auto; padding: 34px 42px; overflow-y: auto; background: #fffdf9; color: #393137; box-shadow: 0 5px 24px rgba(61, 41, 51, .13); }
+.document-brand { display: flex; align-items: center; gap: 12px; padding-bottom: 22px; border-bottom: 2px solid #81576f; }
+.document-monogram { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; background: #81576f; color: white; font: 800 19px Manrope, sans-serif; }
+.document-brand div { display: grid; gap: 4px; }
+.document-brand strong { color: #684257; font: 800 12px Manrope, sans-serif; letter-spacing: .12em; }
+.document-brand small { color: #76676e; font-size: 11px; }
+.document-record-id { margin-left: auto; color: #76676e; font-size: 11px; text-align: right; }
+.document-title { margin: 28px 0 7px; color: #352b31; font: 800 30px/1.25 Manrope, sans-serif; overflow-wrap: anywhere; }
+.document-subtitle { margin: 0 0 24px; color: #76676e; font: 500 16px 'DM Sans', sans-serif; }
+.document-rule { height: 1px; background: #e4d8dd; margin-bottom: 24px; }
+.document-group { margin: 0 0 22px; }
+.document-group h3 { margin: 0 0 10px; color: #684257; font: 800 13px Manrope, sans-serif; letter-spacing: .035em; }
+.document-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.document-field { position: relative; min-width: 0; display: grid; gap: 6px; padding: 12px 13px; border: 1px solid #e7dfe0; border-radius: 7px; background: #fffdfa; }
+.document-field > .document-field-label { display: block; color: #762b50; font: 800 13px/1.4 Manrope, sans-serif; letter-spacing: .025em; text-transform: uppercase; border-bottom: 1px solid #ead6df; padding-bottom: 7px; }
+.document-field > strong, .document-value-comparison strong { display: block; color: #29212a; font: 500 15px/1.65 'DM Sans', sans-serif; overflow-wrap: anywhere; white-space: pre-wrap; }
+.document-field-changed { border: 1.5px solid #c45b7a; background: #fff0f4; box-shadow: inset 4px 0 #c45b7a; padding-left: 16px; }
+.document-value-comparison { display: grid; gap: 8px; }
+.document-previous, .document-current { min-width: 0; padding: 9px 10px; border-radius: 6px; }
+.document-previous { background: #f2eeee; border: 1px solid #ded5d9; }
+.document-previous small, .document-current small { display: block; margin-bottom: 4px; font: 800 9px/1.4 Manrope, sans-serif; letter-spacing: .09em; }
+.document-previous small { color: #796c73; }
+.document-previous strong { color: #6e6269; font-size: 13px; font-weight: 400; text-decoration: line-through; text-decoration-color: #a99aa2; }
+.document-current { background: #ffe2eb; border: 1px solid #e5a8bc; box-shadow: inset 3px 0 #bd3f69; }
+.document-current small { color: #9c3157; }
+.document-current strong { color: #552039; font-weight: 700; }
+.document-current-value { padding-top: 2px; }
+.document-field em { justify-self: start; padding: 3px 6px; border-radius: 4px; background: #f4d5df; color: #8e3454; font: 800 9px Manrope, sans-serif; letter-spacing: .06em; font-style: normal; }
+.document-long-value { min-height: 24px; }
+.document-footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 28px; padding-top: 14px; border-top: 1px solid #e4d8dd; color: #76676e; font-size: 10px; }
+.preview-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 22px; border-top: 1px solid #d0c0c5; background: #f2eae7; }
+.preview-legend { margin-right: auto; display: flex; align-items: center; gap: 8px; color: #76676e; font-size: 11px; }
+.preview-legend i { width: 12px; height: 12px; border: 1px solid #c45b7a; background: #fff0f4; border-radius: 3px; }
+
+/* ==========================================================================
+   8. MEDIA QUERIES & RESPONSIVENESS
+   ================================================================---------- */
+@media (max-width: 1050px) {
+  .record-identity-bar { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 10px; }
+  .identity-heading { grid-column: 1 / -1; padding: 0 0 9px; }
+  .identity-value:first-of-type { border-left: 0; padding-left: 0; }
 }
 
-.minimal-spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid rgba(226, 228, 233, 0.15);
-  border-top-color: #f1f5f9;
-  border-radius: 50%;
-  animation: spin 0.7s infinite linear;
+@media (max-width: 980px) {
+  .workspace { grid-template-columns: 220px minmax(0, 1fr); column-gap: 20px; padding: 24px 20px 38px; }
+  .editor-heading { align-items: flex-start; flex-direction: column; }
+  .heading-actions { justify-content: flex-start; align-items: flex-end; }
+  .section-nav .nav-copy small { display: none; }
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+@media (max-width: 700px) {
+  .topbar { height: 70px; padding: 0 16px; }
+  .topbar-meta > span:not(.record-pill):not(.status-dot) { display: none; }
+  .record-identity-bar { position: sticky; top: 70px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px 14px; }
+  .identity-heading { grid-column: 1 / -1; }
+  .identity-value { min-height: 48px; padding: 7px 10px; border-left: 1px solid #d5c0c8; border-top: 1px solid #d5c0c8; }
+  .identity-value:nth-of-type(2n) { border-left: 0; padding-left: 0; }
+  .identity-value strong { font-size: 12px; }
+  
+  .workspace { display: block; width: 100%; padding: 20px 14px 28px; }
+  .sidebar { width: 100%; position: static; margin: 0 0 22px; max-height: none; overflow: visible; }
+  .sidebar-intro { border-bottom: 1px solid var(--line); padding-bottom: 14px; }
+  .sidebar-intro p { max-width: 420px; }
+  .search-label, .sidebar-bottom { display: none; }
+  .search-wrap { margin-bottom: 12px; }
+  
+  .section-nav { display: flex; flex-direction: row; align-items: stretch; overflow-x: auto; gap: 6px; padding-bottom: 5px; }
+  .section-nav .nav-item { display: flex; flex: 0 0 auto; width: auto; min-width: max-content; padding: 10px; background: #f0e7e4; }
+  .nav-number, .nav-arrow, .change-count { display: none; }
+  .nav-copy strong { white-space: nowrap; }
+
+  .editor-area { width: 100%; }
+  .editor-heading h2 { font-size: 27px; }
+  .form-section { padding: 19px 16px; }
+  .field-grid { grid-template-columns: minmax(0, 1fr); gap: 17px; }
+  .span-2 { grid-column: auto; }
+  .genre-selects { grid-template-columns: minmax(0, 1fr); }
+  
+  .review-row { grid-template-columns: 1fr 26px; }
+  .review-values { grid-column: 1/2; grid-row: 2; }
+  .undo-icon { grid-column: 2; grid-row: 1/3; }
+  .review-values span:not(.review-arrow) { max-width: 44%; }
+
+  .savebar { padding: 10px 14px; min-height: 68px; gap: 10px; }
+  .savebar-info { font-size: 10px; flex-basis: 0; }
+  .savebar-actions { gap: 6px; }
+  .button { padding: 0 10px; font-size: 11px; }
+
+  .preview-backdrop { padding: 0; }
+  .document-preview { width: 100%; max-height: 100vh; height: 100vh; border-radius: 0; }
+  .preview-toolbar { padding: 16px; }
+  .document-sheet { width: calc(100% - 20px); margin: 10px auto; padding: 22px 17px; }
+  .document-title { font-size: 24px; }
+  .document-fields { grid-template-columns: 1fr; }
+  .document-record-id { max-width: 100px; overflow-wrap: anywhere; }
+  .preview-actions { flex-wrap: wrap; padding: 12px; }
+  .preview-legend { flex: 1 0 100%; }
+  .preview-actions .button { flex: 1; }
+}
+/* --- PROPER SCOPED FIX FOR RECORD IDENTIFIER VALUES --- */
+:deep(.record-identity-bar) .identity-value strong {
+  font-family: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.02em !important;
+  color: #14be47 !important;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
-.loading-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: #64748b;
-  font-family: 'JetBrains Mono', monospace;
+@media (max-width: 420px) {
+  .savebar { align-items: flex-start; flex-direction: column; padding-top: 9px; padding-bottom: 9px; }
+  .savebar-info { width: 100%; flex: 0 0 auto; }
+  .savebar-actions { width: 100%; justify-content: flex-end; }
+  .edit-page { padding-bottom: 116px; }
 }
-</style>\n
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+}
+</style>

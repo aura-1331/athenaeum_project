@@ -36,7 +36,6 @@ const toast = ref({
 let toastTimer = null
 
 const editForm = reactive({
-  reason: '',
   preferred_name: '',
   full_name: '',
   malayalam_name: '',
@@ -48,8 +47,7 @@ const editForm = reactive({
 const newVariant = reactive({
   variant_name: '',
   variant_type: 'OTHER',
-  notes: '',
-  reason: ''
+  notes: ''
 })
 
 const filters = [
@@ -200,8 +198,7 @@ const isDirty = computed(() => {
     editForm.authority_type !==
       (authority.authority_type || '') ||
     editForm.notes !==
-      (authority.notes || '') ||
-    editForm.reason.trim() !== ''
+      (authority.notes || '')
   )
 })
 
@@ -212,7 +209,8 @@ const isDirty = computed(() => {
 const dlg = reactive({
   open: false,
   type: 'VERIFY',
-  reason: ''
+  variantId: null,
+  variantName: ''
 })
 
 const dlgTitle = computed(() => ({
@@ -243,7 +241,6 @@ function askAction(type) {
   if (actionLoading.value) return
 
   dlg.type = type
-  dlg.reason = ''
   dlg.open = true
 }
 
@@ -252,9 +249,7 @@ function closeDialog() {
 }
 
 async function submitDialog() {
-  const reason = dlg.reason.trim()
-
-  if (reason.length < 3 || actionLoading.value) {
+  if (actionLoading.value) {
     return
   }
 
@@ -262,13 +257,13 @@ async function submitDialog() {
   dlg.open = false
 
   if (type === 'DELVARIANT') {
-    await deleteVariant(dlg.variantId, reason)
+    await deleteVariant(dlg.variantId)
   } else if (type === 'VERIFY') {
-    await verifyAuthority(reason)
+    await verifyAuthority()
   } else if (type === 'REJECT') {
-    await rejectAuthority(reason)
+    await rejectAuthority()
   } else if (type === 'REOPEN') {
-    await reopenAuthority(reason)
+    await reopenAuthority()
   }
 }
 
@@ -392,13 +387,6 @@ async function apiRequest(path, options = {}) {
             ? err.loc[err.loc.length - 1]
             : ''
 
-          if (field === 'reason') {
-            return (
-              'AUDIT JUSTIFICATION REQUIRED // ' +
-              'Please enter a valid reason of at least 3 characters.'
-            )
-          }
-
           return (
             `VALIDATION ERROR // ${String(field).toUpperCase()}: ` +
             `${err.msg}`
@@ -429,17 +417,100 @@ async function apiRequest(path, options = {}) {
 // FETCH AUTHORITY REGISTRY
 // ============================================================
 
+
+
+
 async function fetchAuthorities() {
+  if (loading.value) return
+
   loading.value = true
   errorMessage.value = ''
 
-  try {
-    const data = await apiRequest('/authority/?limit=1000')
+  const limit = 100
+  let offset = 0
+  let total = Infinity
+  const allAuthorities = []
+  const seenAuthorityIds = new Set()
 
-    authorities.value = Array.isArray(data?.data)
-      ? data.data
-      : []
+  try {
+    while (offset < total) {
+      const response = await apiRequest(
+        `/authority/?limit=${limit}&offset=${offset}`
+      )
+
+      const pageItems = Array.isArray(response?.data)
+        ? response.data
+        : Array.isArray(response)
+          ? response
+          : []
+
+      // Read the total record count from the API response.
+      if (offset === 0) {
+        const reportedTotal = response?.total
+
+        if (
+          reportedTotal !== null &&
+          reportedTotal !== undefined &&
+          reportedTotal !== '' &&
+          Number.isFinite(Number(reportedTotal)) &&
+          Number(reportedTotal) >= 0
+        ) {
+          total = Number(reportedTotal)
+        } else {
+          total = pageItems.length < limit
+            ? pageItems.length
+            : Infinity
+        }
+      }
+
+      if (pageItems.length === 0) break
+
+      let addedThisBatch = 0
+
+      for (const authority of pageItems) {
+        const id = authority?.authority_id
+
+        if (id !== null && id !== undefined) {
+          const key = String(id)
+
+          if (seenAuthorityIds.has(key)) continue
+
+          seenAuthorityIds.add(key)
+        }
+
+        allAuthorities.push(authority)
+        addedThisBatch++
+      }
+
+      if (allAuthorities.length >= total) break
+
+      // Stop safely if the API returns duplicate records.
+      if (addedThisBatch === 0) break
+
+      // Move to the next batch.
+      offset += pageItems.length
+
+      if (pageItems.length < limit) break
+
+      if (offset > 1000000) {
+        throw new Error(
+          'Pagination stopped because the registry exceeded the safety limit.'
+        )
+      }
+    }
+
+    authorities.value = allAuthorities
+
+    if (
+      Number.isFinite(total) &&
+      allAuthorities.length < total
+    ) {
+      errorMessage.value =
+        `Loaded ${allAuthorities.length} of ${total} authorities. ` +
+        'Some records may be unavailable. Please retry.'
+    }
   } catch (error) {
+    authorities.value = []
     errorMessage.value =
       error.message || 'Unable to load authorities.'
 
@@ -448,6 +519,7 @@ async function fetchAuthorities() {
     loading.value = false
   }
 }
+
 
 // ============================================================
 // OPEN AUTHORITY DETAIL
@@ -479,12 +551,10 @@ async function openAuthority(authority) {
     authority.authority_type || ''
 
   editForm.notes = authority.notes || ''
-  editForm.reason = ''
 
   newVariant.variant_name = ''
   newVariant.variant_type = 'OTHER'
   newVariant.notes = ''
-  newVariant.reason = ''
 
   try {
     const detail = await apiRequest(
@@ -542,22 +612,11 @@ function closeAuthority() {
 // STATUS TRANSITIONS
 // ============================================================
 
-async function verifyAuthority(reasonText) {
+async function verifyAuthority() {
   if (
     !selectedAuthority.value ||
     selectedAuthority.value.status !== 'PROVISIONAL'
   ) {
-    return
-  }
-
-  const reason = String(reasonText || '').trim()
-
-  if (reason.length < 3) {
-    actionFailed.value = true
-    actionMessage.value =
-      'Enter a reason of at least 3 characters.'
-
-    showToast(actionMessage.value, 'error')
     return
   }
 
@@ -571,7 +630,7 @@ async function verifyAuthority(reasonText) {
       `/authority/${selectedAuthority.value.authority_id}/verify`,
       {
         method: 'PATCH',
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({ reason: 'Verified via UI' })
       }
     )
 
@@ -599,22 +658,11 @@ async function verifyAuthority(reasonText) {
   }
 }
 
-async function rejectAuthority(reasonText) {
+async function rejectAuthority() {
   if (
     !selectedAuthority.value ||
     selectedAuthority.value.status !== 'PROVISIONAL'
   ) {
-    return
-  }
-
-  const reason = String(reasonText || '').trim()
-
-  if (reason.length < 3) {
-    actionFailed.value = true
-    actionMessage.value =
-      'Enter a reason of at least 3 characters.'
-
-    showToast(actionMessage.value, 'error')
     return
   }
 
@@ -628,7 +676,7 @@ async function rejectAuthority(reasonText) {
       `/authority/${selectedAuthority.value.authority_id}/reject`,
       {
         method: 'PATCH',
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({ reason: 'Rejected via UI' })
       }
     )
 
@@ -656,22 +704,11 @@ async function rejectAuthority(reasonText) {
   }
 }
 
-async function reopenAuthority(reasonText) {
+async function reopenAuthority() {
   if (
     !selectedAuthority.value ||
     selectedAuthority.value.status === 'PROVISIONAL'
   ) {
-    return
-  }
-
-  const reason = String(reasonText || '').trim()
-
-  if (reason.length < 3) {
-    actionFailed.value = true
-    actionMessage.value =
-      'Enter a reason of at least 3 characters.'
-
-    showToast(actionMessage.value, 'error')
     return
   }
 
@@ -685,7 +722,7 @@ async function reopenAuthority(reasonText) {
       `/authority/${selectedAuthority.value.authority_id}/reopen`,
       {
         method: 'PATCH',
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({ reason: 'Reopened via UI' })
       }
     )
 
@@ -719,17 +756,6 @@ async function reopenAuthority(reasonText) {
 // ============================================================
 
 async function saveAuthorityDetails() {
-  const reason = editForm.reason.trim()
-
-  if (reason.length < 3) {
-    actionFailed.value = true
-    actionMessage.value =
-      'Enter a reason for this change (at least 3 characters).'
-
-    showToast(actionMessage.value, 'error')
-    return
-  }
-
   if (
     !selectedAuthority.value ||
     selectedAuthority.value.status !== 'PROVISIONAL'
@@ -762,7 +788,7 @@ async function saveAuthorityDetails() {
           authority_code: editForm.authority_code,
           authority_type: editForm.authority_type,
           notes: editForm.notes,
-          reason
+          reason: 'Updated via UI'
         })
       }
     )
@@ -789,7 +815,6 @@ async function saveAuthorityDetails() {
       editForm.malayalam_name
     ).trim()
 
-    editForm.reason = ''
     actionMessage.value = 'Record details updated successfully.'
 
     showToast(actionMessage.value)
@@ -817,8 +842,6 @@ async function addVariant() {
     newVariant.variant_name
   ).trim()
 
-  const reason = newVariant.reason.trim()
-
   if (!authority) return
 
   if (authority.status !== 'PROVISIONAL') {
@@ -833,15 +856,6 @@ async function addVariant() {
   if (!variantName) {
     actionFailed.value = true
     actionMessage.value = 'Enter a variant name.'
-
-    showToast(actionMessage.value, 'error')
-    return
-  }
-
-  if (reason.length < 3) {
-    actionFailed.value = true
-    actionMessage.value =
-      'Enter a reason of at least 3 characters.'
 
     showToast(actionMessage.value, 'error')
     return
@@ -862,7 +876,7 @@ async function addVariant() {
         body: JSON.stringify({
           variant_name: variantName,
           variant_type: newVariant.variant_type || 'OTHER',
-          reason
+          reason: 'Variant added via UI'
         })
       }
     )
@@ -870,7 +884,6 @@ async function addVariant() {
     newVariant.variant_name = ''
     newVariant.variant_type = 'OTHER'
     newVariant.notes = ''
-    newVariant.reason = ''
 
     actionMessage.value = 'Variant added successfully.'
     showToast(actionMessage.value)
@@ -913,11 +926,10 @@ function askVariantDelete(variantId, variantName) {
   dlg.type = 'DELVARIANT'
   dlg.variantId = variantId
   dlg.variantName = variantName
-  dlg.reason = ''
   dlg.open = true
 }
 
-async function deleteVariant(variantId, reason) {
+async function deleteVariant(variantId) {
   const authority = selectedAuthority.value
 
   if (!authority) return
@@ -934,7 +946,7 @@ async function deleteVariant(variantId, reason) {
       `/authority/${authorityId}/variants/${variantId}`,
       {
         method: 'DELETE',
-        body: JSON.stringify({ reason })
+        body: JSON.stringify({ reason: 'Variant deleted via UI' })
       }
     )
 
@@ -1353,19 +1365,6 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
 
-                <div class="form-field full-width">
-                  <label>REASON FOR THIS CHANGE (required)</label>
-                  <input
-                    v-model="editForm.reason"
-                    type="text"
-                    maxlength="500"
-                    minlength="3"
-                    required
-                    class="reason-input"
-                    placeholder="e.g. Added full name expansion"
-                  />
-                </div>
-
                 <button type="submit" class="save-button" :disabled="actionLoading">
                   <span>{{ actionLoading && actionType === 'UPDATE' ? 'SAVING...' : 'SAVE CHANGES' }}</span>
                 </button>
@@ -1451,7 +1450,7 @@ onBeforeUnmount(() => {
                   <select v-model="newVariant.variant_type" required>
                     <option value="ALTERNATE_NAME">ALTERNATE_NAME</option>
                     <option value="INITIALISM">INITIALISM</option>
-                    <option value="PSEUDONYM">PSEUDONYM</option>
+                    <option value="PEN NAME">PEN NAME</option>
                     <option value="TRANSLITERATION">TRANSLITERATION</option>
                     <option value="TRANSLATED_NAME">TRANSLATED_NAME</option>
                     <option value="FORMER_NAME">FORMER_NAME</option>
@@ -1459,22 +1458,10 @@ onBeforeUnmount(() => {
                   </select>
                 </div>
 
-                <div class="form-field">
-                  <label>REASON FOR ADDING</label>
-                  <input
-                    v-model="newVariant.reason"
-                    type="text"
-                    placeholder="Minimum 3 characters..."
-                    minlength="3"
-                    maxlength="1000"
-                    required
-                  />
-                </div>
-
                 <button
                   type="submit"
                   class="add-variant-btn"
-                  :disabled="actionLoading || newVariant.reason.trim().length < 3 || !newVariant.variant_name.trim()"
+                  :disabled="actionLoading || !newVariant.variant_name.trim()"
                 >
                   <span>{{ actionLoading && actionType === 'ADD_VARIANT' ? 'ADDING...' : '+ ADD VARIANT' }}</span>
                 </button>
@@ -1540,21 +1527,12 @@ onBeforeUnmount(() => {
           <strong>{{ normalizeEnglishName(selectedAuthority.preferred_name) }}</strong> &middot; {{ selectedAuthority.authority_code }}
         </p>
         <p class="dlg-text">{{ dlgText }}</p>
-        <label class="dlg-label">REASON (required, at least 3 characters)</label>
-        <textarea
-          v-model="dlg.reason"
-          rows="3"
-          maxlength="500"
-          minlength="3"
-          class="dlg-input"
-          placeholder="Why are you doing this?"
-        ></textarea>
         <div class="dlg-actions">
           <button type="button" class="dlg-cancel" @click="closeDialog">Cancel</button>
           <button
             type="button"
             class="dlg-confirm"
-            :disabled="dlg.reason.trim().length < 3 || actionLoading"
+            :disabled="actionLoading"
             @click="submitDialog"
           >
             {{ dlgConfirm }}
@@ -2399,26 +2377,7 @@ onBeforeUnmount(() => {
 .dlg-text {
   color: #445c33;
   font-size: 0.9rem;
-  margin-bottom: 1rem;
-}
-
-.dlg-label {
-  display: block;
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: #557040;
-  margin-bottom: 0.35rem;
-}
-
-.dlg-input {
-  width: 100%;
-  padding: 0.5rem;
-  background: #f7faf5;
-  border: 1px solid #c8d8b8;
-  color: #1a2612;
-  border-radius: 4px;
-  margin-bottom: 1.25rem;
-  outline: none;
+  margin-bottom: 1.5rem;
 }
 
 .dlg-actions {
