@@ -156,20 +156,7 @@ def _history_event(row: dict) -> Optional[dict]:
         "note_kind": diff.get("kind") if kind == "NOTE" else None,
     }
 
-# --- AUTHORIZED WORK LOOKUP FOR ITEM ACCESSION ---
 
-
-# --- 2. ACCESSION ADDITIONAL COPY ---
-
-
-# --- KEEPER: MY SUBMISSIONS ---
-
-
-# --- KEEPER: CORRECT AND RESUBMIT REJECTED WORK ---
-
-# --- KEEPER: CORRECT AND RESUBMIT REJECTED ITEM ---
-
-# --- DOCKET: MATTER HISTORY (from the audit ledger) ---
 @router.get(
     "/history/{entity}/{entity_id}",
     tags=["Docket"],
@@ -273,6 +260,7 @@ def get_catalogue_exact(
     genre: Optional[str] = None,
     language: Optional[str] = None,
     category: Optional[str] = None,
+    q: Optional[str] = None,
     current_user: dict = Depends(get_current_user),
 ):
     return get_catalogue(
@@ -286,6 +274,7 @@ def get_catalogue_exact(
         genre=genre,
         language=language,
         category=category,
+        q=q,
         current_user=current_user,
     )
 
@@ -302,10 +291,9 @@ def get_catalogue(
     genre: Optional[str] = None,
     language: Optional[str] = None,
     category: Optional[str] = None,
+    q: Optional[str] = None,
     current_user: dict = Depends(get_current_user),
 ):
-    # The two catalogue routes intentionally share this implementation. Validate
-    # here so both endpoints behave identically, including direct internal calls.
     if page < 1:
         raise HTTPException(status_code=400, detail="Page must be at least 1.")
     if limit < 1 or limit > 100:
@@ -343,8 +331,6 @@ def get_catalogue(
         filters = [
             "i.is_deleted = FALSE",
             "w.status = 'APPROVED'",
-            # A pending Item attached to an approved Work is still awaiting
-            # verification and must not appear as a live catalogue holding.
             "COALESCE(i.availability_status, '') NOT IN ('PENDING', 'REJECTED')",
         ]
         params = []
@@ -358,12 +344,21 @@ def get_catalogue(
         if genre:
             filters.append("w.genre ILIKE %s")
             params.append(f"%{genre}%")
+        # Exact (case-insensitive) match, so "Fiction" does not match "Non-Fiction".
         if language:
-            filters.append("w.language ILIKE %s")
-            params.append(f"%{language}%")
+            filters.append("LOWER(BTRIM(w.language)) = LOWER(BTRIM(%s))")
+            params.append(language)
         if category:
-            filters.append("w.category ILIKE %s")
-            params.append(f"%{category}%")
+            filters.append("LOWER(BTRIM(w.category)) = LOWER(BTRIM(%s))")
+            params.append(category)
+        # One search box: title, author, call no., ISBN, publisher, accession no.
+        if q and q.strip():
+            like = f"%{q.strip()}%"
+            filters.append(
+                "(w.title ILIKE %s OR w.author ILIKE %s OR w.call_no ILIKE %s "
+                "OR w.isbn ILIKE %s OR w.publisher ILIKE %s OR i.accession_no ILIKE %s)"
+            )
+            params.extend([like] * 6)
 
         where_clause = " AND ".join(filters)
         count_query = f"""
@@ -382,7 +377,15 @@ def get_catalogue(
                 w.category, w.genre, w.year, w.publisher,
                 i.shelf, w.language AS language, w.isbn,
                 w.ddc, w.call_no,
-                w.notes, w.original_language, w.translation_compilation
+                w.notes, w.original_language, w.translation_compilation,
+                w.original_author, w.original_title, w.translator, w.compiler_editor, w.work_nature,
+                w.edition_statement, w.series_title, w.series_volume, w.lccn, w.oclc_no,
+                w.subject_headings, w.target_audience_era, w.copyright_status,
+                i.physical_condition, i.binding_type, i.provenance_source, 
+                i.artifactual_notes, i.access_restrictions,
+                i.extent_page_count, i.physical_dimensions,
+                i.date_acquired, i.collection_fonds,
+                i.digital_scan_available, i.ocr_status
             FROM public.items i
             INNER JOIN public.works w ON i.work_id = w.work_id
             WHERE {where_clause}
@@ -411,12 +414,6 @@ def get_catalogue(
 
 @router.post("/check-duplicate")
 def check_duplicate(request: Request, payload: DuplicateCheckRequest, current_user: dict = Depends(get_current_user)):
-    """Check existing Works for likely duplicates before accession.
-
-    Duplicate detection is deliberately separate from authority resolution: this
-    endpoint compares bibliographic identity signals only and never creates or
-    changes an authority record.
-    """
     title = payload.title.strip()
     author = (payload.author or "").strip()
     language = (payload.language or "").strip()
@@ -428,9 +425,6 @@ def check_duplicate(request: Request, payload: DuplicateCheckRequest, current_us
     conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
-        # Pull a bounded candidate set using title similarity first. The final
-        # score is computed in Python so the response can explain why a match
-        # was surfaced to the Chief/Keeper UI.
         candidate_clauses = ["title ILIKE %s"]
         candidate_params = [f"%{title}%"]
         if isbn:
@@ -522,30 +516,50 @@ def check_duplicate(request: Request, payload: DuplicateCheckRequest, current_us
         cur.close()
         conn.close()
 
-
-# ===========================================================================
-# REVIEW & CORRECTION WORKFLOW (Items)
-# ===========================================================================
-
-
-
-
-
-
-
-
-
-
-
-
-# --- REVIEW FORM DATA (Chief + owning Keeper) ---
-
-# --- CHIEF: SEND AN ITEM BACK WITH MARKED FIELDS ---
-
-# --- NOTES (Chief, or the Keeper who owns the item) ---
-
-# --- KEEPER: CORRECT THE MARKED FIELDS AND RESUBMIT ---
-
+@router.get("/{serial_no}")
+def get_catalogue_item_detail(
+    serial_no: int,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT
+                i.serial_no, i.accession_no, i.work_id, w.title, w.author,
+                w.category, w.genre, w.year, w.publisher,
+                i.shelf, w.language AS language, w.isbn,
+                w.ddc, w.call_no,
+                w.notes, w.original_language, w.translation_compilation,
+                w.original_author, w.original_title, w.translator, w.compiler_editor, w.work_nature,
+                w.edition_statement, w.series_title, w.series_volume, w.lccn, w.oclc_no,
+                w.subject_headings, w.target_audience_era, w.copyright_status,
+                i.physical_condition, i.binding_type, i.provenance_source, 
+                i.artifactual_notes, i.access_restrictions,
+                i.extent_page_count, i.physical_dimensions,
+                i.date_acquired, i.collection_fonds,
+                i.digital_scan_available, i.ocr_status
+            FROM public.items i
+            INNER JOIN public.works w ON i.work_id = w.work_id
+            WHERE i.serial_no = %s AND i.is_deleted = FALSE
+        """, (serial_no,))
+        
+        item = cur.fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail="Catalogue record not found.")
+            
+        item["record_id"] = generate_record_id(item["serial_no"])
+        return item
+        
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"Catalogue item detail lookup failed: {exc}")
+        raise HTTPException(status_code=500, detail="Unable to load the catalogue record.")
+    finally:
+        cur.close()
+        conn.close()        
 
 # ===========================================================================
 # REVIEW & CORRECTION WORKFLOW (Works)
@@ -554,15 +568,7 @@ WORK_CORRECTABLE_FIELDS = (
     "title", "author", "category", "language", "publisher", "year", "isbn",
     "ddc", "call_no", "translation_compilation", "genre",
     "original_language", "notes", "proposal_reason",
+    "original_author", "original_title", "translator", "compiler_editor", "work_nature",
+    "edition_statement", "series_title", "series_volume", "lccn", "oclc_no",
+    "subject_headings", "target_audience_era", "copyright_status",
 )
-
-
-
-
-
-
-# --- REVIEW FORM DATA (Chief + owning Keeper) ---
-
-# --- CHIEF: SEND A WORK BACK WITH MARKED FIELDS ---
-
-# --- KEEPER: CORRECT THE MARKED FIELDS AND RESUBMIT ---
