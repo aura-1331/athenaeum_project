@@ -45,8 +45,11 @@ export function useCreateWork() {
     copyright_status: "",
     shelf: "",
     notes: "",
+    series_name: "",
+    series_number: "",
+    volume_number: "",
+    related_work_id: null,
 
-    // Physical holding attributes for the initial copy
     extent_page_count: "",
     physical_dimensions: "",
     date_acquired: "",
@@ -70,6 +73,7 @@ export function useCreateWork() {
   const loading = ref(false)
   const duplicateLoading = ref(false)
   const isbnLoading = ref(false)
+
   const titleLookupLoading = ref(false)
   const titleLookupResults = ref([])
   const titleLookupMessage = ref("")
@@ -78,6 +82,51 @@ export function useCreateWork() {
   let titleLookupDebounceTimer = null
   let authorLocalSearchTimer = null
   let authorSearchGeneration = 0
+
+  function clearTitleLookupResults(resetQuery = true) {
+    clearTimeout(titleLookupDebounceTimer)
+    titleLookupRequestId++
+    titleLookupResults.value = []
+    titleLookupMessage.value = ""
+    titleLookupLoading.value = false
+  }
+
+  function searchTitleCandidates(query) {
+    clearTimeout(titleLookupDebounceTimer)
+    const currentId = ++titleLookupRequestId
+    const q = String(query || form.value.title || "").trim()
+    if (q.length < 2) {
+      clearTitleLookupResults(false)
+      return
+    }
+    titleLookupLoading.value = true
+    titleLookupMessage.value = "Searching title candidates..."
+
+    titleLookupDebounceTimer = setTimeout(async () => {
+      try {
+        const res = await axios.get("/catalogue/title-lookup", { params: { q } })
+        if (currentId !== titleLookupRequestId) return
+        titleLookupResults.value = Array.isArray(res.data) ? res.data : []
+        titleLookupMessage.value = titleLookupResults.value.length ? "" : "No matching title candidates found."
+      } catch (err) {
+        if (currentId !== titleLookupRequestId) return
+        titleLookupResults.value = []
+        titleLookupMessage.value = "Title search failed."
+      } finally {
+        if (currentId === titleLookupRequestId) {
+          titleLookupLoading.value = false
+        }
+      }
+    }, 300)
+  }
+
+  function selectTitleCandidate(candidate) {
+    if (!candidate) return
+    form.value.title = candidate.title || ""
+    if (candidate.author) form.value.author = candidate.author
+    if (candidate.year) form.value.year = String(candidate.year)
+    clearTitleLookupResults()
+  }
 
   const lastImportedIsbn = ref("")
   let isbnLookupRequestId = 0
@@ -95,20 +144,17 @@ export function useCreateWork() {
   let autoSaveTimer = null
   let cleanDraftSignature = ""
 
-  const DRAFT_STORAGE_KEY = "athenaeum:create-work-drafts:v2"
+  const DRAFT_STORAGE_KEY = "athenaeum:create-work-drafts:v3"
   const DRAFT_AUDIT_ID_KEY = `${DRAFT_STORAGE_KEY}:audit-id`
 
   function getDraftAuditId() {
     let id = localStorage.getItem(DRAFT_AUDIT_ID_KEY)
-
     if (!id) {
       id = typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
         : `draft-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-
       localStorage.setItem(DRAFT_AUDIT_ID_KEY, id)
     }
-
     return id
   }
 
@@ -118,10 +164,7 @@ export function useCreateWork() {
   const scannerLastKeyAt = ref(0)
   const scannerStartedAt = ref(0)
   const scannerDetected = ref(false)
-
   let scannerResetTimer = null
-  let scannerTarget = null
-  let scannerTargetValue = ""
 
   const callNumberPattern = ref("LANG-AUTHOR-YEAR")
   const callNumberPrefix = ref("")
@@ -131,15 +174,8 @@ export function useCreateWork() {
   const volumeNumber = ref("")
   const relatedWorkId = ref("")
 
-  // Restored state used by the registration form.
   const extraLanguages = ref([])
-  const genreGroupA = ref([
-    "Fiction",
-    "Non-Fiction",
-    "Reference",
-    "Religious",
-    "Poetry"
-  ])
+  const genreGroupA = ref(["Fiction", "Non-Fiction", "Reference", "Religious", "Poetry"])
   const genreGroupB = ref([])
   const dynamicCommunityGenres = ref([])
 
@@ -166,289 +202,107 @@ export function useCreateWork() {
 
   let typingTimer = null
 
-  const isYearValid = computed(() =>
-    !form.value.year || /^\d{4}$/.test(String(form.value.year))
-  )
-
-  const cleanIsbnValue = computed(() =>
-    String(form.value.isbn || "")
-      .replace(/[^0-9X]/gi, "")
-      .toUpperCase()
-  )
+  const isYearValid = computed(() => !form.value.year || /^\d{4}$/.test(String(form.value.year)))
+  const cleanIsbnValue = computed(() => String(form.value.isbn || "").replace(/[^0-9X]/gi, "").toUpperCase())
 
   const isIsbnChecksumValid = computed(() => {
     const isbn = cleanIsbnValue.value
-
     if (isbn.length === 10) {
       let sum = 0
-
       for (let i = 0; i < 10; i++) {
         const c = isbn[i]
         const n = c === "X" ? 10 : Number(c)
-
-        if (
-          !Number.isInteger(n) ||
-          n < 0 ||
-          n > 10 ||
-          (c === "X" && i !== 9)
-        ) {
-          return false
-        }
-
+        if (!Number.isInteger(n) || n < 0 || n > 10 || (c === "X" && i !== 9)) return false
         sum += n * (10 - i)
       }
-
       return sum % 11 === 0
     }
-
     if (isbn.length === 13 && /^\d{13}$/.test(isbn)) {
-      const sum = [...isbn]
-        .slice(0, 12)
-        .reduce(
-          (total, c, i) => total + Number(c) * (i % 2 ? 3 : 1),
-          0
-        )
-
+      const sum = [...isbn].slice(0, 12).reduce((total, c, i) => total + Number(c) * (i % 2 ? 3 : 1), 0)
       return (10 - (sum % 10)) % 10 === Number(isbn[12])
     }
-
     return false
   })
+ 
+  const fieldHints = {
+    isbn: "Enter 10 digits for ISBN-10 or 13 digits for ISBN-13.",
+    year: "Use the four-digit publication year.",
+    ddc: "Optional Dewey Decimal Classification.",
+    call_no: "Library call number.",
+    shelf: "Physical shelf location identifier."
+  }
 
   const isIsbnValid = computed(() => isIsbnChecksumValid.value)
-
   const isPasteIsbnReady = computed(() => {
-    const isbn = String(pasteInput.value || "")
-      .replace(/[^0-9X]/gi, "")
-      .toUpperCase()
-
+    const isbn = String(pasteInput.value || "").replace(/[^0-9X]/gi, "").toUpperCase()
     return isbn.length === 10 || isbn.length === 13
   })
+  const isIsbnReadyForCatalogue = computed(() => !cleanIsbnValue.value || isIsbnChecksumValid.value)
 
-  const isIsbnReadyForCatalogue = computed(() =>
-    !cleanIsbnValue.value || isIsbnChecksumValid.value
-  )
-
-  // Keep the key/value structure expected by the Vue templates.
   const readinessItems = computed(() => [
-    {
-      key: "title",
-      value: !!String(form.value.title || "").trim()
-    },
-    {
-      key: "language",
-      value: !!String(form.value.language_id || "").trim()
-    },
-    {
-      key: "author",
-      value: !!String(form.value.author || "").trim()
-    },
-    {
-      key: "year",
-      value: isYearValid.value
-    },
-    {
-      key: "isbn",
-      value: isIsbnReadyForCatalogue.value
-    }
+    { key: "title", value: !!String(form.value.title || "").trim() },
+    { key: "language", value: !!String(form.value.language_id || "").trim() },
+    { key: "author", value: !!String(form.value.author || "").trim() },
+    { key: "year", value: isYearValid.value },
+    { key: "isbn", value: isIsbnReadyForCatalogue.value }
   ])
 
-  const readinessCount = computed(() =>
-    readinessItems.value.filter(item => item.value).length
-  )
-
+  const readinessCount = computed(() => readinessItems.value.filter(item => item.value).length)
   const readinessTotal = computed(() => readinessItems.value.length)
-
-  const readinessPercent = computed(() =>
-    readinessTotal.value
-      ? Math.round(
-          readinessCount.value / readinessTotal.value * 100
-        )
-      : 0
-  )
+  const readinessPercent = computed(() => readinessTotal.value ? Math.round((readinessCount.value / readinessTotal.value) * 100) : 0)
 
   const hasDraftContent = computed(() =>
     Object.entries(form.value).some(([key, value]) => {
       if (key === "digital_scan_available") return value === true
-
-      return value !== null &&
-        value !== undefined &&
-        String(value).trim() !== ""
-    }) ||
-    !!pasteInput.value.trim() ||
-    !!seriesName.value.trim() ||
-    !!seriesNumber.value.trim() ||
-    !!volumeNumber.value.trim() ||
-    !!relatedWorkId.value.trim()
+      return value !== null && value !== undefined && String(value).trim() !== ""
+    }) || !!pasteInput.value.trim() || !!seriesName.value.trim() || !!seriesNumber.value.trim() || !!volumeNumber.value.trim() || !!relatedWorkId.value.trim()
   )
 
-  const isFieldImported = field =>
-    importedFieldNames.value.includes(field)
-
+  const isFieldImported = field => importedFieldNames.value.includes(field)
   const authorSuggestions = computed(() => autocompleteAuthors.value)
   const publisherSuggestions = computed(() => autocompletePublishers.value)
 
   const liveCompiledGenreChips = computed(() =>
-    String(form.value.genre || "")
-      .split("/")
-      .map(s => s.trim())
-      .filter(Boolean)
+    String(form.value.genre || "").split("/").map(s => s.trim()).filter(Boolean)
   )
 
   function markFieldImported(field, value) {
-    if (!importedFieldNames.value.includes(field)) {
-      importedFieldNames.value.push(field)
-    }
-
+    if (!importedFieldNames.value.includes(field)) importedFieldNames.value.push(field)
     lastImportedValues.value[field] = value
   }
 
   function clearImportedFieldState(field) {
-    importedFieldNames.value =
-      importedFieldNames.value.filter(item => item !== field)
-
+    importedFieldNames.value = importedFieldNames.value.filter(item => item !== field)
     const next = { ...lastImportedValues.value }
     delete next[field]
     lastImportedValues.value = next
   }
 
   function applyImportedField(field, label, value) {
-    if (
-      value === null ||
-      value === undefined ||
-      String(value).trim() === ""
-    ) {
-      return
-    }
-
+    if (value === null || value === undefined || String(value).trim() === "") return
     const normalized = String(value).trim()
     const existing = String(form.value[field] || "").trim()
-
     if (existing && existing !== normalized) {
       metadataConflicts.value = [
         ...metadataConflicts.value.filter(item => item.field !== field),
-        {
-          field,
-          label,
-          current: existing,
-          existing,
-          incoming: normalized
-        }
+        { field, label, current: existing, existing, incoming: normalized }
       ]
-
       return
     }
-
     form.value[field] = normalized
     markFieldImported(field, normalized)
   }
 
-  function clearIsbnLookupMetadata() {
-    for (const field of [
-      "title",
-      "author",
-      "publisher",
-      "year",
-      "genre",
-      "ddc"
-    ]) {
-      if (
-        isFieldImported(field) &&
-        form.value[field] === lastImportedValues.value[field]
-      ) {
-        form.value[field] = ""
-      }
-
-      clearImportedFieldState(field)
-    }
-
-    metadataConflicts.value = []
-  }
-
-  function hasMeaningfulDraftSnapshot(snapshot) {
-    if (
-      !snapshot ||
-      typeof snapshot !== "object" ||
-      !snapshot.form
-    ) {
-      return false
-    }
-
-    return Object.values(snapshot.form).some(value =>
-      value !== null &&
-      value !== undefined &&
-      String(value).trim() !== ""
-    ) || !!snapshot.pasteInput
-  }
-
   async function harvestSystemGenresMatrix() {
     try {
-      const response = await axios.get(
-        "/catalogue/review/field-options"
-      )
-
+      const response = await axios.get("/catalogue/review/field-options")
       const data = response?.data || {}
-      const languages = Array.isArray(data.languages)
-        ? data.languages
-        : []
-
-      extraLanguages.value = languages
-
-      const genres = Array.isArray(data.genres)
-        ? data.genres
-            .map(value => String(value).trim())
-            .filter(Boolean)
-        : []
-
-      genreGroupB.value = genres
-        .filter(g =>
-          !genreGroupA.value.some(
-            a => a.toLowerCase() === g.toLowerCase()
-          )
-        )
-        .slice(0, 100)
-
-      dynamicCommunityGenres.value = [...new Set(genres)]
-        .sort((a, b) => a.localeCompare(b))
-
-      if (form.value.genre) {
-        const selected = String(form.value.genre)
-          .split("/")
-          .map(value => value.trim())
-          .filter(Boolean)
-
-        selectedGroupAGenre.value =
-          selected.find(g => genreGroupA.value.includes(g)) || ""
-
-        selectedGroupBGenre.value =
-          selected.find(g => genreGroupB.value.includes(g)) || ""
-
-        selectedGroupCGenre.value =
-          selected.find(
-            g =>
-              dynamicCommunityGenres.value.includes(g) &&
-              g !== selectedGroupBGenre.value
-          ) || ""
-
-        customManualGenreText.value = selected
-          .filter(
-            g =>
-              ![
-                selectedGroupAGenre.value,
-                selectedGroupBGenre.value,
-                selectedGroupCGenre.value
-              ].includes(g)
-          )
-          .join(" / ")
-
-        showCustomManualGenreField.value =
-          !!customManualGenreText.value
-      }
+      extraLanguages.value = Array.isArray(data.languages) ? data.languages : []
+      const genres = Array.isArray(data.genres) ? data.genres.map(value => String(value).trim()).filter(Boolean) : []
+      genreGroupB.value = genres.filter(g => !genreGroupA.value.some(a => a.toLowerCase() === g.toLowerCase())).slice(0, 100)
+      dynamicCommunityGenres.value = [...new Set(genres)].sort((a, b) => a.localeCompare(b))
     } catch (error) {
-      console.warn(
-        "Could not load system genre/language options:",
-        error?.response?.data || error.message
-      )
+      console.warn("Could not load system options:", error)
     }
   }
 
@@ -458,1426 +312,458 @@ export function useCreateWork() {
       selectedGroupBGenre.value,
       selectedGroupCGenre.value,
       ...String(customManualGenreText.value || "").split("/")
-    ]
-      .map(value => String(value || "").trim())
-      .filter(Boolean)
-
+    ].map(value => String(value || "").trim()).filter(Boolean)
     form.value.genre = [...new Set(values)].join(" / ")
     showCustomManualGenreField.value = true
   }
 
   function syncManualGenreInput() {
-    const values = [
-      selectedGroupAGenre.value,
-      selectedGroupBGenre.value,
-      selectedGroupCGenre.value,
-      ...String(customManualGenreText.value || "").split("/")
-    ]
-      .map(value => String(value || "").trim())
-      .filter(Boolean)
-
-    form.value.genre = [...new Set(values)].join(" / ")
+    syncGenreSelection()
   }
 
   async function fetchNextNumbers() {
     const language = String(form.value.language_id || "").trim()
-
     if (!language) {
-      previewNumbers.value = {
-        serial_no: "[Auto-Generated by System]",
-        accession_no: "[Select Language First]",
-        call_no: ""
-      }
-
+      previewNumbers.value = { serial_no: "[Auto-Generated by System]", accession_no: "[Select Language First]", call_no: "" }
       return
     }
-
     try {
       const response = await axios.get("/catalogue/next-numbers", {
-        params: {
-          language,
-          category: form.value.category || undefined
-        }
+        params: { language, category: form.value.category || undefined }
       })
-
-      previewNumbers.value = {
-        ...previewNumbers.value,
-        ...(response.data || {})
-      }
+      previewNumbers.value = { ...previewNumbers.value, ...(response.data || {}) }
     } catch (error) {
-      console.warn(
-        "Could not load number previews:",
-        error?.response?.data || error.message
-      )
+      console.warn("Could not load number previews:", error)
     }
   }
 
   function applyGeneratedCallNumber() {
     const generated = String(callNumberPreview.value || "").trim()
-
-    if (!generated) return
-
-    form.value.call_no = generated
+    if (generated) form.value.call_no = generated
   }
 
-  function handleEnterToNextField(event) {
-    if (
-      event.defaultPrevented ||
-      event.key !== "Enter" ||
-      event.shiftKey ||
-      event.ctrlKey ||
-      event.altKey ||
-      event.metaKey
-    ) {
-      return
-    }
-
-    const target = event.target
-
-    if (
-      !(target instanceof HTMLElement) ||
-      !target.matches("input, select")
-    ) {
-      return
-    }
-
-    if (
-      target instanceof HTMLInputElement &&
-      [
-        "button",
-        "checkbox",
-        "radio",
-        "submit",
-        "reset",
-        "file",
-        "hidden"
-      ].includes(target.type)
-    ) {
-      return
-    }
-
-    if (
-      target.closest("[role='dialog'], .modal-backdrop") ||
-      target.isContentEditable
-    ) {
-      return
-    }
-
-    const scope =
-      target.closest("form") ||
-      target.closest(".catalogue-form") ||
-      document
-
-    const candidates = [
-      ...scope.querySelectorAll("input, select, textarea, button")
-    ].filter(element =>
-      element instanceof HTMLElement &&
-      !element.hasAttribute("disabled") &&
-      element.getAttribute("aria-hidden") !== "true" &&
-      element.offsetParent !== null &&
-      !(
-        element instanceof HTMLInputElement &&
-        [
-          "button",
-          "checkbox",
-          "radio",
-          "submit",
-          "reset",
-          "file",
-          "hidden"
-        ].includes(element.type)
-      )
-    )
-
-    const index = candidates.indexOf(target)
-
-    if (index < 0 || index >= candidates.length - 1) return
-
-    const nextField = candidates[index + 1]
-
-    if (!(nextField instanceof HTMLElement)) return
-
-    event.preventDefault()
-    nextField.focus()
-  }
-
-  function resetScannerBuffer() {
-    scannerBuffer.value = ""
-    scannerLastKeyAt.value = 0
-    scannerStartedAt.value = 0
-    scannerDetected.value = false
-    scannerTarget = null
-    scannerTargetValue = ""
-
-    clearTimeout(scannerResetTimer)
-    scannerResetTimer = null
-  }
-
-  function handleScannerKeydown(event) {
-    if (
-      event.defaultPrevented ||
-      event.ctrlKey ||
-      event.altKey ||
-      event.metaKey
-    ) {
-      return
-    }
-
-    const now = Date.now()
-
-    if (event.key === "Enter") {
-      const scanned = scannerBuffer.value
-        .replace(/[^0-9X]/gi, "")
-        .toUpperCase()
-
-      const isBarcode =
-        scannerDetected.value &&
-        (scanned.length === 10 || scanned.length === 13) &&
-        now - scannerLastKeyAt.value < 150
-
-      if (isBarcode) {
-        event.preventDefault()
-
-        form.value.isbn = formatIsbnDisplay(scanned)
-        pasteInput.value = formatIsbnDisplay(scanned)
-
-        void handleIsbnLookup(scanned)
-      }
-
-      resetScannerBuffer()
-      return
-    }
-
-    if (!/^[0-9Xx]$/.test(event.key)) {
-      if (
-        event.key.length === 1 ||
-        event.key === "Backspace" ||
-        event.key === "Tab"
-      ) {
-        resetScannerBuffer()
-      }
-
-      return
-    }
-
-    const gap = scannerLastKeyAt.value
-      ? now - scannerLastKeyAt.value
-      : 0
-
-    if (!scannerLastKeyAt.value || gap > 80) {
-      scannerBuffer.value = event.key
-      scannerStartedAt.value = now
-      scannerDetected.value = false
-      scannerTarget = event.target
-      scannerTargetValue =
-        typeof event.target?.value === "string"
-          ? event.target.value
-          : ""
-    } else {
-      scannerBuffer.value += event.key
-
-      if (
-        scannerBuffer.value.length >= 8 &&
-        now - scannerStartedAt.value <= 1000
-      ) {
-        scannerDetected.value = true
-      }
-    }
-
-    scannerLastKeyAt.value = now
-
-    clearTimeout(scannerResetTimer)
-    scannerResetTimer = setTimeout(resetScannerBuffer, 250)
-  }
-
-  const fieldHints = {
-    isbn: "Enter 10 digits for ISBN-10 or 13 digits for ISBN-13.",
-    year: "Use the four-digit publication year.",
-    ddc: "Optional Dewey Decimal Classification.",
-    call_no: "Library call number.",
-    shelf: "Physical shelf location identifier."
-  }
-
-  const standardizedTitlePreview = computed(() => {
-    if (!form.value.title) return ""
-
-    return toTitleCase(
-      form.value.title
-        .replace(/[“”"]/g, '"')
-        .replace(/\s*:\s*/g, ": ")
-        .replace(/\s*-\s*/g, " - ")
-        .replace(/\s+/g, " ")
-        .trim()
-    )
-  })
-
-  const standardizedAuthorPreview = computed(() => {
-    if (!form.value.author) return ""
-
-    return toTitleCase(
-      form.value.author
-        .replace(/\s*,\s*/g, ", ")
-        .replace(/\s+/g, " ")
-        .trim()
-    )
-  })
   const callNumberPreview = computed(() => {
-  const authorWords = standardizedAuthorPreview.value.split(/\s+/).filter(Boolean)
-  const surname = authorWords[authorWords.length - 1] || ""
-  const authorCode = surname.replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase()
-  const languageCode = String(form.value.language_id || "GEN").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase()
-  const categoryCode = String(form.value.category || "GEN").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase()
-  const year = String(form.value.year || "").replace(/\D/g, "").slice(0, 4)
-  const sequence = String(previewNumbers.value.serial_no || "").replace(/\D/g, "").slice(-4).padStart(4, "0")
-  const prefix = callNumberPrefix.value.trim().toUpperCase()
-  const parts = { LANG: languageCode, AUTHOR: authorCode, CATEGORY: categoryCode, YEAR: year, SEQ: sequence }
-  const core = [parts.LANG, parts.AUTHOR, parts.YEAR].join("-")
-  return prefix ? `${prefix}-${core}` : core
-})
+    const authorWords = String(form.value.author || "").split(/\s+/).filter(Boolean)
+    const surname = authorWords[authorWords.length - 1] || ""
+    const authorCode = surname.replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase()
+    const languageCode = String(form.value.language_id || "GEN").replace(/[^A-Za-z]/g, "").slice(0, 3).toUpperCase()
+    const year = String(form.value.year || "").replace(/\D/g, "").slice(0, 4)
+    const prefix = callNumberPrefix.value.trim().toUpperCase()
+    const core = [languageCode, authorCode, year].filter(Boolean).join("-")
+    return prefix ? `${prefix}-${core}` : core
+  })
 
-const shelfSuggestion = computed(() => {
-  const ddc = String(form.value.ddc || "").replace(/\D/g, "")
-  const first = ddc ? Number(ddc.charAt(0)) : null
+  const shelfSuggestion = computed(() => {
+    const ddc = String(form.value.ddc || "").replace(/\D/g, "")
+    const first = ddc ? Number(ddc.charAt(0)) : null
+    const categoryMap = { Fiction: "800", "Non-Fiction": "000", Reference: "000", Religious: "200", Poetry: "800" }
+    const band = first !== null && Number.isFinite(first) ? `${first}00` : categoryMap[form.value.category] || ""
+    if (!band) return ""
+    const prefix = String(form.value.language_id || "").trim().split(/\s+/).map(part => part[0]).join("").slice(0, 2).toUpperCase()
+    return prefix ? `S-${band}-${prefix}` : `S-${band}`
+  })
 
-  const categoryMap = {
-    Fiction: "800",
-    "Non-Fiction": "000",
-    Reference: "000",
-    Religious: "200",
-    Poetry: "800",
+  function formatIsbnDisplay(value) {
+    const digits = String(value || "").replace(/[^0-9X]/gi, "").toUpperCase().slice(0, 13)
+    if (digits.length === 13) return `${digits.slice(0, 3)}-${digits.slice(3, 4)}-${digits.slice(4, 8)}-${digits.slice(8, 12)}-${digits.slice(12, 13)}`
+    if (digits.length === 10) return `${digits.slice(0, 1)}-${digits.slice(1, 5)}-${digits.slice(5, 9)}-${digits.slice(9, 10)}`
+    return digits
   }
 
-  const band =
-    first !== null && Number.isFinite(first)
-      ? `${first}00`
-      : categoryMap[form.value.category] || ""
-
-  if (!band) return ""
-
-  const prefix = String(form.value.language_id || "")
-    .trim()
-    .split(/\s+/)
-    .map((part) => part[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase()
-
-  return prefix ? `S-${band}-${prefix}` : `S-${band}`
-})
-
-watch(
-  () => [form.value.ddc, form.value.category],
-  () => {
-    if (
-      shelfSuggestion.value &&
-      (!form.value.shelf || !form.value.shelf.startsWith("S-"))
-    ) {
-      form.value.shelf = shelfSuggestion.value
-    }
+  function normalizeParserIsbn() {
+    const digits = pasteInput.value.replace(/[^0-9X]/gi, "").toUpperCase().slice(0, 13)
+    const formatted = formatIsbnDisplay(digits)
+    if (pasteInput.value !== formatted) pasteInput.value = formatted
   }
-)
 
-function formatIsbnDisplay(value) {
-  const digits = String(value || "").replace(/[^0-9X]/gi, "").toUpperCase().slice(0, 13)
-  if (digits.length === 13) return `${digits.slice(0, 3)}-${digits.slice(3, 4)}-${digits.slice(4, 8)}-${digits.slice(8, 12)}-${digits.slice(12, 13)}`
-  if (digits.length === 10) return `${digits.slice(0, 1)}-${digits.slice(1, 5)}-${digits.slice(5, 9)}-${digits.slice(9, 10)}`
-  return digits
-}
-
-function normalizeParserIsbn() {
-  const digits = pasteInput.value.replace(/[^0-9X]/gi, "").toUpperCase().slice(0, 13)
-  const formatted = formatIsbnDisplay(digits)
-  if (pasteInput.value !== formatted) pasteInput.value = formatted
-  if (lastImportedIsbn.value && digits && digits !== lastImportedIsbn.value) {
-    isbnLookupRequestId += 1
-    clearIsbnLookupMetadata()
-    lastImportedIsbn.value = ""
-  }
-}
-
-function clearTitleLookupResults(scheduleSearch = true) {
-  clearTimeout(titleLookupDebounceTimer)
-  titleLookupRequestId += 1
-  titleLookupLoading.value = false
-  titleLookupResults.value = []
-  titleLookupMessage.value = ""
-  const query = String(form.value.title || "").trim()
-  if (scheduleSearch && query.length >= 3) {
-    const expectedQuery = query
-    titleLookupDebounceTimer = setTimeout(() => {
-      if (String(form.value.title || "").trim() === expectedQuery) searchTitleCandidates()
-    }, 550)
-  }
-}
-
-async function searchTitleCandidates() {
-  const query = String(form.value.title || "").trim()
-  if (query.length < 3) return
-  clearTimeout(titleLookupDebounceTimer)
-  const requestId = ++titleLookupRequestId
-  titleLookupLoading.value = true
-  titleLookupResults.value = []
-  titleLookupMessage.value = "Searching Open Library title references…"
-  try {
-    const res = await axios.get("/catalogue/title-lookup", { params: { q: query } })
-    if (requestId !== titleLookupRequestId || String(form.value.title || "").trim() !== query) return
-    titleLookupResults.value = Array.isArray(res.data?.results) ? res.data.results.filter(item => item?.title) : []
-    titleLookupMessage.value = titleLookupResults.value.length
-      ? `Candidates from ${res.data?.source || "external catalogue"}. Choose one to apply; nothing has been changed yet.`
-      : (res.data?.message || "No title candidates found. Your title has not changed.")
-  } catch (err) {
-    if (requestId === titleLookupRequestId) {
-      titleLookupResults.value = []
-      titleLookupMessage.value = err?.response?.data?.detail || "Title search failed. Your title has not changed."
-    }
-  } finally {
-    if (requestId === titleLookupRequestId) titleLookupLoading.value = false
-  }
-}
-
-function selectTitleCandidate(candidate) {
-  const selectedTitle = String(candidate?.title || "").trim()
-  if (!selectedTitle) return
-  form.value.title = selectedTitle
-  clearImportedFieldState("title")
-  titleLookupRequestId += 1
-  titleLookupResults.value = []
-  titleLookupMessage.value = `Applied the ${candidate.source || "external catalogue"} title candidate. Review it before saving.`
-}
-
-async function handleIsbnLookup(cleanIsbn) {
-  const normalizedIsbn = String(cleanIsbn || "").replace(/[^0-9X]/gi, "").toUpperCase()
-  if (normalizedIsbn.length !== 10 && normalizedIsbn.length !== 13) return
-  if (lastImportedIsbn.value && normalizedIsbn !== lastImportedIsbn.value) {
-    isbnLookupRequestId += 1
-    clearIsbnLookupMetadata()
-    lastImportedIsbn.value = ""
-  }
-  const requestId = ++isbnLookupRequestId
-  isbnLoading.value = true
-  try {
-    const res = await axios.get("/catalogue/isbn-lookup", { params: { isbn: normalizedIsbn } })
-    if (requestId !== isbnLookupRequestId) return
-    if (res.data) {
-      applyImportedField("title", "Title", res.data.title)
-      applyImportedField("author", "Author", res.data.author)
-      applyImportedField("publisher", "Publisher", res.data.publisher)
-      applyImportedField("year", "Publication year", res.data.year ? String(res.data.year) : "")
-      if (res.data.genre) {
-        const incomingGenre = String(res.data.genre).trim()
-        form.value.genre = incomingGenre
-        markFieldImported("genre", incomingGenre)
+  async function handleIsbnLookup(cleanIsbn) {
+    const normalizedIsbn = String(cleanIsbn || "").replace(/[^0-9X]/gi, "").toUpperCase()
+    if (normalizedIsbn.length !== 10 && normalizedIsbn.length !== 13) return
+    isbnLoading.value = true
+    try {
+      const res = await axios.get("/catalogue/isbn-lookup", { params: { isbn: normalizedIsbn } })
+      if (res.data) {
+        applyImportedField("title", "Title", res.data.title)
+        applyImportedField("author", "Author", res.data.author)
+        applyImportedField("publisher", "Publisher", res.data.publisher)
+        applyImportedField("year", "Publication year", res.data.year ? String(res.data.year) : "")
+        if (res.data.genre) form.value.genre = String(res.data.genre).trim()
+        applyImportedField("ddc", "DDC", res.data.ddc)
       }
-      applyImportedField("ddc", "DDC", res.data.ddc)
-    }
-    form.value.isbn = formatIsbnDisplay(normalizedIsbn)
-    pasteInput.value = formatIsbnDisplay(normalizedIsbn)
-    lastImportedIsbn.value = normalizedIsbn
-  } catch (err) {
-    console.error(err)
-  } finally {
-    if (requestId === isbnLookupRequestId) isbnLoading.value = false
-  }
-}
-
-function draftTrackingState() {
-  return {
-    form: { ...form.value },
-    pasteInput: pasteInput.value,
-    selectedGroupAGenre: selectedGroupAGenre.value,
-    selectedGroupBGenre: selectedGroupBGenre.value,
-    selectedGroupCGenre: selectedGroupCGenre.value,
-    customManualGenreText: customManualGenreText.value,
-    seriesName: seriesName.value,
-    seriesNumber: seriesNumber.value,
-    volumeNumber: volumeNumber.value,
-    relatedWorkId: relatedWorkId.value
-  }
-}
-
-const draftTrackingSignature = computed(() => JSON.stringify(draftTrackingState()))
-
-function setCleanDraftBaseline() {
-  cleanDraftSignature = draftTrackingSignature.value
-  hasUnsavedChanges.value = false
-}
-
-function draftSnapshot(mode = "manual") {
-  return {
-    draft_id: getDraftAuditId(),
-    version: 1,
-    mode,
-    form: { ...form.value },
-    pasteInput: pasteInput.value,
-    selectedGroupAGenre: selectedGroupAGenre.value,
-    selectedGroupBGenre: selectedGroupBGenre.value,
-    selectedGroupCGenre: selectedGroupCGenre.value,
-    customManualGenreText: customManualGenreText.value,
-    showCustomManualGenreField: showCustomManualGenreField.value,
-    seriesName: seriesName.value,
-    seriesNumber: seriesNumber.value,
-    volumeNumber: volumeNumber.value,
-    relatedWorkId: relatedWorkId.value,
-    saved_at: new Date().toISOString()
-  }
-}
-
-async function auditDraftAction(action, snapshot, beforeSnapshot = null) {
-  if (!snapshot?.draft_id) return
-  const beforeForm = beforeSnapshot?.form || {}
-  const afterForm = snapshot.form || {}
-  const keys = new Set([...Object.keys(beforeForm), ...Object.keys(afterForm)])
-  const changes = {}
-  for (const key of keys) {
-    const from = beforeForm[key] ?? ""
-    const to = afterForm[key] ?? ""
-    if (String(from) !== String(to)) changes[key] = { from, to }
-  }
-  const fields = Object.keys(afterForm).filter(key => afterForm[key] !== null && afterForm[key] !== undefined && String(afterForm[key]).trim() !== "")
-  try {
-    await axios.post("/catalogue/draft-audit", {
-      draft_id: snapshot.draft_id,
-      action,
-      title: afterForm.title || beforeForm.title || null,
-      mode: snapshot.mode || "manual",
-      fields,
-      changes,
-      saved_at: snapshot.saved_at || null,
-      note: action === "DISCARDED" ? "Local Work draft discarded" : action === "RESTORED" ? "Saved Work draft version restored" : "Local Work draft snapshot saved"
-    })
-  } catch (err) {
-    console.error("Work draft was saved locally, but its audit event could not be recorded:", err)
-    result.value = {
-      draft_saved: true,
-      audit_warning: true,
-      message: "Draft saved locally, but the server could not record the audit event. Check the connection and audit service."
+      form.value.isbn = formatIsbnDisplay(normalizedIsbn)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      isbnLoading.value = false
     }
   }
-}
 
-function restoreDraftVersion(snapshot, options = {}) {
-  const { confirmOverwrite = true } = options
-  if (!hasMeaningfulDraftSnapshot(snapshot)) return false
-
-  if (confirmOverwrite && hasUnsavedChanges.value) {
-    const confirmed = window.confirm(
-      "Restore this saved version? Unsaved changes currently in the form will be replaced."
-    )
-    if (!confirmed) return false
+  function draftTrackingState() {
+    return {
+      form: { ...form.value },
+      pasteInput: pasteInput.value,
+      seriesName: seriesName.value,
+      seriesNumber: seriesNumber.value,
+      volumeNumber: volumeNumber.value,
+      relatedWorkId: relatedWorkId.value
+    }
   }
 
-  const beforeRestore = draftSnapshot("before_restore")
-  clearTimeout(autoSaveTimer)
-  suppressDirtyTracking = true
-  try {
+  const draftTrackingSignature = computed(() => JSON.stringify(draftTrackingState()))
+
+  function setCleanDraftBaseline() {
+    cleanDraftSignature = draftTrackingSignature.value
+    hasUnsavedChanges.value = false
+  }
+
+  function draftSnapshot(mode = "manual") {
+    return {
+      draft_id: getDraftAuditId(),
+      version: 1,
+      mode,
+      form: { ...form.value },
+      pasteInput: pasteInput.value,
+      seriesName: seriesName.value,
+      seriesNumber: seriesNumber.value,
+      volumeNumber: volumeNumber.value,
+      relatedWorkId: relatedWorkId.value,
+      saved_at: new Date().toISOString()
+    }
+  }
+
+  async function auditDraftAction(action, snapshot) {
+    if (!snapshot?.draft_id) return
+    try {
+      await axios.post("/catalogue/draft-audit", {
+        draft_id: snapshot.draft_id,
+        action,
+        title: snapshot.form?.title || null,
+        mode: snapshot.mode || "manual",
+        fields: Object.keys(snapshot.form || {}),
+        changes: {},
+        saved_at: snapshot.saved_at || null,
+        note: "Local Work draft snapshot saved"
+      })
+    } catch (err) {
+      console.error("Draft audit failed:", err)
+    }
+  }
+
+  function restoreDraftVersion(snapshot) {
     form.value = { ...form.value, ...snapshot.form }
-    pasteInput.value = typeof snapshot.pasteInput === "string" ? snapshot.pasteInput : ""
-    seriesName.value = typeof snapshot.seriesName === "string" ? snapshot.seriesName : ""
-    seriesNumber.value = typeof snapshot.seriesNumber === "string" ? snapshot.seriesNumber : ""
-    volumeNumber.value = typeof snapshot.volumeNumber === "string" ? snapshot.volumeNumber : ""
-    relatedWorkId.value = typeof snapshot.relatedWorkId === "string" ? snapshot.relatedWorkId : ""
-
-    if (Object.prototype.hasOwnProperty.call(snapshot, "selectedGroupAGenre")) {
-      selectedGroupAGenre.value = snapshot.selectedGroupAGenre || ""
-      selectedGroupBGenre.value = snapshot.selectedGroupBGenre || ""
-      selectedGroupCGenre.value = snapshot.selectedGroupCGenre || ""
-      customManualGenreText.value = snapshot.customManualGenreText || ""
-      showCustomManualGenreField.value = !!snapshot.showCustomManualGenreField
-    }
-
+    pasteInput.value = snapshot.pasteInput || ""
+    seriesName.value = snapshot.seriesName || ""
+    seriesNumber.value = snapshot.seriesNumber || ""
+    volumeNumber.value = snapshot.volumeNumber || ""
+    relatedWorkId.value = snapshot.relatedWorkId || ""
     draftSavedAt.value = snapshot.saved_at || ""
     setCleanDraftBaseline()
-    if (confirmOverwrite) {
-      const auditedSnapshot = { ...snapshot, draft_id: snapshot.draft_id || getDraftAuditId() }
-      void auditDraftAction("RESTORED", auditedSnapshot, beforeRestore)
-      draftOfferVisible.value = false
-      const restoredMsg = { title: 'Draft update', draft_saved: true, message: 'Saved draft restored.' }
-      result.value = restoredMsg
-      setTimeout(() => {
-        if (result.value === restoredMsg) result.value = null
-      }, 5000)
-    }
+    draftOfferVisible.value = false
+  }
+
+  function persistDraftSnapshot(snapshot, { silent = false } = {}) {
+    draftVersions.value = [snapshot, ...draftVersions.value].slice(0, MAX_DRAFT_VERSIONS)
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftVersions.value))
+    draftSavedAt.value = snapshot.saved_at
+    setCleanDraftBaseline()
+    if (!silent) result.value = { draft_saved: true, message: "Draft saved successfully." }
+    void auditDraftAction("SAVED", snapshot)
     return true
-  } finally {
-    suppressDirtyTracking = false
   }
-}
 
-function persistDraftSnapshot(snapshot, { silent = false, versioned = true } = {}) {
-  if (!hasMeaningfulDraftSnapshot(snapshot)) return false
-  const previousSnapshot = draftVersions.value[0] || null
-  const isUpdate = draftVersions.value.some(item => item.draft_id === snapshot.draft_id)
-  if (versioned || !draftVersions.value.length) {
-    draftVersions.value = [snapshot, ...draftVersions.value.filter(item => item.saved_at !== snapshot.saved_at)].slice(0, MAX_DRAFT_VERSIONS)
-  } else {
-    draftVersions.value = [{ ...snapshot, mode: "auto" }, ...draftVersions.value.slice(1)]
+  function savePartialDraft(options = {}) {
+    const { silent = false } = options
+    if (!hasDraftContent.value) return false
+    return persistDraftSnapshot(draftSnapshot(silent ? "auto" : "manual"), { silent })
   }
-  localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftVersions.value))
-  draftSavedAt.value = snapshot.saved_at
-  setCleanDraftBaseline()
-  if (!silent) {
-    result.value = { draft_saved: true, message: `Draft saved successfully.` }
-  }
-  void auditDraftAction(isUpdate ? "UPDATED" : "SAVED", snapshot, previousSnapshot)
-  return true
-}
 
-function savePartialDraft(options = {}) {
-  const { silent = false, versioned = true } = options
-  if (!hasDraftContent.value) return false
-  try {
-    const saved = persistDraftSnapshot(draftSnapshot(silent ? "auto" : "manual"), { silent, versioned })
-    if (saved === false) return false
-    return true
-  } catch (err) {
-    console.error("Keeper draft save failed:", err)
-    return false
-  }
-}
-
-function scheduleAutoSave() {
-  if (suppressDirtyTracking || loading.value) return
-  const currentSignature = draftTrackingSignature.value
-  if (currentSignature === cleanDraftSignature || !hasDraftContent.value) {
-    hasUnsavedChanges.value = false
-    clearTimeout(autoSaveTimer)
-    return
-  }
-  hasUnsavedChanges.value = true
-  clearTimeout(autoSaveTimer)
-  autoSaveTimer = setTimeout(() => savePartialDraft({ silent: true, versioned: false }), 1500)
-}
-
-function loadPartialDraft() {
-  try {
-    const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
-    if (!raw) return
-    const stored = JSON.parse(raw)
-    const rawVersions = Array.isArray(stored) ? stored : [stored]
-    const versions = rawVersions.filter(hasMeaningfulDraftSnapshot).slice(0, MAX_DRAFT_VERSIONS)
-    draftVersions.value = versions
-    if (!versions.length) {
-      localStorage.removeItem(DRAFT_STORAGE_KEY)
-      draftSavedAt.value = ""
-      return
+  function loadPartialDraft() {
+    try {
+      const raw = localStorage.getItem(DRAFT_STORAGE_KEY)
+      if (!raw) return
+      const stored = JSON.parse(raw)
+      const versions = (Array.isArray(stored) ? stored : [stored]).filter(hasMeaningfulDraftSnapshot)
+      draftVersions.value = versions
+      if (versions.length) {
+        restoreDraftVersion(versions[0])
+        draftOfferVisible.value = true
+      }
+    } catch (err) {
+      console.error(err)
     }
-    if (versions.length !== rawVersions.length) {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(versions))
-    }
-    restoreDraftVersion(versions[0], { confirmOverwrite: false })
-    draftOfferVisible.value = true
-  } catch (err) {
-    console.error(err)
-  } finally {
-    suppressDirtyTracking = false
   }
-}
 
-function clearPartialDrafts() {
-  try {
-    const prior = draftVersions.value[0] || null
-    if (prior) void auditDraftAction("DISCARDED", prior, prior)
+  function clearPartialDrafts() {
     localStorage.removeItem(DRAFT_STORAGE_KEY)
     draftVersions.value = []
     draftSavedAt.value = ""
-    suppressDirtyTracking = true
-    try {
-      clearIsbnLookupMetadata()
-      form.value.call_no = ""
-      form.value.authority_id = null
-      pasteInput.value = ""
-      seriesName.value = ""
-      seriesNumber.value = ""
-      volumeNumber.value = ""
-      relatedWorkId.value = ""
-    } finally {
-      suppressDirtyTracking = false
-    }
     setCleanDraftBaseline()
     draftOfferVisible.value = false
-    const removedMsg = { title: 'Draft update', draft_saved: true, message: 'Saved draft removed.' }
-    result.value = removedMsg
+  }
+
+  function selectAuthor(author) {
+    form.value.author = author?.preferred_name || ""
+    form.value.authority_id = author?.authority_id || null
+    showAuthorSuggestions.value = false
+  }
+
+  function selectExternalAuthor(author) {
+    form.value.author = author?.canonical_name || author?.preferred_name || ""
+    form.value.authority_id = null
+    showAuthorSuggestions.value = false
+  }
+
+  function selectPublisher(name) {
+    form.value.publisher = name
+    showPublisherSuggestions.value = false
+  }
+
+  function handleBlurAction(fieldName) {
     setTimeout(() => {
-      if (result.value === removedMsg) result.value = null
-    }, 5000)
-  } catch (err) {
-    console.error(err)
+      if (fieldName === 'author') showAuthorSuggestions.value = false
+      else if (fieldName === 'publisher') showPublisherSuggestions.value = false
+    }, 250)
   }
-}
 
-function selectAuthor(author) {
-  form.value.author = author?.preferred_name || ""
-  form.value.authority_id = author?.authority_id || null
-  selectedAuthorityName.value = form.value.author
-  autocompleteAuthors.value = []
-  externalAuthorSuggestions.value = []
-  showAuthorSuggestions.value = false
-}
+  function sanitizeField(fieldName) {
+    if (["title", "author", "publisher", "genre"].includes(fieldName)) {
+      form.value[fieldName] = String(form.value[fieldName] || "").replace(/\s+/g, " ").trim()
+    }
+  }
 
-function selectExternalAuthor(author) {
-  form.value.author = author?.canonical_name || canonicalExternalAuthorityName(author?.preferred_name) || ""
-  form.value.authority_id = null
-  selectedAuthorityName.value = ""
-  autocompleteAuthors.value = []
-  externalAuthorSuggestions.value = []
-  showAuthorSuggestions.value = false
-}
+  async function handleMetadataPaste() {
+    const text = pasteInput.value.trim()
+    if (!text) return
+    isParsing.value = true
+    const isbnMatch = text.match(/(?:ISBN(?:[-\s]?1[03])?:?\s*)?([0-9X](?:[\s-]?[0-9X]){9,12})/i)
+    if (isbnMatch) {
+      const cleanIsbn = isbnMatch[1].replace(/[\s-]/g, "").toUpperCase()
+      await handleIsbnLookup(cleanIsbn)
+    }
+    isParsing.value = false
+  }
 
-function selectPublisher(name) {
-  form.value.publisher = name
-  autocompletePublishers.value = []
-  showPublisherSuggestions.value = false
-}
+  function clearField(fieldName) {
+    form.value[fieldName] = ""
+    clearImportedFieldState(fieldName)
+  }
 
-function hideSuggestionsWithDelay(type) {
-  setTimeout(() => {
-    if (type === 'author') showAuthorSuggestions.value = false
-    else showPublisherSuggestions.value = false
-  }, 250)
-}
+  function confirmPrefill(work) {
+    if (!confirm("Load this work into the form?")) return
+    form.value.title = work.title || ""
+    form.value.author = work.author || ""
+    form.value.language_id = work.language || ""
+    form.value.category = work.category || ""
+    form.value.publisher = work.publisher || ""
+    form.value.year = work.year || ""
+  }
 
-function handleBlurAction(fieldName) {
-  sanitizeField(fieldName)
-  hideSuggestionsWithDelay(fieldName)
-}
+  function triggerCreationPrompt() {
+    if (!String(form.value.title || "").trim() || !String(form.value.language_id || "").trim()) {
+      alert("Title and Language are mandatory fields.")
+      return
+    }
+    if (isChiefRegistration()) {
+      creationReason.value = ""
+      showPromptModal.value = true
+      return
+    }
+    creationReason.value = "Keeper submission for Chief review"
+    void executeConfirmedCreation()
+  }
 
-watch(() => form.value.author, (newVal) => {
-  const generation = ++authorSearchGeneration
-  clearTimeout(authorLocalSearchTimer)
-  const query = String(newVal || "").trim()
-  autocompleteAuthors.value = []
-  externalAuthorSuggestions.value = []
-  externalAuthorSearchLoading.value = false
-  externalAuthorSearchMessage.value = ""
+  async function executeConfirmedCreation() {
+    showPromptModal.value = false
+    loading.value = true
+    result.value = null
 
-  if (query.length < 2) return
-  externalAuthorSearchMessage.value = "Checking Athenaeum's local authority records…"
-
-  authorLocalSearchTimer = setTimeout(async () => {
-    if (generation !== authorSearchGeneration || String(form.value.author || "").trim() !== query) return
     try {
-      const res = await axios.get("/authority/search", {
-        params: { q: query, limit: 10, usable_only: true },
+      const payload = {}
+      Object.keys(form.value).forEach(key => {
+        payload[key] = form.value[key] === "" ? null : form.value[key]
       })
-      if (generation !== authorSearchGeneration || String(form.value.author || "").trim() !== query) return
+      payload.author = String(form.value.author || "").trim() || "Unknown"
+      payload.language = form.value.language_id || null
+      payload.series_name = seriesName.value.trim() || null
+      payload.series_number = seriesNumber.value.trim() || null
+      payload.volume_number = volumeNumber.value.trim() || null
+      payload.related_work_id = relatedWorkId.value.trim() || null
 
-      const localMatches = (Array.isArray(res.data) ? res.data : [])
-        .filter(item => item?.authority_id && item?.preferred_name)
-      autocompleteAuthors.value = localMatches
+      const isChief = isChiefRegistration()
+      const operationalReason = String(creationReason.value || "").trim() || (isChief ? "Direct registration" : "Keeper submission")
 
-      if (localMatches.length) {
-        externalAuthorSearchMessage.value = ""
-        return
-      }
-
-      if (query.length >= 3) {
-        externalAuthorSearchMessage.value = "No local match. Searching Open Library…"
-        await searchExternalAuthors(query, generation)
-      } else {
-        externalAuthorSearchMessage.value = "No matching local authority record. Type at least 3 characters to search Open Library."
-      }
-    } catch (err) {
-      if (generation !== authorSearchGeneration) return
-      autocompleteAuthors.value = []
-      externalAuthorSearchMessage.value = "Local authority search failed. Check the backend connection."
-      console.error("Local authority search failed:", err)
-    }
-  }, 350)
-})
-
-function canonicalExternalAuthorityName(value) {
-  let name = String(value || "").split("|")[0].trim()
-  name = name.replace(/\s+\d{4}(?:\s*-\s*\d{0,4})?\.?\s*$/, "")
-  return name.replace(/[\s,;.]+$/, "").replace(/\s+/g, " ").trim()
-}
-
-function normalizeAuthorityNameForMatch(value) {
-  return canonicalExternalAuthorityName(value)
-    .normalize("NFKC")
-    .toLocaleLowerCase()
-    .replace(/[.,;:'"`()\[\]{}]/g, " ")
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
-function editSimilarity(leftValue, rightValue) {
-  const left = String(leftValue || "")
-  const right = String(rightValue || "")
-  if (left === right) return 1
-  if (!left.length || !right.length) return 0
-  let previous = Array.from({ length: right.length + 1 }, (_, index) => index)
-  for (let i = 1; i <= left.length; i += 1) {
-    const current = [i]
-    for (let j = 1; j <= right.length; j += 1) {
-      current[j] = Math.min(
-        current[j - 1] + 1,
-        previous[j] + 1,
-        previous[j - 1] + (left[i - 1] === right[j - 1] ? 0 : 1)
-      )
-    }
-    previous = current
-  }
-  return 1 - previous[right.length] / Math.max(left.length, right.length)
-}
-
-function authorityNameMatchScore(query, candidate) {
-  const left = normalizeAuthorityNameForMatch(query)
-  const rawCandidate = String(candidate?.canonical_name || candidate?.preferred_name || "").trim()
-  const right = normalizeAuthorityNameForMatch(rawCandidate)
-  if (!left || !right) return 0
-  if (left === right) return 1
-
-  const direct = editSimilarity(left, right)
-  const leftTokens = left.split(/\s+/).filter(Boolean)
-  const rightTokens = right.split(/\s+/).filter(Boolean)
-  const orderedTokenScore = (tokensA, tokensB) => {
-    if (!tokensA.length || !tokensB.length) return 0
-    const sharedPositions = Math.min(tokensA.length, tokensB.length)
-    let total = 0
-    for (let i = 0; i < sharedPositions; i += 1) {
-      total += editSimilarity(tokensA[i], tokensB[i])
-    }
-    return total / Math.max(tokensA.length, tokensB.length)
-  }
-
-  let score = Math.max(direct, orderedTokenScore(leftTokens, rightTokens))
-
-  const commaCount = (rawCandidate.match(/,/g) || []).length
-  if (commaCount === 1 && rightTokens.length === 2 && leftTokens.length === 2) {
-    score = Math.max(score, orderedTokenScore(leftTokens, [...rightTokens].reverse()))
-  }
-  return score
-}
-
-function externalAuthorQueryVariants(rawValue) {
-  const original = String(rawValue || "").trim().replace(/\s+/g, " ")
-  const variants = []
-  const add = value => {
-    const clean = String(value || "").trim().replace(/\s+/g, " ")
-    if (clean.length >= 3 && !variants.some(item => item.toLocaleLowerCase() === clean.toLocaleLowerCase())) {
-      variants.push(clean)
-    }
-  }
-    add(original)
-  const originalWords = original.split(/\s+/)
-  const collapsedWords = originalWords.map(word => word.replace(/(.)\1+/gi, "$1"))
-  add(collapsedWords.join(" "))
-
-  const lastWord = originalWords[originalWords.length - 1] || ""
-  if (originalWords.length > 1 && lastWord.length >= 3 && lastWord.length <= 8 && /[aeiou]$/i.test(lastWord)) {
-    add([...originalWords.slice(0, -1), `${lastWord}r`].join(" "))
-  }
-
-  for (let wordIndex = originalWords.length - 1; wordIndex >= 0 && variants.length < 5; wordIndex -= 1) {
-    const word = originalWords[wordIndex]
-    if (word.length < 4) continue
-    const firstVowel = word.search(/[aeiou]/i)
-    const vowelCount = (word.match(/[aeiou]/gi) || []).length
-    if (firstVowel < 2 || vowelCount !== 1) continue
-
-    for (const vowel of ["e", "i", "a", "o", "u"]) {
-      if (variants.length >= 5) break
-      const corrected = word.slice(0, firstVowel) + vowel + word.slice(firstVowel)
-      const changedWords = [...originalWords]
-      changedWords[wordIndex] = corrected
-      add(changedWords.join(" "))
-    }
-  }
-
-  for (let wordIndex = originalWords.length - 1; wordIndex >= 0 && variants.length < 5; wordIndex -= 1) {
-    const word = originalWords[wordIndex]
-    if (word.length < 4) continue
-    for (let position = 1; position < word.length - 1 && variants.length < 5; position += 1) {
-      const chars = [...word]
-      ;[chars[position], chars[position + 1]] = [chars[position + 1], chars[position]]
-      const changedWords = [...originalWords]
-      changedWords[wordIndex] = chars.join("")
-      add(changedWords.join(" "))
-    }
-  }
-
-  return variants.slice(0, 5)
-}
-
-function isUsefulAuthorityCorrectionVariant(rawQuery, variant) {
-  const query = normalizeAuthorityNameForMatch(rawQuery)
-  const candidate = normalizeAuthorityNameForMatch(variant)
-  if (!query || !candidate || query === candidate) return false
-
-  const collapsed = normalizeAuthorityNameForMatch(String(rawQuery || "").replace(/(.)\1+/gi, "$1"))
-  if (collapsed === candidate && collapsed !== query) return true
-  return candidate.length > query.length && editSimilarity(query, candidate) >= 0.80
-}
-
-function authorityRecordQualityScore(candidate) {
-  const workCount = Math.max(0, Number(candidate?.work_count) || 0)
-  const workCountSignal = Math.min(1, Math.log10(workCount + 1) / 2)
-  const topWorkSignal = candidate?.top_work ? 0.4 : 0
-  return Math.min(1, (workCountSignal * 0.6) + topWorkSignal)
-}
-
-async function searchExternalAuthors(rawQuery = String(form.value.author || "").trim(), generation = authorSearchGeneration) {
-  const query = String(rawQuery || "").trim()
-  if (query.length < 3) return
-
-  externalAuthorSearchLoading.value = true
-  externalAuthorSearchMessage.value = "Searching Open Library author records…"
-  externalAuthorSuggestions.value = []
-
-  try {
-    const variants = externalAuthorQueryVariants(query)
-    const gathered = new Map()
-
-    const publishCurrentCandidates = () => {
-      if (generation !== authorSearchGeneration || String(form.value.author || "").trim() !== query) return
-      externalAuthorSuggestions.value = [...gathered.values()]
-        .sort((left, right) => right._rankScore - left._rankScore)
-        .slice(0, 5)
-        .map(({ _rankScore, ...candidate }) => candidate)
-      if (externalAuthorSuggestions.value.length) {
-        externalAuthorSearchMessage.value = "Select the matching Open Library author record. Similarity is not proof of identity; selecting a suggestion does not create or merge a local authority record."
-      }
-    }
-
-    for (const variant of variants) {
-      if (generation !== authorSearchGeneration || String(form.value.author || "").trim() !== query) return
-
-      const res = await axios.get("/authority/external-search", {
-        params: { q: variant, limit: 25 },
-      })
-      if (generation !== authorSearchGeneration || String(form.value.author || "").trim() !== query) return
-
-      const results = Array.isArray(res.data?.results) ? res.data.results : []
-      for (const candidate of results) {
-        if (!candidate?.preferred_name) continue
-        const canonicalName = canonicalExternalAuthorityName(candidate.canonical_name || candidate.preferred_name)
-        const originalNameScore = authorityNameMatchScore(query, { ...candidate, canonical_name: canonicalName })
-        const variantNameScore = authorityNameMatchScore(variant, { ...candidate, canonical_name: canonicalName })
-        const correctiveVariant = isUsefulAuthorityCorrectionVariant(query, variant)
-        const correctionScore = correctiveVariant ? variantNameScore : 0
-        const recordQuality = authorityRecordQualityScore(candidate)
-        const titleText = String(form.value.title || "").trim()
-        const topWorkRelevance = titleText && candidate.top_work
-          ? authorityNameMatchScore(titleText, { canonical_name: candidate.top_work })
-          : 0
-        const rankScore = (originalNameScore * 0.55)
-          + (correctionScore * 0.25)
-          + (topWorkRelevance * 0.15)
-          + (recordQuality * 0.05)
-
-        const queryTokenCount = normalizeAuthorityNameForMatch(query).split(/\s+/).filter(Boolean).length
-        const minimumNameScore = queryTokenCount >= 2 ? 0.62 : 0.58
-        if (originalNameScore < minimumNameScore && correctionScore < 0.80) continue
-        const normalized = normalizeAuthorityNameForMatch(canonicalName)
-        const key = String(candidate.external_id || normalized || candidate.preferred_name)
-        const prior = gathered.get(key)
-        if (!prior || rankScore > prior._rankScore) {
-          gathered.set(key, {
-            ...candidate,
-            canonical_name: canonicalName,
-            match_score: Math.round(originalNameScore * 100),
-            correction_match: correctiveVariant && variantNameScore >= 0.80 && variantNameScore > originalNameScore,
-            _rankScore: rankScore,
-          })
-        }
-      }
-
-      publishCurrentCandidates()
-
-      const titleText = String(form.value.title || "").trim()
-      const contextConfirmed = titleText && [...gathered.values()].some(candidate => {
-        const nameScore = authorityNameMatchScore(query, candidate)
-        const titleScore = candidate.top_work
-          ? authorityNameMatchScore(titleText, { canonical_name: candidate.top_work })
-          : 0
-        return nameScore >= 0.88 && titleScore >= 0.72
-      })
-      if (contextConfirmed) break
-    }
-
-    if (generation === authorSearchGeneration && String(form.value.author || "").trim() === query) {
-      publishCurrentCandidates()
-      if (!externalAuthorSuggestions.value.length) {
-        externalAuthorSearchMessage.value = "Open Library returned no close author matches. Check the spelling or enter the preferred name manually."
-      }
-    }
-  } catch (err) {
-    if (generation !== authorSearchGeneration) return
-    externalAuthorSuggestions.value = []
-    externalAuthorSearchMessage.value = err?.response?.data?.detail
-      || "Open Library author search failed. Your author text has not changed. Try again later."
-    console.error("Open Library external-author search failed:", err)
-  } finally {
-    if (generation === authorSearchGeneration) externalAuthorSearchLoading.value = false
-  }
-}
-
-watch(() => form.value.publisher, async (newVal) => {
-  if (!newVal || newVal.trim().length < 2) {
-    autocompletePublishers.value = []
-    return
-  }
-  try {
-    const res = await axios.get("/catalogue/publishers/search", { params: { q: newVal } })
-    autocompletePublishers.value = res.data
-  } catch (err) {
-    console.error(err)
-  }
-})
-
-watch(() => [form.value.language_id, form.value.category], () => {
-  fetchNextNumbers()
-})
-
-watch(() => [form.value.title, form.value.author, form.value.language_id], () => {
-  clearTimeout(typingTimer)
-  adminOverride.value = false
-  isFrozen.value = false
-  duplicateResult.value = { severity: "none", matches: [] }
-  if (!form.value.title) {
-    duplicateLoading.value = false
-    return
-  }
-  duplicateLoading.value = true
-  typingTimer = setTimeout(checkDuplicate, 350)
-})
-
-watch(() => [duplicateResult.value.severity, adminOverride.value], ([severity, override]) => {
-  isFrozen.value = severity === "strong" && !override
-})
-
-watch(() => form.value.year, (newVal) => {
-  if (!newVal) return
-  form.value.year = newVal.replace(/\D/g, "").slice(0, 4)
-})
-
-watch(() => form.value.isbn, (newVal) => {
-  if (!newVal || isParsing.value) return
-  const digits = newVal.replace(/[^0-9X]/gi, "").toUpperCase().slice(0, 13)
-  const formatted = formatIsbnDisplay(digits)
-  if (formatted !== newVal) form.value.isbn = formatted
-})
-
-watch(() => form.value.ddc, (newVal) => {
-  if (!newVal) return
-  let cleaned = newVal.replace(/[^0-9.]/g, "")
-  const parts = cleaned.split(".")
-  let base = parts[0].replace(/\D/g, "")
-  if (base.length > 3) cleaned = base.slice(0, 3) + "." + base.slice(3) + (parts[1] ? parts[1] : "")
-  form.value.ddc = cleaned
-})
-
-function toTitleCase(str) {
-  if (!str) return ""
-  return str.replace(/\s+/g, " ").toLowerCase().split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")
-}
-
-function sanitizeField(fieldName) {
-  if (["title", "author", "publisher", "genre"].includes(fieldName)) {
-    form.value[fieldName] = String(form.value[fieldName] || "").replace(/\s+/g, " ").trim()
-  }
-}
-
-async function handleMetadataPaste(event) {
-  const pastedText = event?.clipboardData?.getData("text") || pasteInput.value || ""
-  if (!pastedText.trim()) return
-  isParsing.value = true
-  const text = pastedText.trim()
-  const isbnMatch = text.match(/(?:ISBN(?:[-\s]?1[03])?:?\s*)?([0-9X](?:[\s-]?[0-9X]){9,12})/i)
-  let cleanPastedIsbn = ""
-  if (isbnMatch) {
-    cleanPastedIsbn = isbnMatch[1].replace(/[\s-]/g, "").toUpperCase()
-    form.value.isbn = formatIsbnDisplay(cleanPastedIsbn)
-    pasteInput.value = formatIsbnDisplay(cleanPastedIsbn)
-  }
-  if (cleanPastedIsbn.length === 10 || cleanPastedIsbn.length === 13) {
-    await handleIsbnLookup(cleanPastedIsbn)
-  }
-  pasteInput.value = ""
-  isParsing.value = false
-}
-
-async function checkDuplicate() {
-  const requestedTitle = String(form.value.title || "")
-  const requestedAuthor = String(form.value.author || "")
-  const requestedLanguage = String(form.value.language_id || "")
-  try {
-    const res = await axios.post("/catalogue/check-duplicate", {
-      title: form.value.title,
-      author: form.value.author,
-      language: form.value.language_id,
-      isbn: form.value.isbn
-    })
-    if (requestedTitle === String(form.value.title || "")
-      && requestedAuthor === String(form.value.author || "")
-      && requestedLanguage === String(form.value.language_id || "")) {
-      duplicateResult.value = res.data || { severity: "none", matches: [] }
-    }
-  } catch (err) {
-    console.error("Duplicate check failed:", err)
-    duplicateResult.value = { severity: "none", matches: [] }
-  } finally {
-    duplicateLoading.value = false
-  }
-}
-
-function clearField(fieldName) {
-  form.value[fieldName] = ""
-  clearImportedFieldState(fieldName)
-
-  if (fieldName === "genre") {
-    selectedGroupAGenre.value = ""
-    selectedGroupBGenre.value = ""
-    selectedGroupCGenre.value = ""
-    customManualGenreText.value = ""
-    showCustomManualGenreField.value = false
-  }
-}
-
-function confirmPrefill(work) {
-  if (!confirm("Load this work into the form?")) return
-  form.value.title = work.title || ""
-  form.value.author = work.author || ""
-  form.value.language_id = work.language || ""
-  form.value.category = work.category || ""
-  form.value.publisher = work.publisher || ""
-  form.value.year = work.year || ""
-}
-
-function useExistingAuthority(work) {
-  router.push(`/create-item?work_id=${work.work_id}&language_id=${work.language}`)
-}
-
-function triggerCreationPrompt() {
-  if (
-    !String(form.value.title || "").trim() ||
-    !String(form.value.language_id || "").trim()
-  ) {
-    alert("Title and Language are mandatory fields.")
-    return
-  }
-
-  if (isFrozen.value || loading.value) return
-
-  if (isChiefRegistration()) {
-    creationReason.value = ""
-    showPromptModal.value = true
-    return
-  }
-
-  creationReason.value = "Keeper submission for Chief review"
-  void executeConfirmedCreation()
-}
-
-async function executeConfirmedCreation() {
-  showPromptModal.value = false
-  loading.value = true
-  result.value = null
-
-  let payload
-  let operationalReason
-
-  try {
-    const cleanedForm = {}
-
-    Object.keys(form.value).forEach((key) => {
-      cleanedForm[key] = form.value[key] === "" ? null : form.value[key]
-    })
-
-    if (!cleanedForm.genre || !String(cleanedForm.genre).trim()) {
-      cleanedForm.genre = null
-    }
-
-    payload = {
-      ...cleanedForm,
-      author: String(form.value.author || "").trim() || "Unknown",
-      language: form.value.language_id || null,
-      call_no: form.value.call_no || null,
-      shelf: form.value.shelf || null,
-      original_title: form.value.original_title || null,
-      original_author: form.value.original_author || null,
-      translator: form.value.translator || null,
-      compiler_editor: form.value.compiler_editor || null,
-      work_nature: form.value.work_nature || null,
-      edition_statement: form.value.edition_statement || null,
-      series_title: form.value.series_title || form.value.series_name || null,
-      series_volume: form.value.series_volume || form.value.volume_number || null,
-      lccn: form.value.lccn || null,
-      oclc_no: form.value.oclc_no || null,
-      subject_headings: form.value.subject_headings || null,
-      target_audience_era: form.value.target_audience_era || null,
-      copyright_status: form.value.copyright_status || null,
-      series_name: seriesName.value.trim() || null,
-      series_number: seriesNumber.value.trim() || null,
-      volume_number: volumeNumber.value.trim() || null,
-      related_work_id: relatedWorkId.value.trim() || null,
-
-      // --- Physical Holding Attributes mapping ---
-      extent_page_count: form.value.extent_page_count || null,
-      physical_dimensions: form.value.physical_dimensions || null,
-      date_acquired: form.value.date_acquired || null,
-      collection_fonds: form.value.collection_fonds || null,
-      physical_condition: form.value.physical_condition || null,
-      binding_type: form.value.binding_type || null,
-      provenance_source: form.value.provenance_source || null,
-      artifactual_notes: form.value.artifactual_notes || null,
-      access_restrictions: form.value.access_restrictions || null,
-      digital_scan_available: !!form.value.digital_scan_available,
-      ocr_status: form.value.ocr_status || "Unindexed"
-    }
-
-    operationalReason =
-      String(creationReason.value || "").trim() ||
-      "Keeper submission for Chief review"
-
-    const isChief = isChiefRegistration()
-    const registrationMode = isChief
-      ? "DIRECT_CHIEF"
-      : "KEEPER_SUBMISSION"
-
-    if (!payload.title?.trim() || !payload.language?.trim()) {
-      throw new Error("Title and Language are required.")
-    }
-
-    if (isChief && !String(creationReason.value || "").trim()) {
-      throw new Error("A specific reason is required for direct Chief registration.")
-    }
-
-    const response = await axios.post(
-      "/catalogue/create-work",
-      payload,
-      {
+      const response = await axios.post("/catalogue/create-work", payload, {
         headers: {
           "X-Change-Reason": operationalReason,
-          "X-Registration-Mode": registrationMode
+          "X-Registration-Mode": isChief ? "DIRECT_CHIEF" : "KEEPER_SUBMISSION"
         }
-      }
-    )
+      })
 
-    const data = response.data
+      result.value = response.data
+      clearPartialDrafts()
 
-    if (!data || data.work_id == null) {
-      throw new Error(
-        `The server returned HTTP ${response.status} but no work_id. ` +
-        `Response: ${JSON.stringify(data)}`
-      )
+      await dispatchAuditTrail("CREATE", "CATALOGUE", result.value.work_id, `Registered work: ${payload.title}`, operationalReason)
+
+      setTimeout(() => {
+        if (isChief) {
+          router.push({ path: "/chief/register-item", query: { work_id: result.value.work_id, language_id: payload.language } })
+        } else {
+          router.push("/docket")
+        }
+      }, 400)
+    } catch (err) {
+      result.value = { error: err?.response?.data?.detail || err.message || "Submission failed" }
+    } finally {
+      loading.value = false
     }
+  }
 
-    result.value = {
-      ...data,
-      message: isChief
-        ? "Work registered successfully."
-        : "Work submitted for Chief review."
-    }
-  } catch (err) {
-    const response = err?.response
-    let message
-
-    if (response) {
-      const body = response.data
-      const detail =
-        body?.detail ||
-        body?.message ||
-        body?.error ||
-        (typeof body === "string" ? body : JSON.stringify(body))
-
-      message = `Work submission failed (HTTP ${response.status}): ${detail}`
-    } else if (err?.request) {
-      message =
-        `The API did not return a response for ${err.config?.url || "/catalogue/create-work"}. ` +
-        `${err.code ? `Code: ${err.code}. ` : ""}${err.message || ""}`
-    } else {
-      message = err?.message || "Work submission failed before the request was sent."
-    }
-
-    result.value = { error: message, detail: message }
-
+  async function checkDuplicate() {
+    const requestedTitle = String(form.value.title || "")
+    const requestedAuthor = String(form.value.author || "")
+    const requestedLanguage = String(form.value.language_id || "")
     try {
-      const logKey = "athenaeum_error_log"
-      const log = JSON.parse(localStorage.getItem(logKey) || "[]")
-      log.unshift({
-        at: new Date().toISOString(),
-        page: window.location.pathname + window.location.hash,
-        message
+      const res = await axios.post("/catalogue/check-duplicate", {
+        title: form.value.title,
+        author: form.value.author,
+        language: form.value.language_id,
+        isbn: form.value.isbn
       })
-      localStorage.setItem(logKey, JSON.stringify(log.slice(0, 50)))
-    } catch (logErr) {
-      console.error("Could not write error log:", logErr)
+      if (requestedTitle === String(form.value.title || "")
+        && requestedAuthor === String(form.value.author || "")
+        && requestedLanguage === String(form.value.language_id || "")) {
+        duplicateResult.value = res.data || { severity: "none", matches: [] }
+      }
+    } catch (err) {
+      console.error("Duplicate check failed:", err)
+      duplicateResult.value = { severity: "none", matches: [] }
+    } finally {
+      duplicateLoading.value = false
     }
-
-    setTimeout(() => {
-      if (result.value && result.value.error === message) result.value = null
-    }, 10000)
-
-    console.error("Work submission failed:", err)
-    loading.value = false
-    return
   }
 
-  try {
-    clearPartialDrafts()
-  } catch (err) {
-    console.error("Work was created, but the local draft could not be cleared:", err)
-  }
+  watch(() => [form.value.language_id, form.value.category], () => {
+    fetchNextNumbers()
+  })
 
-  try {
-    await dispatchAuditTrail(
-      "CREATE",
-      "CATALOGUE",
-      result.value.work_id,
-      `Registered work: ${payload.title}`,
-      operationalReason
-    )
-  } catch (err) {
-    console.error(
-      "Work creation returned a Work ID, but secondary audit dispatch failed:",
-      err
-    )
-  }
-
-  loading.value = false
-
-  const workId = result.value.work_id
-  const language = payload.language
-
-  setTimeout(() => {
-    if (isChiefRegistration()) {
-      router.push({
-        path: "/chief/register-item",
-        query: { work_id: workId, language_id: language }
-      })
-    } else {
-      router.push("/docket")
+  watch(() => [form.value.title, form.value.author, form.value.language_id], () => {
+    clearTimeout(typingTimer)
+    adminOverride.value = false
+    isFrozen.value = false
+    duplicateResult.value = { severity: "none", matches: [] }
+    if (!form.value.title) {
+      duplicateLoading.value = false
+      return
     }
-  }, 400)
-}
+    duplicateLoading.value = true
+    typingTimer = setTimeout(checkDuplicate, 350)
+  })
 
-watch(draftTrackingSignature, () => scheduleAutoSave())
+  watch([duplicateResult, adminOverride], ([res, override]) => {
+    isFrozen.value = res.severity === "strong" && !override
+  }, { deep: true })
 
-onMounted(async () => {
-  window.addEventListener("keydown", handleScannerKeydown)
-  window.addEventListener("keydown", handleEnterToNextField)
-  suppressDirtyTracking = true
+  watch(draftTrackingSignature, () => {
+    if (suppressDirtyTracking || loading.value) return
+    hasUnsavedChanges.value = true
+  })
 
-  try {
-    await harvestSystemGenresMatrix()
-    loadPartialDraft()
-  } finally {
-    suppressDirtyTracking = false
-    setCleanDraftBaseline()
+  onMounted(async () => {
+    suppressDirtyTracking = true
+    try {
+      await harvestSystemGenresMatrix()
+      loadPartialDraft()
+    } finally {
+      suppressDirtyTracking = false
+      setCleanDraftBaseline()
+    }
+  })
+
+  onUnmounted(() => {
+    clearTimeout(autoSaveTimer)
+    clearTimeout(titleLookupDebounceTimer)
+    clearTimeout(authorLocalSearchTimer)
+  })
+
+  return {
+    router,
+    pasteInput,
+    isParsing,
+    showAuthorSuggestions,
+    showPublisherSuggestions,
+    showPromptModal,
+    creationReason,
+    form,
+    previewNumbers,
+    result,
+    loading,
+    duplicateLoading,
+    isbnLoading,
+    metadataConflicts,
+    draftSavedAt,
+    draftVersions,
+    hasUnsavedChanges,
+    draftOfferVisible,
+    callNumberPrefix,
+    extraLanguages,
+    genreGroupA,
+    genreGroupB,
+    dynamicCommunityGenres,
+    selectedGroupAGenre,
+    selectedGroupBGenre,
+    selectedGroupCGenre,
+    showCustomManualGenreField,
+    customManualGenreText,
+    isFrozen,
+    isIsbnValid,
+    isPasteIsbnReady,
+    cleanIsbnValue,
+    isIsbnChecksumValid,
+    isIsbnReadyForCatalogue,
+    readinessItems,
+    readinessCount,
+    readinessTotal,
+    readinessPercent,
+    hasDraftContent,
+    isFieldImported,
+    isYearValid,
+    authorSuggestions,
+    externalAuthorSuggestions,
+    externalAuthorSearchLoading,
+    externalAuthorSearchMessage,
+    publisherSuggestions,
+    titleLookupLoading,
+    titleLookupResults,
+    titleLookupMessage,
+    searchTitleCandidates,
+    selectTitleCandidate,
+    clearTitleLookupResults,
+    liveCompiledGenreChips,
+    seriesName,
+    seriesNumber,
+    volumeNumber,
+    relatedWorkId,
+    duplicateResult,
+    adminOverride,
+    fieldHints,
+    savePartialDraft,
+    clearPartialDrafts,
+    restoreDraftVersion,
+    selectAuthor,
+    selectExternalAuthor,
+    selectPublisher,
+    handleBlurAction,
+    sanitizeField,
+    handleMetadataPaste,
+    normalizeParserIsbn,
+    clearField,
+    confirmPrefill,
+    triggerCreationPrompt,
+    executeConfirmedCreation,
+    syncGenreSelection,
+    syncManualGenreInput,
+    applyGeneratedCallNumber,
+    callNumberPreview,
+    shelfSuggestion
   }
-})
-
-onUnmounted(() => {
-  clearTimeout(autoSaveTimer)
-  clearTimeout(titleLookupDebounceTimer)
-  clearTimeout(authorLocalSearchTimer)
-  authorSearchGeneration += 1
-
-  if (
-    !suppressDirtyTracking &&
-    !loading.value &&
-    hasDraftContent.value &&
-    draftTrackingSignature.value !== cleanDraftSignature
-  ) {
-    savePartialDraft({ silent: true, versioned: false })
-  }
-
-  window.removeEventListener("keydown", handleScannerKeydown)
-  window.removeEventListener("keydown", handleEnterToNextField)
-  clearTimeout(scannerResetTimer)
-})
-
-return {
-  router,
-  pasteInput,
-  isParsing,
-  showAuthorSuggestions,
-  showPublisherSuggestions,
-  showPromptModal,
-  creationReason,
-  form,
-  previewNumbers,
-  result,
-  loading,
-  duplicateLoading,
-  isbnLoading,
-  titleLookupLoading,
-  titleLookupResults,
-  titleLookupMessage,
-  searchTitleCandidates,
-  selectTitleCandidate,
-  clearTitleLookupResults,
-  metadataConflicts,
-  importedFieldNames,
-  draftSavedAt,
-  draftVersions,
-  hasUnsavedChanges,
-  draftOfferVisible,
-  callNumberPattern,
-  callNumberPrefix,
-  seriesName,
-  seriesNumber,
-  volumeNumber,
-  relatedWorkId,
-  fieldHints,
-  standardizedTitlePreview,
-  standardizedAuthorPreview,
-  callNumberPreview,
-  shelfSuggestion,
-  applyGeneratedCallNumber,
-  duplicateResult,
-  adminOverride,
-  extraLanguages,
-  genreGroupA,
-  genreGroupB,
-  dynamicCommunityGenres,
-  selectedGroupAGenre,
-  selectedGroupBGenre,
-  selectedGroupCGenre,
-  showCustomManualGenreField,
-  customManualGenreText,
-  isFrozen,
-  isIsbnValid,
-  isPasteIsbnReady,
-  cleanIsbnValue,
-  isIsbnChecksumValid,
-  isIsbnReadyForCatalogue,
-  readinessItems,
-  readinessCount,
-  readinessTotal,
-  readinessPercent,
-  hasDraftContent,
-  isFieldImported,
-  isYearValid,
-  autocompleteAuthors,
-  externalAuthorSuggestions,
-  externalAuthorSearchLoading,
-  externalAuthorSearchMessage,
-  searchExternalAuthors,
-  selectedAuthorityName,
-  authorSuggestions,
-  autocompletePublishers,
-  publisherSuggestions,
-  liveCompiledGenreChips,
-  syncGenreSelection,
-  syncManualGenreInput,
-  savePartialDraft,
-  clearPartialDrafts,
-  restoreDraftVersion,
-  selectAuthor,
-  selectExternalAuthor,
-  selectPublisher,
-  handleBlurAction,
-  sanitizeField,
-  handleMetadataPaste,
-  normalizeParserIsbn,
-  checkDuplicate,
-  clearField,
-  confirmPrefill,
-  useExistingAuthority,
-  triggerCreationPrompt,
-  executeConfirmedCreation
 }
-}  

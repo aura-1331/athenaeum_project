@@ -330,6 +330,77 @@
       <!-- Right Column: Verification & Decision Sidebar -->
       <div class="sidebar-column">
         
+        <!-- =================================================================== -->
+<!-- SECTION E (ALT): INITIAL PHYSICAL COPY & ARTIFACT PROVENANCE        -->
+<!-- =================================================================== -->
+<section class="card">
+  <div class="card-header">
+    <h2>Initial Physical Copy & Artifact Provenance</h2>
+  </div>
+  <div class="card-body">
+    <div class="grid-3col">
+      <div class="field-group">
+        <label>Extent / Page count</label>
+        <input autocomplete="new-password" v-model="form.extent_page_count" placeholder="e.g. xiv, 342 p." />
+      </div>
+      <div class="field-group">
+        <label>Physical dimensions</label>
+        <input autocomplete="new-password" v-model="form.physical_dimensions" placeholder="e.g. 24 cm" />
+      </div>
+      <div class="field-group">
+        <label>Date acquired</label>
+        <input autocomplete="new-password" type="date" v-model="form.date_acquired" />
+      </div>
+    </div>
+
+    <div class="grid-3col" style="margin-top: 16px;">
+      <div class="field-group">
+        <label>Collection / Fonds</label>
+        <input autocomplete="new-password" v-model="form.collection_fonds" placeholder="Named special collection" />
+      </div>
+      <div class="field-group">
+        <label>Physical condition</label>
+        <input autocomplete="new-password" v-model="form.physical_condition" placeholder="e.g. Fine, Good, Fragile" />
+      </div>
+      <div class="field-group">
+        <label>Binding type</label>
+        <input autocomplete="new-password" v-model="form.binding_type" placeholder="e.g. Hardcover, Leather" />
+      </div>
+    </div>
+
+    <div class="field-group" style="margin-top: 16px;">
+      <label>Provenance source / donor</label>
+      <input autocomplete="new-password" v-model="form.provenance_source" placeholder="Source or vendor history" />
+    </div>
+
+    <div class="field-group" style="margin-top: 16px;">
+      <label>Artifactual notes</label>
+      <textarea autocomplete="off" v-model="form.artifactual_notes" rows="2" placeholder="Bookplates, inscriptions, marginalia..."></textarea>
+    </div>
+
+    <div class="grid-3col" style="margin-top: 16px;">
+      <div class="field-group">
+        <label>Access restrictions</label>
+        <input autocomplete="new-password" v-model="form.access_restrictions" placeholder="Restrictions or handling notes" />
+      </div>
+      <div class="field-group">
+        <label>Digital scan available</label>
+        <select v-model="form.digital_scan_available">
+          <option :value="false">No</option>
+          <option :value="true">Yes</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label>OCR status</label>
+        <select v-model="form.ocr_status">
+          <option value="Unindexed">Unindexed</option>
+          <option value="Indexed">Indexed</option>
+          <option value="Partial">Partial</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</section>
         <!-- Section E: Evidence & Duplicates -->
         <section class="card">
           <div class="card-header">
