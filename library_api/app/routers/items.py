@@ -24,8 +24,22 @@ router = APIRouter(prefix="/items", tags=["items"])
 # changes remain owned by the Item layer while legacy /catalogue URLs remain intact.
 catalogue_item_router = APIRouter(prefix="/catalogue", tags=["catalogue"])
 
-ITEM_CORRECTABLE_FIELDS = ("work_id", "language_id")
-
+ITEM_CORRECTABLE_FIELDS = (
+    "work_id",
+    "language_id",
+    "shelf",
+    "extent_page_count",
+    "physical_dimensions",
+    "date_acquired",
+    "collection_fonds",
+    "physical_condition",
+    "binding_type",
+    "provenance_source",
+    "artifactual_notes",
+    "access_restrictions",
+    "digital_scan_available",
+    "ocr_status",
+)
 
 
 @router.get("/{serial_no}")
@@ -34,10 +48,35 @@ def get_item(
     current_user: dict = Depends(get_current_user)
 ):
     conn = get_connection(request=request)
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         cur.execute("""
-            SELECT w.title, w.author, w.language, w.publisher, w.year, w.genre, w.notes
+            SELECT 
+                i.serial_no,
+                i.work_id,
+                i.accession_no,
+                i.call_no,
+                i.shelf,
+                i.language_id,
+                i.extent_page_count,
+                i.physical_dimensions,
+                i.date_acquired,
+                i.collection_fonds,
+                i.physical_condition,
+                i.binding_type,
+                i.provenance_source,
+                i.artifactual_notes,
+                i.access_restrictions,
+                i.digital_scan_available,
+                i.ocr_status,
+                i.availability_status,
+                w.title,
+                w.author,
+                w.language,
+                w.publisher,
+                w.year,
+                w.genre,
+                w.notes
             FROM public.items i
             JOIN public.works w ON i.work_id = w.work_id
             WHERE i.serial_no = %s
@@ -50,15 +89,7 @@ def get_item(
         if not row:
             raise HTTPException(status_code=404, detail="Holding not found")
             
-        return {
-            "title": row[0],
-            "author": row[1],
-            "language": row[2],
-            "publisher": row[3],
-            "year": row[4],
-            "genre": row[5],
-            "notes": row[6]
-        }
+        return row
     finally:
         cur.close()
         conn.close()
@@ -71,9 +102,10 @@ def get_item(
 @audit_action(
     "UPDATE_HOLDING",
     category="CATALOG_API",
-    target_entity="Item",
+    target_entity="ITEM",
     target_id_param="serial_no",
-    reason_param="x_change_reason"
+    reason_param="x_change_reason",
+    log_success=False
 )
 def update_item(
     serial_no: int,
@@ -85,9 +117,8 @@ def update_item(
     conn = get_connection(request=request)
     cur = conn.cursor()
     try:
-        # 1. Resolve work_id and capture existing state for audit diff
         cur.execute("""
-            SELECT i.work_id, w.title, w.author, w.language, w.publisher, w.year, w.genre, w.notes
+            SELECT i.work_id, w.title, w.author, w.language, w.publisher, w.year, w.genre, w.notes, i.shelf
             FROM public.items i
             JOIN public.works w ON i.work_id = w.work_id
             WHERE i.serial_no = %s
@@ -99,9 +130,6 @@ def update_item(
             
         work_id = item_row[0]
 
-        # Validate bibliographic values before changing either the Work or its
-        # denormalized Item fields. A malformed year must be a client error,
-        # not a database exception/HTTP 500.
         for required_field in ("title", "language"):
             if required_field in payload and not str(payload.get(required_field) or "").strip():
                 raise HTTPException(
@@ -123,10 +151,10 @@ def update_item(
             "publisher": item_row[4],
             "year": item_row[5],
             "genre": item_row[6],
-            "notes": item_row[7]
+            "notes": item_row[7],
+            "shelf": item_row[8]
         }
 
-        # 2. Keep Work author text and the AUTHOR authority relationship synchronized.
         requested_author = payload.get("author")
         authority_id = payload.get("authority_id")
         resolved_author = None
@@ -174,7 +202,6 @@ def update_item(
                 current_user.get("user_id")
             ))
 
-        # 3. Update bibliographic attributes on WORKS.
         cur.execute("""
             UPDATE public.works 
             SET title = COALESCE(%s, title),
@@ -192,24 +219,13 @@ def update_item(
             payload.get("notes"), work_id
         ))
 
-        # 3. Update denormalized attributes on ITEMS
-        cur.execute("""
-            UPDATE public.items 
-            SET title = COALESCE(%s, title),
-                author = COALESCE(%s, author),
-                publisher = COALESCE(%s, publisher),
-                year = CASE WHEN %s THEN %s ELSE year END,
-                genre = COALESCE(%s, genre),
-                notes = COALESCE(%s, notes)
-            WHERE work_id = %s
-        """, (
-            payload.get("title"), resolved_author if (requested_author is not None or authority_id is not None) else None, payload.get("publisher"),
-            year_is_set, safe_year, payload.get("genre"), payload.get("notes"),
-            work_id
-        ))
+        if "shelf" in payload:
+            cur.execute("""
+                UPDATE public.items 
+                SET shelf = NULLIF(BTRIM(%s), '')
+                WHERE serial_no = %s
+            """, (payload.get("shelf"), serial_no))
 
-
-        # 4. Cryptographic ledger anchor
         actor_id = str(current_user.get("user_id", "UNKNOWN"))
         actor_name = str(current_user.get("username") or current_user.get("name") or "Archive Operator")
         actor_role = str(current_user.get("role", "The Keeper"))
@@ -262,14 +278,13 @@ def update_item(
         cur.close()
         conn.close()
 
-# ---------------------------------------------------------------------------
-# Legacy /catalogue Item lifecycle endpoints
-# ---------------------------------------------------------------------------
+
 @catalogue_item_router.post("/create-item", dependencies=[Depends(require_role(["The Chief", "The Keeper"]))])
 @audit_action(
     "ACCESSION_ITEM",
-    target_entity="Item",
-    reason_param="x_change_reason"
+    target_entity="ITEM",
+    reason_param="x_change_reason",
+    log_success=False
 )
 async def create_item(
     payload: dict,
@@ -328,15 +343,19 @@ async def create_item(
 
         existing_work_id, title, language, category, call_no, work_status = work
 
-        if str(work_status or "").strip().upper() != "APPROVED":
+        # Check how many copies currently exist for this Work
+        cur.execute("SELECT COUNT(*) FROM public.items WHERE work_id = %s AND is_deleted = FALSE", (existing_work_id,))
+        existing_copies_count = cur.fetchone()[0]
+
+        is_approved = str(work_status or "").strip().upper() == "APPROVED"
+
+        # Allow adding a copy if the Work is approved, OR if it's the very first copy for a pending Work
+        if not is_approved and existing_copies_count > 0:
             raise HTTPException(
                 status_code=409,
-                detail="This Work is not yet approved and cannot receive an additional copy."
+                detail="This Work is not yet approved and cannot receive additional copies."
             )
 
-        # The physical Item's language must agree with its parent Work. The
-        # frontend sends the Work language label as language_id; reject stale
-        # or mismatched form state instead of creating inconsistent metadata.
         normalized_work_language = str(language or "").strip().casefold()
         normalized_item_language = str(language_id or "").strip().casefold()
         if not normalized_work_language or normalized_item_language != normalized_work_language:
@@ -345,26 +364,18 @@ async def create_item(
                 detail="The Item language must match the approved Work's language. Reload the Work and try again."
             )
 
-        # An approved Work must still have a usable author authority before a
-        # new physical Item can be attached to it.
         validate_work_authority(cur, existing_work_id)
 
         lang_prefix = get_language_prefix(language)
         
         cur.execute("""
-            UPDATE public.language_registry
-            SET last_number = last_number + 1
-            WHERE TRIM(prefix) = %s
+            INSERT INTO public.language_registry (language, prefix, last_number)
+            VALUES (%s, %s, 1)
+            ON CONFLICT (prefix)
+            DO UPDATE SET last_number = public.language_registry.last_number + 1
             RETURNING last_number;
-        """, (lang_prefix,))
+        """, (language.strip(), lang_prefix))
         row = cur.fetchone()
-        if not row:
-            cur.execute("""
-                INSERT INTO public.language_registry (language, prefix, last_number)
-                VALUES (%s, %s, 1)
-                RETURNING last_number;
-            """, (language.strip(), lang_prefix))
-            row = cur.fetchone()
         accession_count = row[0]
         accession_no = f"{lang_prefix}-{accession_count}"
 
@@ -548,8 +559,6 @@ async def resubmit_item(
                 detail="The parent Work is not approved and this Item cannot be resubmitted."
             )
 
-        # The parent Work may still be APPROVED in its own status while its
-        # author authority has subsequently been rejected or deactivated.
         validate_work_authority(cur, item["work_id"])
 
         if _open_correction(cur, "ITEM", serial_no):
@@ -683,8 +692,6 @@ def list_pending_items(request: Request, current_user: dict = Depends(get_curren
                 ON i.work_id = w.work_id
             WHERE i.availability_status = 'PENDING'
               AND i.is_deleted = FALSE
-              -- The initial copy for a pending Work is not a separate Item request.
-              -- Work approval/rejection decides that initial copy's state.
               AND UPPER(TRIM(w.status)) = 'APPROVED'
               AND (
                     LOWER(TRIM(%s)) = 'the chief'
@@ -730,8 +737,6 @@ async def approve_item(
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         if decision == "APPROVE":
-            # An Item may only become AVAILABLE while its parent Work is still approved.
-            # Re-check the Work here because its status may have changed since accession.
             cur.execute("""
                 UPDATE public.items i
                 SET availability_status = 'AVAILABLE'
@@ -763,8 +768,6 @@ async def approve_item(
 
         row = cur.fetchone()
         if not row:
-            # Guard direct API calls as well as the filtered UI queue: both
-            # APPROVE and REJECT must wait for the parent Work's decision.
             cur.execute("""
                 SELECT i.serial_no, w.status AS work_status
                 FROM public.items i
@@ -856,12 +859,15 @@ async def approve_item(
         conn.close()
 
 
+# app/routers/items.py (Replace update_ledger_record and get_catalogue_book)
+
 @catalogue_item_router.patch("/{serial_no}", dependencies=[Depends(require_role(["The Chief"]))])
 @audit_action(
     "UPDATE_LEDGER",
-    target_entity="Item",
+    target_entity="ITEM",
     target_id_param="serial_no",
-    reason_param="x_change_reason"
+    reason_param="x_change_reason",
+    log_success=False
 )
 async def update_ledger_record(
     serial_no: int,
@@ -888,15 +894,38 @@ async def update_ledger_record(
         cur.execute("SET LOCAL request.custom.device_id = %s;", (x_device_id,))
         cur.execute("SET LOCAL request.custom.ip_address = %s;", (x_ip_address,))
 
+        # Update items table fields
         cur.execute("""
             UPDATE public.items SET
-                shelf = CASE
-                    WHEN %s THEN NULLIF(BTRIM(%s), '')
-                    ELSE shelf
-                END
+                shelf = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE shelf END,
+                extent_page_count = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE extent_page_count END,
+                physical_dimensions = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE physical_dimensions END,
+                date_acquired = CASE WHEN %s THEN NULLIF(BTRIM(%s), '')::date ELSE date_acquired END,
+                collection_fonds = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE collection_fonds END,
+                physical_condition = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE physical_condition END,
+                binding_type = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE binding_type END,
+                provenance_source = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE provenance_source END,
+                artifactual_notes = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE artifactual_notes END,
+                access_restrictions = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE access_restrictions END,
+                digital_scan_available = CASE WHEN %s THEN %s::boolean ELSE digital_scan_available END,
+                ocr_status = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE ocr_status END
             WHERE serial_no = %s
             RETURNING work_id
-        """, ("shelf" in payload, payload.get("shelf"), serial_no))
+        """, (
+            "shelf" in payload, payload.get("shelf"),
+            "extent_page_count" in payload, str(payload.get("extent_page_count") or ""),
+            "physical_dimensions" in payload, payload.get("physical_dimensions"),
+            "date_acquired" in payload and bool(payload.get("date_acquired")), str(payload.get("date_acquired") or ""),
+            "collection_fonds" in payload, payload.get("collection_fonds"),
+            "physical_condition" in payload, payload.get("physical_condition"),
+            "binding_type" in payload, payload.get("binding_type"),
+            "provenance_source" in payload, payload.get("provenance_source"),
+            "artifactual_notes" in payload, payload.get("artifactual_notes"),
+            "access_restrictions" in payload, payload.get("access_restrictions"),
+            "digital_scan_available" in payload, bool(payload.get("digital_scan_available")),
+            "ocr_status" in payload, payload.get("ocr_status"),
+            serial_no
+        ))
         
         res = cur.fetchone()
         if not res:
@@ -923,8 +952,6 @@ async def update_ledger_record(
             lang_initial = lang_prefix if len(lang_prefix) == 2 else current_lang[0].upper()
             clean_lang = current_lang.strip()
 
-            # Match the lock used by Work creation so concurrent allocations
-            # cannot calculate the same next call number.
             cur.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                 (f"call_no:{clean_lang.casefold()}:{new_cat.casefold()}",)
@@ -941,7 +968,7 @@ async def update_ledger_record(
         safe_year = None
         if "year" in payload:
             if raw_year is None or str(raw_year).strip() == "":
-                safe_year = None  # An explicitly blank year clears the year.
+                safe_year = None
             else:
                 try:
                     safe_year = int(str(raw_year).strip())
@@ -951,9 +978,7 @@ async def update_ledger_record(
                         detail="Year must be a whole number or blank. Existing data was not changed."
                     )
 
-        # PATCH semantics: fields omitted from the request are left untouched.
-        # Explicitly supplied blank values clear nullable fields; title, author,
-        # and language keep their existing values when supplied as blank.
+        # Update all fields on public.works
         cur.execute("""
             UPDATE public.works SET
                 title = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), title) ELSE title END,
@@ -966,9 +991,23 @@ async def update_ledger_record(
                 genre = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE genre END,
                 language = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), language) ELSE language END,
                 original_language = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_language END,
+                original_title = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_title END,
+                original_author = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_author END,
+                translator = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE translator END,
+                compiler_editor = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE compiler_editor END,
+                work_nature = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE work_nature END,
+                edition_statement = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE edition_statement END,
+                series_title = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE series_title END,
+                series_volume = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE series_volume END,
+                lccn = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE lccn END,
+                oclc_no = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE oclc_no END,
+                subject_headings = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE subject_headings END,
+                target_audience_era = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE target_audience_era END,
+                copyright_status = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE copyright_status END,
                 translation_compilation = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE translation_compilation END,
                 notes = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE notes END,
-                call_no = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), call_no) ELSE call_no END
+                call_no = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), call_no) ELSE call_no END,
+                updated_at = NOW()
             WHERE work_id = %s
         """, (
             "title" in payload, payload.get("title"),
@@ -981,11 +1020,59 @@ async def update_ledger_record(
             "genre" in payload, payload.get("genre"),
             "language" in payload, payload.get("language"),
             "original_language" in payload, payload.get("original_language"),
+            "original_title" in payload, payload.get("original_title"),
+            "original_author" in payload, payload.get("original_author"),
+            "translator" in payload, payload.get("translator"),
+            "compiler_editor" in payload, payload.get("compiler_editor"),
+            "work_nature" in payload, payload.get("work_nature"),
+            "edition_statement" in payload, payload.get("edition_statement"),
+            "series_title" in payload, payload.get("series_title"),
+            "series_volume" in payload, payload.get("series_volume"),
+            "lccn" in payload, payload.get("lccn"),
+            "oclc_no" in payload, payload.get("oclc_no"),
+            "subject_headings" in payload, payload.get("subject_headings"),
+            "target_audience_era" in payload, payload.get("target_audience_era"),
+            "copyright_status" in payload, payload.get("copyright_status"),
             "translation_compilation" in payload, payload.get("translation_compilation"),
             "notes" in payload, payload.get("notes"),
             ("call_no" in payload or "category" in payload), final_call_no,
             work_id
         ))
+
+        # Handle relational series group updates
+        s_name = str(payload.get("series_name") or "").strip()
+        s_num = str(payload.get("series_number") or "").strip() or None
+        v_num_raw = str(payload.get("volume_number") or "").strip()
+        v_num = int(v_num_raw) if v_num_raw and v_num_raw.isdigit() else None
+        rel_work_raw = str(payload.get("related_work_id") or "").strip()
+        rel_work_id = int(rel_work_raw) if rel_work_raw and rel_work_raw.isdigit() else None
+
+        if s_name:
+            cur.execute("""
+                SELECT series_id FROM public.work_series_groups
+                WHERE LOWER(BTRIM(series_name)) = LOWER(BTRIM(%s))
+                FOR UPDATE
+            """, (s_name,))
+            s_row = cur.fetchone()
+            if s_row:
+                s_id = s_row[0]
+            else:
+                cur.execute("""
+                    INSERT INTO public.work_series_groups (series_name, created_by)
+                    VALUES (%s, %s)
+                    RETURNING series_id
+                """, (s_name, token_user_id))
+                s_id = cur.fetchone()[0]
+
+            cur.execute("""
+                INSERT INTO public.work_series_members (work_id, series_id, series_number, volume_number, related_work_id)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (work_id) DO UPDATE SET
+                    series_id = EXCLUDED.series_id,
+                    series_number = EXCLUDED.series_number,
+                    volume_number = EXCLUDED.volume_number,
+                    related_work_id = EXCLUDED.related_work_id
+            """, (work_id, s_id, s_num, v_num, rel_work_id))
 
         if final_call_no:
             cur.execute("UPDATE public.items SET call_no = %s WHERE work_id = %s", (final_call_no, work_id))
@@ -1035,13 +1122,13 @@ async def update_ledger_record(
         cur.close()
         conn.close()
 
-
 @catalogue_item_router.delete("/{book_id}", tags=["Catalogue Operations"], dependencies=[Depends(require_role(["The Chief"]))])
 @audit_action(
     "DEACCESSION",
-    target_entity="Item",
+    target_entity="ITEM",
     target_id_param="book_id",
-    reason_param="reason"
+    reason_param="reason",
+    log_success=False
 )
 async def soft_delete_book(
     book_id: int, reason: str, request: Request,
@@ -1129,7 +1216,10 @@ class ItemCorrectionSubmit(BaseModel):
 def _load_item_for_review(cur, serial_no: int, actor: dict) -> dict:
     cur.execute("""
         SELECT
-            i.serial_no, i.accession_no, i.work_id, i.call_no, i.language_id,
+            i.serial_no, i.accession_no, i.work_id, i.call_no, i.shelf, i.language_id,
+            i.extent_page_count, i.physical_dimensions, i.date_acquired, i.collection_fonds,
+            i.physical_condition, i.binding_type, i.provenance_source, i.artifactual_notes,
+            i.access_restrictions, i.digital_scan_available, i.ocr_status,
             i.availability_status, i.is_deleted, i.deletion_reason,
             i.proposed_by, i.created_at,
             w.title, w.author, w.language, w.category,
@@ -1193,7 +1283,19 @@ def get_item_review(
             "accession_no": item["accession_no"],
             "work_id": item["work_id"],
             "call_no": item["call_no"],
+            "shelf": item["shelf"],
             "language_id": item["language_id"],
+            "extent_page_count": item["extent_page_count"],
+            "physical_dimensions": item["physical_dimensions"],
+            "date_acquired": item["date_acquired"],
+            "collection_fonds": item["collection_fonds"],
+            "physical_condition": item["physical_condition"],
+            "binding_type": item["binding_type"],
+            "provenance_source": item["provenance_source"],
+            "artifactual_notes": item["artifactual_notes"],
+            "access_restrictions": item["access_restrictions"],
+            "digital_scan_available": item["digital_scan_available"],
+            "ocr_status": item["ocr_status"],
             "status": status_value,
             "rejection_reason": item["deletion_reason"],
             "proposed_by": item["proposed_by"],
@@ -1471,21 +1573,32 @@ async def resubmit_corrected_item(
             raise HTTPException(status_code=403, detail=detail)
 
         new_values = {}
-        if "language_id" in requested:
-            language_value = str(requested["language_id"] or "").strip()
-            if not language_value:
-                raise HTTPException(
-                    status_code=400, detail="Language Profile cannot be empty."
-                )
-            new_values["language_id"] = language_value
-        if "work_id" in requested:
-            try:
-                new_values["work_id"] = int(str(requested["work_id"]).strip())
-            except (TypeError, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Authorized Work ID must be a numeric Work ID."
-                )
+        for key in allowed:
+            if key in requested:
+                val = requested[key]
+                if key == "work_id":
+                    try:
+                        new_values["work_id"] = int(str(val).strip())
+                    except (TypeError, ValueError):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Authorized Work ID must be a numeric Work ID."
+                        )
+                elif key == "language_id":
+                    language_value = str(val or "").strip()
+                    if not language_value:
+                        raise HTTPException(
+                            status_code=400, detail="Language Profile cannot be empty."
+                        )
+                    new_values["language_id"] = language_value
+                elif key == "digital_scan_available":
+                    new_values["digital_scan_available"] = bool(val)
+                elif key in ("shelf", "extent_page_count", "physical_dimensions",
+                             "date_acquired", "collection_fonds", "physical_condition",
+                             "binding_type", "provenance_source", "artifactual_notes",
+                             "access_restrictions", "ocr_status"):
+                    text_val = str(val if val is not None else "").strip()
+                    new_values[key] = text_val or None
 
         target_work_id = new_values.get("work_id", item["work_id"])
         cur.execute(
@@ -1508,7 +1621,6 @@ async def resubmit_corrected_item(
                 status_code=400,
                 detail="The Item language must match the selected Work's language."
             )
-        # Keep the Item language synchronized if its parent Work was changed.
         new_values["language_id"] = target_work_language
 
         ledger_change_set = _audit_ledger_diff(item, new_values)
@@ -1543,20 +1655,13 @@ async def resubmit_corrected_item(
 
             prefix = get_language_prefix(new_work["language"])
             cur.execute("""
-                UPDATE public.language_registry
-                SET last_number = last_number + 1
-                WHERE TRIM(prefix) = %s
+                INSERT INTO public.language_registry (language, prefix, last_number)
+                VALUES (%s, %s, 1)
+                ON CONFLICT (prefix)
+                DO UPDATE SET last_number = public.language_registry.last_number + 1
                 RETURNING last_number;
-            """, (prefix,))
-            row = cur.fetchone()
-            if not row:
-                cur.execute("""
-                    INSERT INTO public.language_registry (language, prefix, last_number)
-                    VALUES (%s, %s, 1)
-                    RETURNING last_number;
-                """, (new_work["language"].strip(), prefix))
-                row = cur.fetchone()
-            counter = row[0]
+            """, (new_work["language"].strip(), prefix))
+            counter = cur.fetchone()[0]
             accession_no = f"{prefix}-{counter}"
             call_no = new_work["call_no"]
             final_work_id = new_work["work_id"]
@@ -1565,23 +1670,40 @@ async def resubmit_corrected_item(
             }
             field_changes["call_no"] = {"from": item["call_no"], "to": call_no}
 
-        cur.execute("""
+        item_updates = {}
+        for k in ("shelf", "extent_page_count", "physical_dimensions", "date_acquired",
+                  "collection_fonds", "physical_condition", "binding_type",
+                  "provenance_source", "artifactual_notes", "access_restrictions",
+                  "digital_scan_available", "ocr_status"):
+            if k in field_changes:
+                item_updates[k] = field_changes[k]["to"]
+
+        set_clauses = [
+            "work_id = %s",
+            "accession_no = %s",
+            "call_no = %s",
+            "language_id = %s",
+            "availability_status = 'PENDING'",
+            "is_deleted = FALSE",
+            "deletion_reason = NULL"
+        ]
+        params = [final_work_id, accession_no, call_no, final_language_id]
+
+        for col, val in item_updates.items():
+            set_clauses.append(f"{col} = %s")
+            params.append(val)
+
+        params.extend([serial_no, actor["user_id"]])
+
+        cur.execute(f"""
             UPDATE public.items
-            SET work_id = %s,
-                accession_no = %s,
-                call_no = %s,
-                language_id = %s,
-                availability_status = 'PENDING',
-                is_deleted = FALSE,
-                deletion_reason = NULL
+            SET {', '.join(set_clauses)}
             WHERE serial_no = %s
               AND proposed_by = %s
               AND availability_status = 'REJECTED'
             RETURNING serial_no
-        """, (
-            final_work_id, accession_no, call_no, final_language_id,
-            serial_no, actor["user_id"]
-        ))
+        """, tuple(params))
+
         if not cur.fetchone():
             raise HTTPException(
                 status_code=409,
@@ -1662,10 +1784,10 @@ async def resubmit_corrected_item(
         conn.close()
 
 
-
 def _generate_record_id(serial_no: int) -> str:
     from datetime import datetime
     return f"AO-REC-{datetime.now().year}-{str(serial_no).zfill(6)}"
+
 
 @catalogue_item_router.get("/holding/{serial_no}")
 def get_catalogue_book(request: Request, serial_no: int, current_user: dict = Depends(get_current_user)):
@@ -1674,11 +1796,24 @@ def get_catalogue_book(request: Request, serial_no: int, current_user: dict = De
     try:
         query = """
             SELECT  
+                i.item_id,
                 i.serial_no, 
                 i.accession_no, 
                 i.shelf, 
                 i.work_id, 
-                w.language as language, 
+                i.extent_page_count,
+                i.physical_dimensions,
+                i.date_acquired,
+                i.collection_fonds,
+                i.physical_condition,
+                i.binding_type,
+                i.provenance_source,
+                i.artifactual_notes,
+                i.access_restrictions,
+                i.digital_scan_available,
+                i.ocr_status,
+                i.availability_status,
+                w.language, 
                 w.title, 
                 w.author, 
                 w.publisher, 
@@ -1687,12 +1822,31 @@ def get_catalogue_book(request: Request, serial_no: int, current_user: dict = De
                 w.ddc, 
                 w.call_no, 
                 w.original_language, 
+                w.original_title,
+                w.original_author,
+                w.translator,
+                w.compiler_editor,
+                w.work_nature,
+                w.edition_statement,
+                w.series_title,
+                w.series_volume,
+                w.lccn,
+                w.oclc_no,
+                w.subject_headings,
+                w.target_audience_era,
+                w.copyright_status,
                 w.notes, 
                 w.category, 
                 w.genre, 
-                w.translation_compilation
+                w.translation_compilation,
+                sg.series_name,
+                sm.series_number,
+                sm.volume_number,
+                sm.related_work_id
             FROM public.items i
             INNER JOIN public.works w ON i.work_id = w.work_id
+            LEFT JOIN public.work_series_members sm ON sm.work_id = w.work_id
+            LEFT JOIN public.work_series_groups sg ON sg.series_id = sm.series_id
             WHERE i.serial_no = %s
               AND COALESCE(i.is_deleted, FALSE) = FALSE
               AND UPPER(BTRIM(COALESCE(w.status, ''))) = 'APPROVED'
@@ -1702,7 +1856,6 @@ def get_catalogue_book(request: Request, serial_no: int, current_user: dict = De
         result = cur.fetchone()
         
         if not result:
-            print("❌ Database Error: 404: Book Record not found")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Book Record not found"
@@ -1718,4 +1871,3 @@ def get_catalogue_book(request: Request, serial_no: int, current_user: dict = De
     finally:
         cur.close()
         conn.close()
-

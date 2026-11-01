@@ -67,19 +67,6 @@ class WorkCreate(BaseModel):
     series_number: Optional[str] = None
     volume_number: Optional[str] = None
     related_work_id: Optional[int] = None
-    
-    # --- Incoming form fields for the initial physical copy ---
-    extent_page_count: Optional[str] = None
-    physical_dimensions: Optional[str] = None
-    date_acquired: Optional[str] = None
-    collection_fonds: Optional[str] = None
-    physical_condition: Optional[str] = None
-    binding_type: Optional[str] = None
-    provenance_source: Optional[str] = None
-    artifactual_notes: Optional[str] = None
-    access_restrictions: Optional[str] = None
-    digital_scan_available: Optional[bool] = False
-    ocr_status: Optional[str] = "Unindexed"
 
 
 class WorkDraftAuditPayload(BaseModel):
@@ -101,15 +88,6 @@ def create_work_transaction(
     x_device_id: Optional[str] = "Desktop Browser Workstation",
     x_ip_address: Optional[str] = "127.0.0.1",
 ):
-    """Create Work, authority relationship, initial Item and audit atomically.
-
-    No commit occurs until every step succeeds. The existing /catalogue/create-work
-    route remains the compatibility boundary during the refactor.
-
-    Important: Work and Item business identifiers are database-managed by the
-    transactional numbering functions installed by the Create Work migration.
-    This function deliberately does not call nextval() itself.
-    """
     request.state.error_operation = "CREATE_WORK"
     request.state.error_stage = "INITIALIZATION"
     request.state.error_context = {
@@ -144,19 +122,13 @@ def create_work_transaction(
         clean_lang = payload.language.strip()
 
         cur.execute("""
-            UPDATE public.language_registry
-            SET last_number = last_number + 1
-            WHERE TRIM(prefix) = %s
+            INSERT INTO public.language_registry (language, prefix, last_number)
+            VALUES (%s, %s, 1)
+            ON CONFLICT (prefix)
+            DO UPDATE SET last_number = public.language_registry.last_number + 1
             RETURNING last_number;
-        """, (lang_prefix,))
+        """, (clean_lang, lang_prefix))
         row = cur.fetchone()
-        if not row:
-            cur.execute("""
-                INSERT INTO public.language_registry (language, prefix, last_number)
-                VALUES (%s, %s, 1)
-                RETURNING last_number;
-            """, (clean_lang, lang_prefix))
-            row = cur.fetchone()
         next_accession_count = row[0]
         final_accession_no = f"{lang_prefix}-{next_accession_count}"
 
@@ -164,8 +136,6 @@ def create_work_transaction(
         if payload.category and (not final_call_no or final_call_no.endswith("-")):
             cat_code = get_category_code(payload.category)
             lang_initial = lang_prefix if len(lang_prefix) == 2 else payload.language[0].upper()
-            # Serialize call-number allocation for this language/category pair.
-            # Every allocator must take this transaction-scoped lock before counting.
             cur.execute(
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                 (f"call_no:{clean_lang.casefold()}:{payload.category.casefold()}",)
@@ -247,9 +217,6 @@ def create_work_transaction(
         ))
 
         request.state.error_stage = "SERIES_LINKING"
-        # Series / multi-volume context is optional. The migration creates two small
-        # relation tables so the Work itself stays bibliographically clean while
-        # related volumes can be discovered as a group.
         series_name = str(payload.series_name or "").strip()
         series_number = str(payload.series_number or "").strip() or None
         raw_volume_number = str(payload.volume_number or "").strip()
@@ -308,7 +275,6 @@ def create_work_transaction(
                     related_work_id = EXCLUDED.related_work_id
             """, (work_id, series_id, series_number, volume_number, related_work_id))
         elif related_work_id is not None:
-            # A related Work can be provided even when the series name is not known yet.
             cur.execute("""
                 SELECT series_id
                 FROM public.work_series_members
@@ -381,32 +347,6 @@ def create_work_transaction(
             token_user_id,
         ))
 
-        request.state.error_stage = "ALLOCATE_ITEM_SERIAL"
-        cur.execute("SELECT public.next_item_serial_no()")
-        created_serial_no = cur.fetchone()[0]
-
-        request.state.error_stage = "CREATE_INITIAL_ITEM"
-        initial_item_status = "AVAILABLE" if real_role.strip().lower() == "the chief" else "PENDING"
-        
-        cur.execute("""
-            INSERT INTO public.items (
-                serial_no, work_id, accession_no, call_no, shelf, 
-                extent_page_count, physical_dimensions, date_acquired, collection_fonds,
-                physical_condition, binding_type, provenance_source, artifactual_notes,
-                access_restrictions, digital_scan_available, ocr_status,
-                availability_status, is_deleted, created_at, proposed_by
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'f', NOW(), %s
-            )
-        """, (
-            created_serial_no, work_id, final_accession_no, final_call_no, payload.shelf or None,
-            payload.extent_page_count or None, payload.physical_dimensions or None,
-            payload.date_acquired or None, payload.collection_fonds or None,
-            payload.physical_condition or None, payload.binding_type or None,
-            payload.provenance_source or None, payload.artifactual_notes or None,
-            payload.access_restrictions or None, payload.digital_scan_available or False,
-            payload.ocr_status or "Unindexed", initial_item_status, token_user_id
-        ))
         request.state.error_stage = "WRITE_AUDIT"
         registration_mode = (
             "DIRECT_CHIEF"
@@ -436,7 +376,6 @@ def create_work_transaction(
             justification=x_change_reason,
             diff={
                 "work_id": work_id,
-                "serial_no": created_serial_no,
                 "accession_no": final_accession_no,
                 "title": payload.title,
                 "author": author_name,
@@ -454,7 +393,6 @@ def create_work_transaction(
             },
             extra={
                 "work_id": work_id,
-                "serial_no": created_serial_no,
                 "accession_no": final_accession_no,
                 "registration_mode": registration_mode,
                 "workflow_outcome": workflow_outcome,
@@ -470,7 +408,6 @@ def create_work_transaction(
         return {
             "work_id": work_id,
             "accession_no": final_accession_no,
-            "serial_no": created_serial_no,
             "series": {
                 "name": series_name or None,
                 "number": series_number,
@@ -490,15 +427,12 @@ def create_work_transaction(
         conn.close()
 
 
-# ===========================================================================
-# WORK LIFECYCLE ENDPOINTS (moved from catalogue.py; public URLs preserved)
-# ===========================================================================
-
 @work_router.post("/create-work", dependencies=[Depends(require_role(["The Chief", "The Keeper"]))])
 @audit_action(
     "ACCESSION_WORK",
-    target_entity="Work",
-    reason_param="x_change_reason"
+    target_entity="WORK",
+    reason_param="x_change_reason",
+    log_success=False
 )
 def create_work(
     payload: WorkCreate,
@@ -621,6 +555,7 @@ def get_work_for_item_accession(
         cur.close()
         conn.close()
 
+
 @work_router.get(
     "/my-submissions",
     tags=["Keeper Operations"],
@@ -683,6 +618,7 @@ def list_my_submissions(
     finally:
         cur.close()
         conn.close()
+
 
 @work_router.post(
     "/resubmit/{work_id}",
@@ -899,6 +835,7 @@ async def resubmit_work(
         cur.close()
         conn.close()
 
+
 @work_router.get(
     "/pending-works",
     tags=["Admin Operations"],
@@ -959,6 +896,7 @@ def list_pending_works(request: Request, current_user: dict = Depends(get_curren
         cur.close()
         conn.close()
 
+
 @work_router.get(
     "/review/final-rejections",
     tags=["Docket"],
@@ -968,7 +906,6 @@ def list_final_rejections(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Read-only list of permanently rejected Works, for The Chief."""
     conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -1005,6 +942,7 @@ def list_final_rejections(
         cur.close()
         conn.close()
 
+
 @work_router.get(
     "/review/my-final-rejections",
     tags=["Docket"],
@@ -1014,7 +952,6 @@ def list_my_final_rejections(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Read-only list of the calling Keeper's own permanently rejected Works."""
     conn = get_connection(request=request)
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -1050,6 +987,7 @@ def list_my_final_rejections(
         cur.close()
         conn.close()
 
+
 @work_router.get(
     "/review/field-options",
     tags=["Docket"],
@@ -1059,7 +997,6 @@ def get_field_options(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Read-only lists used by the correction form dropdowns."""
     conn = get_connection(request=request)
     cur = conn.cursor()
     try:
@@ -1099,13 +1036,15 @@ def get_field_options(
         cur.close()
         conn.close()
 
+
 @work_router.post("/approve/{work_id}", tags=["Admin Operations"], dependencies=[Depends(require_role(["The Chief"]))])
 @audit_action(
     "CURATOR_DECISION",
     category="ARCHIVAL_GOVERNANCE",
-    target_entity="Work",
+    target_entity="WORK",
     target_id_param="work_id",
-    reason_param="reason"
+    reason_param="reason",
+    log_success=False
 )
 async def approve_work(
     work_id: int, action: str, reason: str, request: Request,
@@ -1236,12 +1175,6 @@ class WorkCorrectionSubmit(BaseModel):
     note: Optional[str] = None
 
 def _is_finally_rejected_work(cur, work_id: int) -> bool:
-    """Return True for a Work with an explicitly audited final REJECT decision.
-
-    Older records have no decision_action marker and retain their legacy
-    correction behavior. A return-for-correction also has its own marker and
-    remains resubmittable through its open correction request.
-    """
     import json
 
     cur.execute("""
@@ -1297,12 +1230,6 @@ def _load_work_for_review(cur, work_id: int, actor: dict) -> dict:
     return work
 
 def _sync_work_authority(cur, work_id: int, author_name: str, user_id):
-    """Resolve and synchronize the primary AUTHOR relationship for a Work.
-
-    The authority resolver participates in the caller's transaction. Existing
-    AUTHOR relationships are replaced so the bibliographic author and
-    work-authority relationship cannot drift apart.
-    """
     clean_name = author_name.strip() if author_name and author_name.strip() else "Unknown"
     authority_id = resolve_or_create_authority(cur, clean_name, user_id)
 
@@ -1344,6 +1271,7 @@ def _clean_work_value(key: str, value):
             detail="Title and language cannot be empty."
         )
     return text or None
+
 
 @work_router.get(
     "/review/work/{work_id}",
@@ -1412,6 +1340,7 @@ def get_work_review(
     finally:
         cur.close()
         conn.close()
+
 
 @work_router.post(
     "/review/work/{work_id}/request-correction",
@@ -1558,6 +1487,7 @@ async def request_work_correction(
     finally:
         cur.close()
         conn.close()
+
 
 @work_router.post(
     "/review/work/{work_id}/resubmit-corrected",

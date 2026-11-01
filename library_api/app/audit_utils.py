@@ -51,6 +51,17 @@ def _build_context(args: tuple, kwargs: dict) -> dict:
                 break
 
     current_user = kwargs.get("current_user") or {}
+    if not current_user and request is not None:
+        # Routes without a logged-in user (for example /auth/refresh) may set
+        # request.state.audit_user_id so the row says WHO it was.
+        state = getattr(request, "state", None)
+        state_user_id = getattr(state, "audit_user_id", None)
+        if state_user_id:
+            current_user = {
+                "user_id": str(state_user_id),
+                "username": getattr(state, "audit_username", None) or ("user " + str(state_user_id)),
+                "role": getattr(state, "audit_role", None) or "OPERATOR",
+            }
     if isinstance(current_user, dict):
         user_id = current_user.get("user_id", "SYSTEM")
         username = current_user.get("username") or current_user.get("name") or "SYSTEM"
@@ -235,6 +246,7 @@ def audit_action(
     target_entity: Optional[str] = None,
     target_id_param: Optional[str] = None,
     reason_param: Optional[str] = None,
+    log_success: bool = True,
 ):
     """Audit success and failure outcomes for sync or async route functions.
 
@@ -273,15 +285,16 @@ def audit_action(
                     )
                     raise
 
-                await run_in_threadpool(
-                    _write_audit_event,
-                    context=context,
-                    action_type=action_type,
-                    category=category,
-                    target_entity=target_entity,
-                    target_id=_resolve_target_id(context, kwargs, target_id_param, result),
-                    outcome="SUCCESS",
-                )
+                if log_success:
+                    await run_in_threadpool(
+                        _write_audit_event,
+                        context=context,
+                        action_type=action_type,
+                        category=category,
+                        target_entity=target_entity,
+                        target_id=_resolve_target_id(context, kwargs, target_id_param, result),
+                        outcome="SUCCESS",
+                    )
                 return result
 
             return async_wrapper
@@ -305,14 +318,15 @@ def audit_action(
                 )
                 raise
 
-            _write_audit_event(
-                context=context,
-                action_type=action_type,
-                category=category,
-                target_entity=target_entity,
-                target_id=_resolve_target_id(context, kwargs, target_id_param, result),
-                outcome="SUCCESS",
-            )
+            if log_success:
+                _write_audit_event(
+                    context=context,
+                    action_type=action_type,
+                    category=category,
+                    target_entity=target_entity,
+                    target_id=_resolve_target_id(context, kwargs, target_id_param, result),
+                    outcome="SUCCESS",
+                )
             return result
 
         return sync_wrapper

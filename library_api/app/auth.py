@@ -304,6 +304,9 @@ async def refresh(
             detail="Invalid refresh token"
         )
 
+    # Let the audit decorator record who this refresh belongs to.
+    request.state.audit_user_id = str(user_id)
+
     # -------------------------
     # VALIDATE DATABASE SESSION
     # -------------------------
@@ -327,7 +330,7 @@ async def refresh(
         if session_exists:
             cur.execute(
                 """
-                SELECT role, status, expires_at
+                SELECT role, status, expires_at, name
                 FROM users
                 WHERE user_id = %s
                 """,
@@ -345,7 +348,9 @@ async def refresh(
         if not identity:
             raise HTTPException(status_code=401, detail="Account not found")
 
-        current_role, current_status, current_expires_at = identity
+        current_role, current_status, current_expires_at, current_name = identity
+        request.state.audit_username = current_name
+        request.state.audit_role = current_role
         if current_status != "APPROVED":
             raise HTTPException(status_code=401, detail="Account inactive")
         if current_role not in {"The Chief", "The Keeper", "The Seeker"}:
