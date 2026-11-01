@@ -1,5 +1,48 @@
 [
   {
+    "version": "v2.2.5",
+    "date": "2026-11-01",
+    "sections": [
+      {
+        "category": "UI & UX",
+        "notes": [
+          "migrate core frontend to TypeScript and streamline view workflows"
+        ]
+      },
+      {
+        "category": "Security & Authentication",
+        "notes": [
+          "Audit: no duplicate success rows, record the user on token refresh, WORK/ITEM spelling"
+        ]
+      },
+      {
+        "category": "Bug Fixes",
+        "notes": [
+          "Fix keeper and chief work creation",
+          "patch",
+          "Fix classification routing and update authorities"
+        ]
+      },
+      {
+        "category": "Changes",
+        "notes": [
+          "Catalogue API: q search, exact category and language filters",
+          "authority.py: read rows safely with tuple or dict cursors",
+          "Sync remaining modified files so the branch matches the tested app",
+          "New Work page: typable Language, Original language and Genre",
+          "Keeper/Chief fixes: docket history, final rejections, dropdowns, preview, error log"
+        ]
+      },
+      {
+        "category": "Features",
+        "notes": [
+          "add full name expansion & harmonize sage UI",
+          "Add modules required by the app, plus work-id install and error lookup scripts"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.4",
     "date": "2026-10-06",
     "sections": [
