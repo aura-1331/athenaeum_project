@@ -1,9 +1,13 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
 export default defineConfig(async () => ({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    tailwindcss()
+  ],
 
   resolve: {
     alias: {
@@ -17,7 +21,6 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     host: true,
-    // Added this watch block to fix the Windows EBUSY error
     watch: {
       ignored: ["**/src-tauri/**"],
     }

@@ -1,119 +1,887 @@
 <template>
   <main class="edit-page">
-    <div v-if="loading" class="loading-state"><span class="loader"></span><p>Loading catalogue record…</p></div>
+    <div v-if="loading" class="loading-state">
+      <span class="loader"></span>
+      <p>Loading catalogue record…</p>
+    </div>
+    
+    <section v-else-if="loadError" class="load-error" role="alert">
+      <h2>Unable to load this record</h2>
+      <p>{{ loadError }}</p>
+      <button class="button button-primary" type="button" @click="fetchRecordData">Try again</button>
+    </section>
+
     <template v-else-if="editableBook">
+      <!-- Streamlined Sticky Topbar -->
       <header class="topbar">
-        <div class="brand-mark">C</div>
-        <div class="topbar-title"><span class="eyebrow">CATALOGUE MANAGEMENT</span><h1>Edit record</h1></div>
-        <div class="topbar-meta"><span class="record-pill">Record {{ editableBook.serial_no || editableBook.record_id || route.params.id }}</span><span class="status-dot"></span><span>Editing</span></div>
+        <div class="topbar-left">
+          <button class="button button-back" type="button" @click="handleBackNavigation" title="Back to Dossier (Esc)">
+            <span class="btn-glyph">←</span>
+            <span>Back</span>
+            <kbd class="kbd-badge">Esc</kbd>
+          </button>
+          <div class="topbar-title">
+            <span class="eyebrow">CATALOGUE MANAGEMENT</span>
+            <h1>Edit Record</h1>
+          </div>
+        </div>
+
+        <div class="topbar-meta">
+            <button class="button-back btn-sm" type="button" @click="navigateSection('prev')" title="Previous Section (←)">←</button>
+            <span class="record-pill">{{ currentTabLabel }}</span>
+            <button class="button-back btn-sm" type="button" @click="navigateSection('next')" title="Next Section (→)">→</button>
+            <span class="status-dot"></span>
+            <span>Editing Mode</span>
+          </div>
       </header>
 
+      <!-- Compact Identity Bar -->
       <section class="record-identity-bar" aria-label="Read-only record identifiers">
-        <div class="identity-heading"><span class="identity-mark" aria-hidden="true">ID</span><div><strong>Record identifiers</strong><small>Reference details · read-only</small></div></div>
-        <div class="identity-value"><span>Record identifier</span><strong>{{ editableBook.serial_no || 'Not assigned' }}</strong></div>
-        <div class="identity-value"><span>Accession ID</span><strong>{{ editableBook.accession_no || 'Not assigned' }}</strong></div>
-        <div class="identity-value"><span>Record ID</span><strong>{{ editableBook.record_id || 'Not assigned' }}</strong></div>
-        <div class="identity-value"><span>Work ID</span><strong>{{ editableBook.work_id || 'Not assigned' }}</strong></div>
+        <div class="identity-item">
+          <span>Serial No</span>
+          <strong>{{ editableBook.serial_no || '—' }}</strong>
+        </div>
+        <div class="identity-item">
+          <span>Accession ID</span>
+          <strong class="highlight-code">{{ editableBook.accession_no || '—' }}</strong>
+        </div>
+        <div class="identity-item">
+          <span>Record ID</span>
+          <strong>{{ editableBook.record_id || '—' }}</strong>
+        </div>
+        <div class="identity-item">
+          <span>Work ID</span>
+          <strong>#{{ editableBook.work_id || '—' }}</strong>
+        </div>
       </section>
 
       <div class="workspace">
+        <!-- Sidebar Navigation -->
         <aside class="sidebar">
-          <div class="sidebar-intro"><span class="eyebrow">WORKSPACE</span><h2>Record details</h2><p>Update bibliographic information and review your changes before saving.</p></div>
-          <label class="search-label" for="field-search">Find a field</label>
-          <div class="search-wrap"><span aria-hidden="true">⌕</span><input id="field-search" v-model="searchQuery" placeholder="Search fields…" /></div>
-          <nav class="section-nav" aria-label="Edit sections">
-            <button v-for="item in [
-              {key:'work',number:'01',label:'Core details',hint:'Title and creator'},
-              {key:'taxonomy',number:'02',label:'Classification',hint:'Category and genres'},
-              {key:'languages',number:'03',label:'Languages',hint:'Text and original'},
-              {key:'publication',number:'04',label:'Publication',hint:'Publisher and ISBN'},
-              {key:'location',number:'05',label:'Location',hint:'Shelf and call number'},
-              {key:'notes',number:'06',label:'Notes',hint:'Additional details'}
-            ]" :key="item.key" type="button" class="nav-item" :class="{active: activeTab === item.key}" @click="setTab(item.key as TabKey)">
-              <span class="nav-number">{{ item.number }}</span><span class="nav-copy"><strong>{{ item.label }}</strong><small>{{ item.hint }}</small></span><span v-if="tabChangesCount(item.key as TabKey)" class="change-count">{{ tabChangesCount(item.key as TabKey) }}</span><span v-else class="nav-arrow">›</span>
-            </button>
-          </nav>
-          <div class="sidebar-bottom"><div class="change-summary"><span class="summary-icon">✳</span><div><strong>{{ modifiedFieldsList.length }} changes</strong><small>Compared with original record</small></div></div><button class="text-button" type="button" :disabled="!modifiedFieldsList.length" @click="revertAllModifications">Reset all changes</button></div>
-        </aside>
-
-        <section class="editor-area">
-          <div class="editor-heading"><div><span class="eyebrow">CATALOGUE / EDIT</span><h2>{{ ({work:'Core details',taxonomy:'Classification',languages:'Languages',publication:'Publication',location:'Location',notes:'Notes'} as Record<string,string>)[activeTab] }}</h2><p>Fields marked with <span class="required-star">*</span> are required.</p></div><div class="heading-actions"><span class="change-chip" :class="{'has-changes': modifiedFieldsList.length}">{{ modifiedFieldsList.length ? `${modifiedFieldsList.length} modified` : 'No changes yet' }}</span><button class="button button-quiet" type="button" @click="showAllSections = !showAllSections; searchQuery = ''">{{ showAllSections ? 'Show one section' : 'View all sections' }}</button></div></div>
-
-          <div v-if="searchQuery.trim()" class="search-results-note">Showing fields matching “{{ searchQuery }}”. <button type="button" @click="searchQuery = ''">Clear search</button></div>
-          <div v-if="showAllSections || searchQuery.trim()" class="all-sections-note">All sections are shown. Choose a section from the left to return to focused editing.</div>
-
-          <div class="form-stack">
-            <section v-if="isSectionVisible('work',['title','author','creator','core details'])" class="form-section">
-              <div class="section-heading"><div class="section-index">01</div><div><h3>Core details</h3><p>The main identifying details for this work.</p></div></div>
-              <div class="field-grid">
-                <div id="wrap-title" class="field-block span-2" :class="{'field-modified':isFieldModified('title')}"><div class="label-line"><label for="field-title">Work title <span class="required-star">*</span></label><span v-if="isFieldModified('title')" class="modified-label">Modified</span></div><input id="field-title" v-model="editableBook.title" class="input-control" placeholder="Enter the full title" /><div v-if="isFieldModified('title')" class="field-footer"><span>Original: {{ pristineBook.title || 'Empty' }}</span><button type="button" @click="revertSingleField('title')">Undo</button></div></div>
-                <div id="wrap-author" class="field-block span-2 relative-position" :class="{'field-modified':isFieldModified('author')}"><div class="label-line"><label for="field-author">Author / creator</label><span v-if="isFieldModified('author')" class="modified-label">Modified</span></div><input id="field-author" v-model="editableBook.author" class="input-control" autocomplete="off" placeholder="Search authority names…" @input="searchAuthorsDebounced" @focus="searchAuthorsDebounced" @blur="hideSuggestionsWithDelay('author')" /><div v-if="showAuthorSuggestions && authorSuggestions.length" class="suggestion-list"><button v-for="person in authorSuggestions" :key="person.authority_id" type="button" class="suggestion-item" @mousedown.prevent="selectSuggestion('author',person)"><span class="suggestion-avatar">{{ (person.preferred_name || '?').slice(0,1) }}</span><span class="suggestion-copy"><strong>{{ person.preferred_name }}</strong><small>{{ person.authority_code }}<span v-if="person.full_name"> · {{ person.full_name }}</span></small></span><span class="suggestion-status">{{ person.status }}</span></button></div><p class="field-help">Type at least two characters to search verified authority records.</p><div v-if="isFieldModified('author')" class="field-footer"><span>Original: {{ pristineBook.author || 'Empty' }}</span><button type="button" @click="revertSingleField('author')">Undo</button></div></div>
-              </div>
-            </section>
-
-            <section v-if="isSectionVisible('taxonomy',['classification','category','ddc','genre','taxonomy'])" class="form-section">
-              <div class="section-heading"><div class="section-index">02</div><div><h3>Classification</h3><p>Organise the work for discovery and shelving.</p></div></div>
-              <div class="field-grid"><div class="field-block" :class="{'field-modified':isFieldModified('category')}"><div class="label-line"><label for="field-category">Collection category</label><span v-if="isFieldModified('category')" class="modified-label">Modified</span></div><select id="field-category" v-model="editableBook.category" class="input-control">
-                  <option value="">Choose a category</option>
-                  <option v-if="editableBook.category && !categoryOptions.includes(editableBook.category)" :value="editableBook.category">{{ editableBook.category }}</option>
-                  <option v-for="category in categoryOptions" :key="category" :value="category">{{ category }}</option>
-                </select></div><div class="field-block" :class="{'field-modified':isFieldModified('ddc')}"><div class="label-line"><label for="field-ddc">Dewey Decimal (DDC)</label><span v-if="isFieldModified('ddc')" class="modified-label">Modified</span></div><input id="field-ddc" v-model="editableBook.ddc" class="input-control" placeholder="e.g. 823.914" /></div>
-                <div class="field-block span-2" :class="{'field-modified':isFieldModified('genre')}"><div class="label-line"><label>Genre tags</label><span v-if="isFieldModified('genre')" class="modified-label">Modified</span></div><div class="genre-chips" v-if="liveCompiledGenreChips.length"><span v-for="chip in liveCompiledGenreChips" :key="chip" class="genre-chip">{{ chip }}<button type="button" :aria-label="`Remove ${chip}`" @click="removeGenreChip(chip)">×</button></span><button class="clear-genres" type="button" @click="clearAllGenres">Clear all</button></div><div class="field-grid genre-selects"><div class="field-block"><label for="genre-a">Literary genre</label><select id="genre-a" v-model="selectedGroupAGenre" class="input-control" @change="syncGenreSelection"><option value="">Choose a genre</option><option v-for="genre in genreGroupA" :key="genre" :value="genre">{{ genre }}</option></select></div><div class="field-block"><label for="genre-b">Subject / form</label><select id="genre-b" v-model="selectedGroupBGenre" class="input-control" @change="syncGenreSelection"><option value="">Choose a subject</option><option v-for="genre in genreGroupB" :key="genre" :value="genre">{{ genre }}</option></select></div><div class="field-block"><label for="genre-c">Community genre</label><select id="genre-c" v-model="selectedGroupCGenre" class="input-control" @change="syncGenreSelection"><option value="">Choose a genre</option><option v-for="genre in dynamicCommunityGenres" :key="genre" :value="genre">{{ genre }}</option><option value="CUSTOM_MANUAL_OVERRIDE">Enter manually…</option></select></div><div v-if="showCustomManualGenreField" class="field-block"><label for="genre-custom">Custom genre</label><input id="genre-custom" v-model="customManualGenreText" class="input-control" placeholder="Enter genre" @input="syncManualGenreInput" /></div></div><div v-if="isFieldModified('genre')" class="field-footer"><span>Original: {{ pristineBook.genre || 'Empty' }}</span><button type="button" @click="revertSingleField('genre')">Undo</button></div></div>
-              </div>
-            </section>
-
-            <section v-if="isSectionVisible('languages',['language','original language','languages'])" class="form-section"><div class="section-heading"><div class="section-index">03</div><div><h3>Languages</h3><p>Record the language of this edition and its source.</p></div></div><div class="field-grid"><div class="field-block" :class="{'field-modified':isFieldModified('language')}"><div class="label-line"><label for="field-language">Text language <span class="required-star">*</span></label><span v-if="isFieldModified('language')" class="modified-label">Modified</span></div><select id="field-language" v-model="editableBook.language" class="input-control" required>
-                  <option value="">Choose a language</option>
-                  <option v-if="editableBook.language && !languageOptions.includes(editableBook.language)" :value="editableBook.language">{{ editableBook.language }}</option>
-                  <option v-for="language in languageOptions" :key="language" :value="language">{{ language }}</option>
-                </select></div><div class="field-block" :class="{'field-modified':isFieldModified('original_language')}"><div class="label-line"><label for="field-original-language">Original source language</label><span v-if="isFieldModified('original_language')" class="modified-label">Modified</span></div><select id="field-original-language" v-model="editableBook.original_language" class="input-control">
-                  <option value="">Choose a language (optional)</option>
-                  <option v-if="editableBook.original_language && !languageOptions.includes(editableBook.original_language)" :value="editableBook.original_language">{{ editableBook.original_language }}</option>
-                  <option v-for="language in languageOptions" :key="language" :value="language">{{ language }}</option>
-                </select></div></div></section>
-
-            <section v-if="isSectionVisible('publication',['publication','publisher','year','isbn','imprint'])" class="form-section"><div class="section-heading"><div class="section-index">04</div><div><h3>Publication</h3><p>Edition, publisher and standard identifiers.</p></div></div><div class="field-grid"><div class="field-block relative-position" :class="{'field-modified':isFieldModified('publisher')}"><div class="label-line"><label for="field-publisher">Publisher / imprint</label><span v-if="isFieldModified('publisher')" class="modified-label">Modified</span></div><input id="field-publisher" v-model="editableBook.publisher" class="input-control" autocomplete="off" placeholder="Publisher name" @input="searchPublishersDebounced" @focus="searchPublishersDebounced" @blur="hideSuggestionsWithDelay('publisher')" /><div v-if="showPublisherSuggestions && publisherSuggestions.length" class="suggestion-list"><button v-for="publisher in publisherSuggestions" :key="publisher" type="button" class="suggestion-item" @mousedown.prevent="selectSuggestion('publisher',publisher)"><span class="suggestion-copy"><strong>{{ publisher }}</strong></span><span class="suggestion-status">Use</span></button></div></div><div class="field-block" :class="{'field-modified':isFieldModified('year')}"><div class="label-line"><label for="field-year">Publication year</label><span v-if="isFieldModified('year')" class="modified-label">Modified</span></div><input id="field-year" v-model="editableBook.year" class="input-control" type="text" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" placeholder="YYYY" aria-describedby="field-year-help" @input="limitYearLength" />
-<div id="field-year-help" class="field-help">Enter a whole-number publication year (1000–{{ new Date().getFullYear() }}).</div></div><div class="field-block span-2" :class="{'field-modified':isFieldModified('isbn')}"><div class="label-line"><label for="field-isbn">ISBN</label><span v-if="isFieldModified('isbn')" class="modified-label">Modified</span></div><input id="field-isbn" v-model="editableBook.isbn" class="input-control" placeholder="ISBN-10 or ISBN-13" /></div></div></section>
-
-            <section v-if="isSectionVisible('location',['location','shelf','call number','accession'])" class="form-section"><div class="section-heading"><div class="section-index">05</div><div><h3>Location</h3><p>Where the physical item is stored.</p></div></div><div class="field-grid"><div class="field-block" :class="{'field-modified':isFieldModified('shelf')}"><div class="label-line"><label for="field-shelf">Shelf location</label><span v-if="isFieldModified('shelf')" class="modified-label">Modified</span></div><input id="field-shelf" v-model="editableBook.shelf" class="input-control" placeholder="Shelf or collection location" /></div><div class="field-block" :class="{'field-modified':isFieldModified('call_no')}"><div class="label-line"><label for="field-call-no">Call number</label><span v-if="isFieldModified('call_no')" class="modified-label">Modified</span></div><input id="field-call-no" v-model="editableBook.call_no" class="input-control" placeholder="Classification / call number" /></div></div></section>
-
-            <section v-if="isSectionVisible('notes',['notes','remarks','conservation'])" class="form-section"><div class="section-heading"><div class="section-index">06</div><div><h3>Notes</h3><p>Additional information for cataloguers and collection staff.</p></div></div><div class="field-block" :class="{'field-modified':isFieldModified('notes')}"><div class="label-line"><label for="field-notes">Catalogue notes</label><span v-if="isFieldModified('notes')" class="modified-label">Modified</span></div><textarea id="field-notes" v-model="editableBook.notes" class="input-control textarea-control" rows="5" placeholder="Add relevant notes about this item…"></textarea><div v-if="isFieldModified('notes')" class="field-footer"><span>Original: {{ pristineBook.notes || 'Empty' }}</span><button type="button" @click="revertSingleField('notes')">Undo</button></div></div></section>
+          <div class="sidebar-intro">
+            <span class="eyebrow">WORKSPACE</span>
+            <h2>Record Details</h2>
+            <p>Update bibliographic parameters and review before commit.</p>
           </div>
 
-          <section v-if="modifiedFieldsList.length" class="review-panel"><div class="review-heading"><div><span class="eyebrow">REVIEW</span><h3>Changes in this session</h3></div><button class="text-button" type="button" @click="revertAllModifications">Discard all</button></div><div v-for="change in modifiedFieldsList" :key="change.key" class="review-row"><div><strong>{{ change.label }}</strong><small>{{ change.tabLabel }}</small></div><div class="review-values"><span>{{ change.oldValue || 'Empty' }}</span><span class="review-arrow">→</span><span>{{ change.newValue || 'Empty' }}</span></div><button type="button" class="undo-icon" :aria-label="`Undo ${change.label}`" @click="revertSingleField(change.key)">↶</button></div></section>
+          <label class="search-label" for="field-search">Find a field</label>
+          <div class="search-wrap">
+            <span aria-hidden="true">⌕</span>
+            <input id="field-search" v-model="searchQuery" placeholder="Search fields…" />
+          </div>
+
+          <nav class="section-nav" aria-label="Edit sections">
+            <button 
+              v-for="item in navTabs" 
+              :key="item.key" 
+              type="button" 
+              class="nav-item" 
+              :class="{ active: activeTab === item.key }" 
+              @click="setTab(item.key as TabKey)"
+            >
+              <span class="nav-number">{{ item.number }}</span>
+              <span class="nav-copy">
+                <strong>{{ item.label }}</strong>
+                <small>{{ item.hint }}</small>
+              </span>
+              <span v-if="tabChangesCount(item.key as TabKey)" class="change-count">{{ tabChangesCount(item.key as TabKey) }}</span>
+              <span v-else class="nav-arrow">›</span>
+            </button>
+          </nav>
+
+          <div class="sidebar-bottom">
+            <div class="change-summary">
+              <span class="summary-icon">✳</span>
+              <div>
+                <strong>{{ modifiedFieldsList.length }} changes</strong>
+                <small>Compared with pristine</small>
+              </div>
+            </div>
+            <button class="text-button" type="button" :disabled="!modifiedFieldsList.length" @click="revertAllModifications">
+              Reset all changes
+            </button>
+          </div>
+        </aside>
+
+        <!-- Form Area -->
+        <section class="editor-area">
+          <div class="editor-heading">
+            <div>
+              <span class="eyebrow">CATALOGUE / EDIT</span>
+              <h2>{{ currentTabLabel }}</h2>
+              <p>Fields marked with <span class="required-star">*</span> are mandatory.</p>
+            </div>
+            <div class="heading-actions">
+              <span class="change-chip" :class="{ 'has-changes': modifiedFieldsList.length }">
+                {{ modifiedFieldsList.length ? `${modifiedFieldsList.length} modified` : 'No changes yet' }}
+              </span>
+              <button class="button button-quiet" type="button" @click="showAllSections = !showAllSections; searchQuery = ''">
+                {{ showAllSections ? 'Show one section' : 'View all sections' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="searchQuery.trim()" class="search-results-note">
+            Showing fields matching “{{ searchQuery }}”. <button type="button" @click="searchQuery = ''">Clear search</button>
+          </div>
+
+          <div class="form-stack">
+            <!-- 01 Core Details -->
+            <section v-if="isSectionVisible('work', ['title', 'author', 'creator', 'core details', 'work_nature'])" class="form-section">
+              <div class="section-heading">
+                <div class="section-index">01</div>
+                <div><h3>Core Details</h3><p>Main identifying details for this literary work.</p></div>
+              </div>
+              <div class="field-grid">
+                <div id="wrap-title" class="field-block span-2" :class="{ 'field-modified': isFieldModified('title') }">
+                  <div class="label-line">
+                    <label for="field-title">Work Title <span class="required-star">*</span></label>
+                    <span v-if="isFieldModified('title')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-title" v-model="editableBook.title" class="input-control" placeholder="Enter complete title" required />
+                  <div v-if="isFieldModified('title')" class="field-footer">
+                    <span>Original: {{ pristineBook.title || 'Empty' }}</span>
+                    <button type="button" @click="revertSingleField('title')">Undo</button>
+                  </div>
+                </div>
+
+                <div id="wrap-author" class="field-block span-2 relative-position" :class="{ 'field-modified': isFieldModified('author') }">
+                  <div class="label-line">
+                    <label for="field-author">Author / Creator</label>
+                    <span v-if="isFieldModified('author')" class="modified-label">Modified</span>
+                  </div>
+                  <input 
+                    id="field-author" 
+                    v-model="editableBook.author" 
+                    class="input-control" 
+                    autocomplete="off" 
+                    placeholder="Search or enter author name…" 
+                    @input="searchAuthorsDebounced" 
+                    @focus="searchAuthorsDebounced" 
+                    @blur="hideSuggestionsWithDelay('author')" 
+                  />
+                  <div v-if="showAuthorSuggestions && authorSuggestions.length" class="suggestion-list">
+                    <button v-for="person in authorSuggestions" :key="person.authority_id" type="button" class="suggestion-item" @mousedown.prevent="selectSuggestion('author', person)">
+                      <span class="suggestion-avatar">{{ (person.preferred_name || '?').slice(0, 1) }}</span>
+                      <span class="suggestion-copy">
+                        <strong>{{ person.preferred_name }}</strong>
+                        <small>{{ person.authority_code }}<span v-if="person.full_name"> · {{ person.full_name }}</span></small>
+                      </span>
+                      <span class="suggestion-status">{{ person.status }}</span>
+                    </button>
+                  </div>
+                  <div v-if="isFieldModified('author')" class="field-footer">
+                    <span>Original: {{ pristineBook.author || 'Empty' }}</span>
+                    <button type="button" @click="revertSingleField('author')">Undo</button>
+                  </div>
+                </div>
+
+                <div class="field-block span-2" :class="{ 'field-modified': isFieldModified('work_nature') }">
+                  <div class="label-line">
+                    <label for="field-work-nature">Work Nature</label>
+                    <span v-if="isFieldModified('work_nature')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-work-nature" v-model="editableBook.work_nature" class="input-control" placeholder="e.g. Novel, Monograph, Play, Anthology, Translation" />
+                </div>
+              </div>
+            </section>
+
+            <!-- 02 Classification & Taxonomy -->
+            <section v-if="isSectionVisible('taxonomy', ['classification', 'category', 'ddc', 'genre', 'taxonomy'])" class="form-section">
+              <div class="section-heading">
+                <div class="section-index">02</div>
+                <div><h3>Classification</h3><p>Taxonomy, Dewey Decimal standards, and subject genres.</p></div>
+              </div>
+              <div class="field-grid">
+                <!-- Category Combobox -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('category') }">
+                  <div class="label-line">
+                    <label for="field-category">Collection Category</label>
+                    <span v-if="isFieldModified('category')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-category" v-model="categorySelectValue" class="input-control" @change="handleCategorySelectChange">
+                    <option value="">Select Category</option>
+                    <option v-for="c in categoryOptions" :key="c" :value="c">{{ c }}</option>
+                    <option value="__CUSTOM__">Other (Enter Manually)…</option>
+                  </select>
+                  <input 
+                    v-if="categorySelectValue === '__CUSTOM__'" 
+                    v-model="editableBook.category" 
+                    class="input-control custom-subfield" 
+                    placeholder="Type custom category name…" 
+                  />
+                </div>
+
+                <!-- Strict DDC with regex validation -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('ddc') }">
+                  <div class="label-line">
+                    <label for="field-ddc">Dewey Decimal (DDC)</label>
+                    <span v-if="!isDdcValid" class="validation-error-tag">Format: 3 digits [.decimals]</span>
+                    <span v-else-if="isFieldModified('ddc')" class="modified-label">Modified</span>
+                  </div>
+                  <input 
+                    id="field-ddc" 
+                    v-model="editableBook.ddc" 
+                    class="input-control" 
+                    :class="{ 'input-invalid': !isDdcValid }" 
+                    placeholder="e.g. 823.914 or 894.812" 
+                    maxlength="14" 
+                  />
+                  <p class="field-help">Strict 3-digit class followed by optional decimals (e.g. 894.812 for Malayalam).</p>
+                </div>
+
+                <!-- Unified Genre Multi-Tag Combobox -->
+                <div class="field-block span-2" :class="{ 'field-modified': isFieldModified('genre') }">
+                  <div class="label-line">
+                    <label>Genre Tags (Multi-Select Combobox)</label>
+                    <span v-if="isFieldModified('genre')" class="modified-label">Modified</span>
+                  </div>
+                  
+                  <!-- Selected Chips -->
+                  <div class="genre-chips">
+                    <span v-for="chip in currentGenreList" :key="chip" class="genre-chip">
+                      {{ chip }}
+                      <button type="button" :aria-label="`Remove ${chip}`" @click="removeGenreChip(chip)">×</button>
+                    </span>
+                    <button v-if="currentGenreList.length" class="clear-genres" type="button" @click="clearAllGenres">Clear all</button>
+                  </div>
+
+                  <!-- Tag Input / Suggestions -->
+                  <div class="combobox-entry-row">
+                    <input 
+                      v-model="newGenreInput" 
+                      class="input-control" 
+                      placeholder="Type a genre tag and press Enter or comma…" 
+                      @keydown.enter.prevent="addGenreFromInput" 
+                      @keydown.,.prevent="addGenreFromInput" 
+                    />
+                    <button class="button button-quiet" type="button" @click="addGenreFromInput">Add Tag</button>
+                  </div>
+
+                  <!-- Suggested Quick Badges -->
+                  <div class="quick-genre-hints">
+                    <small>Quick Pick:</small>
+                    <button 
+                      v-for="preset in popularIndianGenres" 
+                      :key="preset" 
+                      type="button" 
+                      class="quick-pill" 
+                      :class="{ selected: currentGenreList.includes(preset) }" 
+                      @click="toggleGenrePill(preset)"
+                    >
+                      + {{ preset }}
+                    </button>
+                  </div>
+
+                  <div v-if="isFieldModified('genre')" class="field-footer">
+                    <span>Original: {{ pristineBook.genre || 'Empty' }}</span>
+                    <button type="button" @click="revertSingleField('genre')">Undo</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- 03 Languages -->
+            <section v-if="isSectionVisible('languages', ['language', 'original language', 'languages'])" class="form-section">
+              <div class="section-heading">
+                <div class="section-index">03</div>
+                <div><h3>Languages</h3><p>Text edition language and source translations.</p></div>
+              </div>
+              <div class="field-grid">
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('language') }">
+                  <div class="label-line">
+                    <label for="field-language">Text Language <span class="required-star">*</span></label>
+                    <span v-if="isFieldModified('language')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-language" v-model="editableBook.language" class="input-control" required>
+                    <option value="">Select Language</option>
+                    <option v-for="lang in availableLanguages" :key="lang" :value="lang">{{ lang }}</option>
+                  </select>
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('original_language') }">
+                  <div class="label-line">
+                    <label for="field-orig-lang">Original Source Language</label>
+                    <span v-if="isFieldModified('original_language')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-orig-lang" v-model="editableBook.original_language" class="input-control">
+                    <option value="">Select Language (If translated)</option>
+                    <option v-for="lang in availableLanguages" :key="'orig-' + lang" :value="lang">{{ lang }}</option>
+                  </select>
+                </div>
+              </div>
+            </section>
+
+            <!-- 04 Publication & Standards -->
+            <section v-if="isSectionVisible('publication', ['publication', 'publisher', 'year', 'isbn', 'imprint', 'lccn', 'oclc_no', 'edition_statement', 'series_title', 'series_volume'])" class="form-section">
+              <div class="section-heading">
+                <div class="section-index">04</div>
+                <div><h3>Publication & Standards</h3><p>Imprint metadata, numeric year, and ISBN formatters.</p></div>
+              </div>
+              <div class="field-grid">
+                <div class="field-block relative-position" :class="{ 'field-modified': isFieldModified('publisher') }">
+                  <div class="label-line">
+                    <label for="field-publisher">Publisher / Imprint</label>
+                    <span v-if="isFieldModified('publisher')" class="modified-label">Modified</span>
+                  </div>
+                  <input 
+                    id="field-publisher" 
+                    v-model="editableBook.publisher" 
+                    class="input-control" 
+                    autocomplete="off" 
+                    placeholder="e.g. DC Books, Mathrubhumi, Oxford" 
+                    @input="searchPublishersDebounced" 
+                    @focus="searchPublishersDebounced" 
+                    @blur="hideSuggestionsWithDelay('publisher')" 
+                  />
+                  <div v-if="showPublisherSuggestions && publisherSuggestions.length" class="suggestion-list">
+                    <button v-for="pub in publisherSuggestions" :key="pub" type="button" class="suggestion-item" @mousedown.prevent="selectSuggestion('publisher', pub)">
+                      <span class="suggestion-copy"><strong>{{ pub }}</strong></span>
+                      <span class="suggestion-status">Select</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Numeric only year -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('year') }">
+                  <div class="label-line">
+                    <label for="field-year">Publication Year</label>
+                    <span v-if="isFieldModified('year')" class="modified-label">Modified</span>
+                  </div>
+                  <input 
+                    id="field-year" 
+                    v-model="editableBook.year" 
+                    class="input-control" 
+                    type="text" 
+                    inputmode="numeric" 
+                    maxlength="4" 
+                    placeholder="YYYY" 
+                    @input="enforceNumbersOnly($event, 'year', 4)" 
+                  />
+                </div>
+
+                <!-- Structured ISBN -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('isbn') }">
+                  <div class="label-line">
+                    <label for="field-isbn">ISBN (10 or 13 digits)</label>
+                    <span v-if="!isIsbnValid" class="validation-error-tag">Invalid ISBN</span>
+                    <span v-else-if="isFieldModified('isbn')" class="modified-label">Modified</span>
+                  </div>
+                  <input 
+                    id="field-isbn" 
+                    v-model="editableBook.isbn" 
+                    class="input-control" 
+                    :class="{ 'input-invalid': !isIsbnValid }" 
+                    placeholder="e.g. 978-81-264-1234-5" 
+                    @blur="formatIsbnOnBlur" 
+                  />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('edition_statement') }">
+                  <div class="label-line">
+                    <label for="field-edition">Edition Statement</label>
+                    <span v-if="isFieldModified('edition_statement')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-edition" v-model="editableBook.edition_statement" class="input-control" placeholder="e.g. 1st Edition, Revised, Diamond Jubilee Ed." />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('series_title') }">
+                  <div class="label-line">
+                    <label for="field-series-title">Academic Series Title</label>
+                    <span v-if="isFieldModified('series_title')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-series-title" v-model="editableBook.series_title" class="input-control" placeholder="Series name if part of an imprint series" />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('series_volume') }">
+                  <div class="label-line">
+                    <label for="field-series-vol">Series Volume / No.</label>
+                    <span v-if="isFieldModified('series_volume')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-series-vol" v-model="editableBook.series_volume" class="input-control" placeholder="e.g. Vol. 2" />
+                </div>
+
+                <!-- Expandable LCCN / OCLC Drawer -->
+                <div class="field-block span-2">
+                  <details class="advanced-drawer">
+                    <summary>External Bibliographic Identifiers (LCCN / OCLC WorldCat)</summary>
+                    <div class="field-grid drawer-grid">
+                      <div class="field-block">
+                        <label for="field-lccn">Library of Congress Control No. (LCCN)</label>
+                        <input id="field-lccn" v-model="editableBook.lccn" class="input-control" placeholder="e.g. 2001012345" />
+                      </div>
+                      <div class="field-block">
+                        <label for="field-oclc">OCLC WorldCat No.</label>
+                        <input 
+                          id="field-oclc" 
+                          v-model="editableBook.oclc_no" 
+                          class="input-control" 
+                          inputmode="numeric" 
+                          placeholder="e.g. 12345678" 
+                          @input="enforceNumbersOnly($event, 'oclc_no')" 
+                        />
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </div>
+            </section>
+
+            <!-- 05 Lineage, Context & Rights -->
+            <section v-if="isSectionVisible('lineage', ['lineage', 'original title', 'original author', 'translator', 'compiler', 'rights', 'copyright', 'subject_headings'])" class="form-section">
+              <div class="section-heading">
+                <div class="section-index">05</div>
+                <div><h3>Lineage, Context & Rights</h3><p>Attributions, translators, subject tags, and copyright.</p></div>
+              </div>
+              <div class="field-grid">
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('original_title') }">
+                  <div class="label-line">
+                    <label for="field-orig-title">Original Title</label>
+                    <span v-if="isFieldModified('original_title')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-orig-title" v-model="editableBook.original_title" class="input-control" placeholder="Root title in source tongue" />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('original_author') }">
+                  <div class="label-line">
+                    <label for="field-orig-author">Original Author</label>
+                    <span v-if="isFieldModified('original_author')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-orig-author" v-model="editableBook.original_author" class="input-control" placeholder="Original author name" />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('translator') }">
+                  <div class="label-line">
+                    <label for="field-translator">Translator</label>
+                    <span v-if="isFieldModified('translator')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-translator" v-model="editableBook.translator" class="input-control" placeholder="Credited translator" />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('compiler_editor') }">
+                  <div class="label-line">
+                    <label for="field-compiler">Compiler / Editor</label>
+                    <span v-if="isFieldModified('compiler_editor')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-compiler" v-model="editableBook.compiler_editor" class="input-control" placeholder="Editor or compiler" />
+                </div>
+
+                <div class="field-block span-2" :class="{ 'field-modified': isFieldModified('translation_compilation') }">
+                  <div class="label-line">
+                    <label for="field-trans-comp">Translation & Compilation Notes</label>
+                    <span v-if="isFieldModified('translation_compilation')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-trans-comp" v-model="editableBook.translation_compilation" class="input-control" placeholder="e.g. Translated from Russian text authorized edition" />
+                </div>
+
+                <div class="field-block span-2" :class="{ 'field-modified': isFieldModified('subject_headings') }">
+                  <div class="label-line">
+                    <label for="field-subjects">Subject Headings (Separated by commas)</label>
+                    <span v-if="isFieldModified('subject_headings')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-subjects" v-model="editableBook.subject_headings" class="input-control" placeholder="e.g. Malayalam Fiction, Detective Stories, Travancore" />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('target_audience_era') }">
+                  <div class="label-line">
+                    <label for="field-audience">Target Audience / Era</label>
+                    <span v-if="isFieldModified('target_audience_era')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-audience" v-model="editableBook.target_audience_era" class="input-control" placeholder="e.g. 20th Century, General Reader" />
+                </div>
+
+                <!-- Copyright Combobox -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('copyright_status') }">
+                  <div class="label-line">
+                    <label for="field-copyright">Copyright Status</label>
+                    <span v-if="isFieldModified('copyright_status')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-copyright" v-model="copyrightSelectValue" class="input-control" @change="handleCopyrightSelectChange">
+                    <option value="">Select Status</option>
+                    <option v-for="c in copyrightOptions" :key="c" :value="c">{{ c }}</option>
+                    <option value="__CUSTOM__">Other (Specify)…</option>
+                  </select>
+                  <input 
+                    v-if="copyrightSelectValue === '__CUSTOM__'" 
+                    v-model="editableBook.copyright_status" 
+                    class="input-control custom-subfield" 
+                    placeholder="Enter custom copyright / license terms…" 
+                  />
+                </div>
+              </div>
+            </section>
+
+            <!-- 06 Relational Series Grouping -->
+            <section v-if="isSectionVisible('series', ['series', 'series_name', 'series_number', 'volume_number', 'related_work_id', 'grouping'])" class="form-section">
+              <div class="section-heading">
+                <div class="section-index">06</div>
+                <div><h3>Relational Series Grouping</h3><p>Group multi-volume works and connected catalogued items.</p></div>
+              </div>
+              <div class="field-grid">
+                <div class="field-block span-2" :class="{ 'field-modified': isFieldModified('series_name') }">
+                  <div class="label-line">
+                    <label for="field-series-group">Series Group Name</label>
+                    <span v-if="isFieldModified('series_name')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-series-group" v-model="editableBook.series_name" class="input-control" placeholder="e.g. Complete Works of Agatha Christie" />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('series_number') }">
+                  <div class="label-line">
+                    <label for="field-series-num">Series Number (Digits Only)</label>
+                    <span v-if="isFieldModified('series_number')" class="modified-label">Modified</span>
+                  </div>
+                  <input 
+                    id="field-series-num" 
+                    v-model="editableBook.series_number" 
+                    class="input-control" 
+                    inputmode="numeric" 
+                    placeholder="e.g. 4" 
+                    @input="enforceNumbersOnly($event, 'series_number')" 
+                  />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('volume_number') }">
+                  <div class="label-line">
+                    <label for="field-vol-num">Volume Number (Digits Only)</label>
+                    <span v-if="isFieldModified('volume_number')" class="modified-label">Modified</span>
+                  </div>
+                  <input 
+                    id="field-vol-num" 
+                    v-model="editableBook.volume_number" 
+                    class="input-control" 
+                    inputmode="numeric" 
+                    placeholder="e.g. 1" 
+                    @input="enforceNumbersOnly($event, 'volume_number')" 
+                  />
+                </div>
+
+                <div class="field-block span-2" :class="{ 'field-modified': isFieldModified('related_work_id') }">
+                  <div class="label-line">
+                    <label for="field-rel-work">Related Work ID (Digits Only)</label>
+                    <span v-if="isFieldModified('related_work_id')" class="modified-label">Modified</span>
+                  </div>
+                  <input 
+                    id="field-rel-work" 
+                    v-model="editableBook.related_work_id" 
+                    class="input-control" 
+                    inputmode="numeric" 
+                    placeholder="e.g. 505" 
+                    @input="enforceNumbersOnly($event, 'related_work_id')" 
+                  />
+                </div>
+              </div>
+            </section>
+
+            <!-- 07 Location -->
+            <section v-if="isSectionVisible('location', ['location', 'shelf', 'call number', 'accession'])" class="form-section">
+              <div class="section-heading">
+                <div class="section-index">07</div>
+                <div><h3>Location</h3><p>Physical shelf placement and stack call number.</p></div>
+              </div>
+              <div class="field-grid">
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('shelf') }">
+                  <div class="label-line">
+                    <label for="field-shelf">Shelf Placement</label>
+                    <span v-if="isFieldModified('shelf')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-shelf" v-model="editableBook.shelf" class="input-control" placeholder="e.g. S-0-S or Bay 4 / Shelf B" />
+                </div>
+
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('call_no') }">
+                  <div class="label-line">
+                    <label for="field-call-no">Call Number</label>
+                    <span v-if="isFieldModified('call_no')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-call-no" v-model="editableBook.call_no" class="input-control" placeholder="e.g. ML-FIC-26.0" />
+                </div>
+              </div>
+            </section>
+
+            <!-- 08 Preservation & Holding Details -->
+            <section v-if="isSectionVisible('preservation', ['preservation', 'holding', 'condition', 'binding', 'provenance', 'fonds', 'pages', 'dimensions'])" class="form-section">
+              <div class="section-heading">
+                <div class="section-index">08</div>
+                <div><h3>Preservation & Holding Details</h3><p>Conservation, dimensions, provenance, and accessibility.</p></div>
+              </div>
+              <div class="field-grid">
+                <!-- Extent Page Count: strictly numeric -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('extent_page_count') }">
+                  <div class="label-line">
+                    <label for="field-extent">Pages / Extent (Numbers Only)</label>
+                    <span v-if="isFieldModified('extent_page_count')" class="modified-label">Modified</span>
+                  </div>
+                  <div class="input-with-unit">
+                    <input 
+                      id="field-extent" 
+                      v-model="editableBook.extent_page_count" 
+                      class="input-control" 
+                      inputmode="numeric" 
+                      placeholder="e.g. 420" 
+                      @input="enforceNumbersOnly($event, 'extent_page_count')" 
+                    />
+                    <span class="unit-tag">pages</span>
+                  </div>
+                </div>
+
+                <!-- Structured Dimension: Height × Width cm -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('physical_dimensions') }">
+                  <div class="label-line">
+                    <label>Physical Dimensions (Height × Width)</label>
+                    <span v-if="isFieldModified('physical_dimensions')" class="modified-label">Modified</span>
+                  </div>
+                  <div class="dimension-input-group">
+                    <input 
+                      v-model="dimHeight" 
+                      class="input-control dim-box" 
+                      inputmode="numeric" 
+                      placeholder="Height" 
+                      @input="syncDimensions" 
+                    />
+                    <span class="dim-separator">×</span>
+                    <input 
+                      v-model="dimWidth" 
+                      class="input-control dim-box" 
+                      inputmode="numeric" 
+                      placeholder="Width" 
+                      @input="syncDimensions" 
+                    />
+                    <select v-model="dimUnit" class="input-control dim-unit-select" @change="syncDimensions">
+                      <option value="cm">cm</option>
+                      <option value="mm">mm</option>
+                      <option value="in">inches</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Date Acquired: strict date with max="today" -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('date_acquired') }">
+                  <div class="label-line">
+                    <label for="field-acquired">Date Acquired</label>
+                    <span v-if="isFieldModified('date_acquired')" class="modified-label">Modified</span>
+                  </div>
+                  <input 
+                    id="field-acquired" 
+                    v-model="editableBook.date_acquired" 
+                    class="input-control" 
+                    type="date" 
+                    :max="todayDateString" 
+                  />
+                </div>
+
+                <!-- Collection / Fonds -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('collection_fonds') }">
+                  <div class="label-line">
+                    <label for="field-fonds">Collection / Archival Fonds</label>
+                    <span v-if="isFieldModified('collection_fonds')" class="modified-label">Modified</span>
+                  </div>
+                  <input id="field-fonds" v-model="editableBook.collection_fonds" class="input-control" placeholder="e.g. Rare Palm-Leaf Archival Fonds, Donor Collection" />
+                </div>
+
+                <!-- Physical Condition Combobox -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('physical_condition') }">
+                  <div class="label-line">
+                    <label for="field-condition">Physical Condition</label>
+                    <span v-if="isFieldModified('physical_condition')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-condition" v-model="conditionSelectValue" class="input-control" @change="handleConditionSelectChange">
+                    <option value="">Select Condition</option>
+                    <option v-for="cond in conditionOptions" :key="cond" :value="cond">{{ cond }}</option>
+                    <option value="__CUSTOM__">Other (Enter Manually)…</option>
+                  </select>
+                  <input 
+                    v-if="conditionSelectValue === '__CUSTOM__'" 
+                    v-model="editableBook.physical_condition" 
+                    class="input-control custom-subfield" 
+                    placeholder="Specific condition notes…" 
+                  />
+                </div>
+
+                <!-- Binding Type Combobox -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('binding_type') }">
+                  <div class="label-line">
+                    <label for="field-binding">Binding Type</label>
+                    <span v-if="isFieldModified('binding_type')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-binding" v-model="bindingSelectValue" class="input-control" @change="handleBindingSelectChange">
+                    <option value="">Select Binding</option>
+                    <option v-for="b in bindingOptions" :key="b" :value="b">{{ b }}</option>
+                    <option value="__CUSTOM__">Other (Enter Manually)…</option>
+                  </select>
+                  <input 
+                    v-if="bindingSelectValue === '__CUSTOM__'" 
+                    v-model="editableBook.binding_type" 
+                    class="input-control custom-subfield" 
+                    placeholder="Specific binding style…" 
+                  />
+                </div>
+
+                <!-- Provenance Source Combobox -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('provenance_source') }">
+                  <div class="label-line">
+                    <label for="field-provenance">Provenance Source</label>
+                    <span v-if="isFieldModified('provenance_source')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-provenance" v-model="provenanceSelectValue" class="input-control" @change="handleProvenanceSelectChange">
+                    <option value="">Select Provenance</option>
+                    <option v-for="p in provenanceOptions" :key="p" :value="p">{{ p }}</option>
+                    <option value="__CUSTOM__">Other (Specify Donor / Source)…</option>
+                  </select>
+                  <input 
+                    v-if="provenanceSelectValue === '__CUSTOM__'" 
+                    v-model="editableBook.provenance_source" 
+                    class="input-control custom-subfield" 
+                    placeholder="Name of donor or purchasing registry…" 
+                  />
+                </div>
+
+                <!-- Access Restrictions Combobox -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('access_restrictions') }">
+                  <div class="label-line">
+                    <label for="field-restrictions">Access Restrictions</label>
+                    <span v-if="isFieldModified('access_restrictions')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-restrictions" v-model="restrictionsSelectValue" class="input-control" @change="handleRestrictionsSelectChange">
+                    <option value="">Select Policy</option>
+                    <option v-for="r in restrictionOptions" :key="r" :value="r">{{ r }}</option>
+                    <option value="__CUSTOM__">Other (Specify Restriction)…</option>
+                  </select>
+                  <input 
+                    v-if="restrictionsSelectValue === '__CUSTOM__'" 
+                    v-model="editableBook.access_restrictions" 
+                    class="input-control custom-subfield" 
+                    placeholder="Special access rule…" 
+                  />
+                </div>
+
+                <!-- Digital Scan Boolean -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('digital_scan_available') }">
+                  <div class="label-line">
+                    <label for="field-scan">Digital Scan Available</label>
+                    <span v-if="isFieldModified('digital_scan_available')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-scan" v-model="editableBook.digital_scan_available" class="input-control">
+                    <option :value="false">No (Unscanned)</option>
+                    <option :value="true">Yes (Archived Scan Available)</option>
+                  </select>
+                </div>
+
+                <!-- OCR Status Combobox -->
+                <div class="field-block" :class="{ 'field-modified': isFieldModified('ocr_status') }">
+                  <div class="label-line">
+                    <label for="field-ocr">OCR Status (Optical Recognition)</label>
+                    <span v-if="isFieldModified('ocr_status')" class="modified-label">Modified</span>
+                  </div>
+                  <select id="field-ocr" v-model="editableBook.ocr_status" class="input-control">
+                    <option value="">Select OCR Status</option>
+                    <option v-for="ocr in ocrOptions" :key="ocr" :value="ocr">{{ ocr }}</option>
+                  </select>
+                </div>
+
+                <div class="field-block span-2" :class="{ 'field-modified': isFieldModified('artifactual_notes') }">
+                  <div class="label-line">
+                    <label for="field-artifact-notes">Artifact Markers / Notes (Bookplates, Inscriptions, Seals)</label>
+                    <span v-if="isFieldModified('artifactual_notes')" class="modified-label">Modified</span>
+                  </div>
+                  <textarea id="field-artifact-notes" v-model="editableBook.artifactual_notes" class="input-control textarea-control" rows="3" placeholder="Marginalia, signatures, archival stamps, stamps…"></textarea>
+                </div>
+              </div>
+            </section>
+
+            <!-- 09 Notes -->
+            <section v-if="isSectionVisible('notes', ['notes', 'remarks', 'conservation'])" class="form-section">
+              <div class="section-heading">
+                <div class="section-index">09</div>
+                <div><h3>Notes</h3><p>General holding remarks and cataloguing notes.</p></div>
+              </div>
+              <div class="field-block" :class="{ 'field-modified': isFieldModified('notes') }">
+                <div class="label-line">
+                  <label for="field-notes">Catalogue Notes</label>
+                  <span v-if="isFieldModified('notes')" class="modified-label">Modified</span>
+                </div>
+                <textarea id="field-notes" v-model="editableBook.notes" class="input-control textarea-control" rows="5" placeholder="Add relevant notes about this catalogued item…"></textarea>
+                <div v-if="isFieldModified('notes')" class="field-footer">
+                  <span>Original: {{ pristineBook.notes || 'Empty' }}</span>
+                  <button type="button" @click="revertSingleField('notes')">Undo</button>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- Audit Review Panel -->
+          <section v-if="modifiedFieldsList.length" class="review-panel">
+            <div class="review-heading">
+              <div><span class="eyebrow">REVIEW</span><h3>Modified Fields In This Session</h3></div>
+              <button class="text-button" type="button" @click="revertAllModifications">Discard all</button>
+            </div>
+            <div v-for="change in modifiedFieldsList" :key="change.key" class="review-row">
+              <div><strong>{{ change.label }}</strong><small>{{ change.tabLabel }}</small></div>
+              <div class="review-values">
+                <span>{{ change.oldValue || 'Empty' }}</span>
+                <span class="review-arrow">→</span>
+                <span>{{ change.newValue || 'Empty' }}</span>
+              </div>
+              <button type="button" class="undo-icon" :aria-label="`Undo ${change.label}`" @click="revertSingleField(change.key)">↶</button>
+            </div>
+          </section>
         </section>
       </div>
 
-      <footer class="savebar"><div class="savebar-info"><span class="save-indicator" :class="{'dirty':modifiedFieldsList.length}"></span><span>{{ modifiedFieldsList.length ? `${modifiedFieldsList.length} unsaved field changes` : 'No unsaved changes' }}</span></div><div class="savebar-actions"><button class="button button-quiet" type="button" @click="previewOpen = true">Preview document</button><button class="button button-quiet" type="button" @click="triggerActionConfirm('abort')">Cancel</button><button class="button button-save-action" type="button" :disabled="!modifiedFieldsList.length" :aria-disabled="!modifiedFieldsList.length" @click="triggerActionConfirm('commit')">{{ modifiedFieldsList.length ? 'Review & save' : 'No changes to save' }} <span aria-hidden="true">→</span></button></div></footer>
+      <!-- Bottom Savebar -->
+      <footer class="savebar">
+        <div class="savebar-info">
+          <span class="save-indicator" :class="{ dirty: modifiedFieldsList.length }"></span>
+          <span>{{ modifiedFieldsList.length ? `${modifiedFieldsList.length} unsaved field changes` : 'All changes saved' }}</span>
+        </div>
+        <div class="savebar-actions">
+          <button class="button button-quiet" type="button" @click="handleBackNavigation">Cancel (Esc)</button>
+          <button 
+            class="button button-save-action" 
+            type="button" 
+            :disabled="!modifiedFieldsList.length || isSaving" 
+            @click="triggerActionConfirm('commit')"
+          >
+            {{ isSaving ? 'Saving…' : (modifiedFieldsList.length ? 'Review & Save' : 'No Changes') }}
+          </button>
+        </div>
+      </footer>
     </template>
 
-    <div v-if="previewOpen && editableBook" class="preview-backdrop" @click.self="previewOpen = false">
-      <section class="document-preview" role="dialog" aria-modal="true" aria-labelledby="preview-title">
-        <header class="preview-toolbar"><div><span class="eyebrow">CATALOGUE / DOCUMENT PREVIEW</span><h2 id="preview-title">Review edited record</h2><p>Changed fields are highlighted. Review the full record before saving.</p></div><button type="button" class="preview-close" aria-label="Close preview" @click="previewOpen = false">×</button></header>
-        <article class="document-sheet">
-          <div class="document-brand"><span class="document-monogram">C</span><div><strong>CATALOGUE RECORD</strong><small>Bibliographic record · edit preview</small></div><span class="document-record-id">Record {{ editableBook.serial_no || editableBook.record_id || route.params.id }}</span></div>
-          <h1 class="document-title">{{ editableBook.title || 'Untitled work' }}</h1>
-          <p class="document-subtitle">{{ editableBook.author || 'Creator not specified' }}</p>
-          <div class="document-rule"></div>
-          <section class="document-group"><h3>01 · Core details</h3><div class="document-fields"><div v-for="field in [{key:'title',label:'Work title'},{key:'author',label:'Author / creator'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
-          <section class="document-group"><h3>02 · Classification</h3><div class="document-fields"><div v-for="field in [{key:'category',label:'Collection category'},{key:'ddc',label:'Dewey Decimal (DDC)'},{key:'genre',label:'Genre tags'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
-          <section class="document-group"><h3>03 · Languages</h3><div class="document-fields"><div v-for="field in [{key:'language',label:'Text language'},{key:'original_language',label:'Original source language'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
-          <section class="document-group"><h3>04 · Publication</h3><div class="document-fields"><div v-for="field in [{key:'publisher',label:'Publisher / imprint'},{key:'year',label:'Publication year'},{key:'isbn',label:'ISBN'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
-          <section class="document-group"><h3>05 · Location</h3><div class="document-fields"><div v-for="field in [{key:'shelf',label:'Shelf location'},{key:'call_no',label:'Call number'}]" :key="field.key" class="document-field" :class="{'document-field-changed':isFieldModified(field.key)}"><span class="document-field-label">{{ field.label }}</span><div v-if="isFieldModified(field.key)" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong>{{ pristineBook[field.key] || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong>{{ editableBook[field.key] || '—' }}</strong></div></div><strong v-else class="document-current-value">{{ editableBook[field.key] || '—' }}</strong><em v-if="isFieldModified(field.key)">EDITED</em></div></div></section>
-          <section class="document-group"><h3>06 · Notes</h3><div class="document-fields"><div class="document-field" :class="{'document-field-changed':isFieldModified('notes')}"><span class="document-field-label">Catalogue notes</span><div v-if="isFieldModified('notes')" class="document-value-comparison"><div class="document-previous"><small>PREVIOUS VALUE</small><strong class="document-long-value">{{ pristineBook.notes || '—' }}</strong></div><div class="document-current"><small>NEW VALUE</small><strong class="document-long-value">{{ editableBook.notes || '—' }}</strong></div></div><strong v-else class="document-long-value document-current-value">{{ editableBook.notes || '—' }}</strong><em v-if="isFieldModified('notes')">EDITED</em></div></div></section>
-          <footer class="document-footer"><span>{{ modifiedFieldsList.length }} field(s) changed</span><span>Preview only · not yet saved</span></footer>
-        </article>
-        <footer class="preview-actions"><span class="preview-legend"><i></i> Highlighted fields have unsaved edits</span><button type="button" class="button button-quiet" @click="previewOpen = false">Continue editing</button><button type="button" class="button button-save-action" :disabled="!modifiedFieldsList.length" @click="previewOpen = false; triggerActionConfirm('commit')">Review & save →</button></footer>
+    <!-- Confirmation Modal -->
+    <div v-if="activeModalType" class="modal-backdrop" @click.self="!isSaving && closeModalPrompt()">
+      <section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div class="modal-mark">{{ activeModalType === 'commit' ? '✓' : '↶' }}</div>
+        <span class="eyebrow">CONFIRM ACTION</span>
+        <h2 id="confirm-title">{{ activeModalType === 'commit' ? 'Save record updates?' : 'Discard unsaved changes?' }}</h2>
+        <p>{{ activeModalType === 'commit' ? 'Your updates will be saved to the database ledger.' : 'You have unsaved edits. Discarding will revert to previous values.' }}</p>
+        
+        <template v-if="activeModalType === 'commit'">
+          <label for="change-reason">Reason for change <span class="optional-label">(optional)</span></label>
+          <textarea id="change-reason" v-model="changeReason" class="input-control textarea-control" rows="2" placeholder="Briefly describe this update…"></textarea>
+        </template>
+
+        <div class="modal-actions">
+          <button class="button button-quiet" type="button" :disabled="isSaving" @click="closeModalPrompt">Go back</button>
+          <button 
+            class="button" 
+            :class="activeModalType === 'commit' ? 'button-save-action' : 'button-primary'" 
+            type="button" 
+            :disabled="isSaving" 
+            @click="executeConfirmedAction"
+          >
+            {{ isSaving ? 'Saving…' : (activeModalType === 'commit' ? 'Confirm Save' : 'Discard & Return') }}
+          </button>
+        </div>
       </section>
     </div>
 
+    <!-- Toast -->
     <div v-if="toast" class="toast-message" :class="toast.type" role="status">{{ toast.message }}</div>
-    <div v-if="activeModalType" class="modal-backdrop" @click.self="closeModalPrompt"><section class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><div class="modal-mark">{{ activeModalType === 'commit' ? '✓' : '↶' }}</div><span class="eyebrow">CONFIRM ACTION</span><h2 id="confirm-title">{{ activeModalType === 'commit' ? 'Save record changes?' : 'Cancel editing?' }}</h2><p>{{ activeModalType === 'commit' ? 'Your updates will be sent to the catalogue and recorded in the audit trail.' : 'You will leave this page. Any unsaved edits will be discarded.' }}</p><template v-if="activeModalType === 'commit'"><label for="change-reason">Reason for change <span class="optional-label">(optional)</span></label><textarea id="change-reason" v-model="changeReason" class="input-control textarea-control" rows="3" placeholder="Briefly describe why this record is being updated…"></textarea></template><div class="countdown-note">{{ countdownTimerSeconds > 0 ? `Confirming automatically in ${countdownTimerSeconds}s` : 'Processing…' }}</div><div class="modal-actions"><button class="button button-quiet" type="button" @click="closeModalPrompt">Go back</button><button class="button" :class="activeModalType === 'commit' ? 'button-save-action' : 'button-primary'" type="button" :disabled="activeModalType === 'commit' && !modifiedFieldsList.length" @click="executeConfirmedAction">{{ activeModalType === 'commit' ? 'Confirm save' : 'Discard edits' }}</button></div></section></div>
   </main>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, nextTick } from "vue"
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import axios from "axios"
 import { dispatchAuditTrail } from '@/utils/audit'
@@ -124,22 +892,18 @@ const route = useRoute()
 const router = useRouter()
 
 const loading = ref(true)
+const loadError = ref('')
+const isSaving = ref(false)
 const editableBook = ref<any>(null)
-const pristineBook = ref<any>(null) // Baseline snapshot for delta comparison
+const pristineBook = ref<any>(null)
 
-// Navigation & UX Search
-type TabKey = 'work' | 'taxonomy' | 'languages' | 'publication' | 'location' | 'notes'
+type TabKey = 'work' | 'taxonomy' | 'languages' | 'publication' | 'lineage' | 'series' | 'location' | 'preservation' | 'notes'
 const activeTab = ref<TabKey>('work')
 const searchQuery = ref('')
 const showAllSections = ref(false)
-const previewOpen = ref(false)
-
 const activeModalType = ref<'commit' | 'abort' | null>(null)
 const changeReason = ref<string>("")
-const countdownTimerSeconds = ref<number>(0)
-let nativeIntervalReference: any = null
-
-const selectedAuthority = ref<AuthoritySuggestion | null>(null)
+let toastTimeout: ReturnType<typeof setTimeout> | null = null
 
 interface ToastNotification {
   message: string
@@ -147,68 +911,134 @@ interface ToastNotification {
 }
 const toast = ref<ToastNotification | null>(null)
 
-const categoryOptions = ["Fiction", "Non-Fiction", "Reference", "Religious", "Poetry"]
-const languageOptions = [
-  "Assamese", "Arabic", "Bengali", "Chinese", "English", "French", "German",
-  "Gujarati", "Hindi", "Japanese", "Kannada", "Latin", "Malayalam", "Marathi",
-  "Nepali", "Odia", "Pali", "Persian", "Prakrit", "Punjabi", "Sanskrit", "Spanish",
-  "Tamil", "Telugu", "Urdu", "Other"
+const todayDateString = computed(() => new Date().toISOString().split('T')[0])
+
+const navTabs = [
+  { key: 'work', number: '01', label: 'Core Details', hint: 'Title & Creator' },
+  { key: 'taxonomy', number: '02', label: 'Classification', hint: 'DDC & Genres' },
+  { key: 'languages', number: '03', label: 'Languages', hint: 'Text & Original' },
+  { key: 'publication', number: '04', label: 'Publication', hint: 'Imprint & ISBN' },
+  { key: 'lineage', number: '05', label: 'Lineage & Rights', hint: 'Translations & Rights' },
+  { key: 'series', number: '06', label: 'Relational Series', hint: 'Fonds & Volumes' },
+  { key: 'location', number: '07', label: 'Location', hint: 'Shelf & Call No' },
+  { key: 'preservation', number: '08', label: 'Preservation', hint: 'Condition & Fonds' },
+  { key: 'notes', number: '09', label: 'Notes', hint: 'Archival notes' }
 ]
 
-function limitYearLength(event: Event) {
-  const input = event.target as HTMLInputElement
-  const digits = input.value.replace(/\D/g, "").slice(0, 4)
-  editableBook.value.year = digits
-  input.value = digits
+const currentTabLabel = computed(() => {
+  return navTabs.find(t => t.key === activeTab.value)?.label || 'Record Details'
+})
+
+// Options
+const categoryOptions = ["Fiction", "Non-Fiction", "Reference", "Religious", "Poetry", "Manuscript / Rare", "Periodical"]
+const categorySelectValue = ref("")
+
+const copyrightOptions = [
+  "Public Domain",
+  "In Copyright (All Rights Reserved)",
+  "In Copyright - Orphan Work",
+  "Creative Commons (CC BY / CC BY-SA)",
+  "Creative Commons Zero (CC0)",
+  "Copyright Not Evaluated / Unknown"
+]
+const copyrightSelectValue = ref("")
+
+const conditionOptions = [
+  "Pristine / New",
+  "Good",
+  "Fair",
+  "Fragile / Brittle",
+  "Damaged / Requires Conservation",
+  "Restricted Handling"
+]
+const conditionSelectValue = ref("")
+
+const bindingOptions = [
+  "Hardcover",
+  "Paperback / Softcover",
+  "Leatherbound",
+  "Cloth / Buckram",
+  "Palm-Leaf Bundle",
+  "Spiral / Comb",
+  "Loose Sheets / Portfolio"
+]
+const bindingSelectValue = ref("")
+
+const provenanceOptions = [
+  "Purchase / Vendor",
+  "Gift / Personal Donation",
+  "Institutional Transfer",
+  "Bequest / Estate",
+  "Found in Collection"
+]
+const provenanceSelectValue = ref("")
+
+const restrictionOptions = [
+  "Open Access / General Circulation",
+  "Reference Room Only",
+  "Supervised Reading Room Only",
+  "Restricted / Rare Archive",
+  "Digitized Copy Only"
+]
+const restrictionsSelectValue = ref("")
+
+const ocrOptions = ["NOT_APPLICABLE", "PENDING", "IN_PROGRESS", "COMPLETED", "FAILED"]
+
+// Dynamic Deduplicated Language Registry
+const systemLanguages = ref<string[]>([])
+const standardLanguages = [
+  "Malayalam", "English", "Sanskrit", "Tamil", "Hindi",
+  "Arabic", "Bengali", "French", "German", "Gujarati",
+  "Kannada", "Latin", "Marathi", "Persian", "Prakrit",
+  "Punjabi", "Russian", "Spanish", "Telugu", "Urdu", "Multilingual"
+]
+
+const availableLanguages = computed(() => {
+  const rawList = [
+    ...standardLanguages,
+    ...systemLanguages.value
+  ]
+  const cleaned = rawList
+    .map(lang => {
+      if (!lang) return ""
+      const trimmed = String(lang).trim()
+      if (trimmed.toLowerCase().replace(/[\s-]/g, "") === "multilingual") return "Multilingual"
+      return trimmed
+    })
+    .filter(Boolean)
+
+  const unique = Array.from(new Set(cleaned))
+  const priority = ["Malayalam", "English", "Sanskrit", "Tamil", "Hindi", "Multilingual"]
+
+  return unique.sort((a, b) => {
+    const idxA = priority.indexOf(a)
+    const idxB = priority.indexOf(b)
+    if (idxA !== -1 && idxB !== -1) return idxA - idxB
+    if (idxA !== -1) return -1
+    if (idxB !== -1) return 1
+    return a.localeCompare(b)
+  })
+})
+
+async function fetchLanguageOptions() {
+  try {
+    const res = await axios.get("/catalogue/review/field-options")
+    if (Array.isArray(res.data?.languages)) {
+      systemLanguages.value = res.data.languages
+    }
+  } catch (err) {
+    console.warn("Could not fetch remote language options:", err)
+  }
 }
 
-// Taxonomy Presets
-const genreGroupA = ref([
-  "ADVENTURE", "BIOGRAPHY", "CLASSIC", "DETECTIVE", "FANTASY", 
-  "FOLKLORE", "FOLKTALES", "HORROR", "MYSTERY", "NOVEL", 
-  "POETRY", "SATIRE", "SHORT STORIES", "TEMPLE SONGS"
-])
+// Genres
+const newGenreInput = ref("")
+const popularIndianGenres = [
+  "NOVEL", "SHORT STORIES", "POETRY", "BIOGRAPHY", "DETECTIVE", 
+  "HISTORICAL", "PHILOSOPHY", "DRAMA", "SATIRE", "FOLKLORE"
+]
 
-const genreGroupB = ref([
-  "AETHISM", "ANIMAL HUSBANDRY", "AUTOBIOGRAPHY", "COLLECTION OF PROVERBS", 
-  "COLLECTION OF WORKS", "EDUCATIONAL", "ENCYCLOPEDIA", "ENGINEERING", 
-  "FORENSIC INVESTIGATIONS", "FUTURISM", "HISTORY", "HOBBY", "INVESTIGATION", 
-  "MEDICINE (AYURVEDA)", "MEMOIR", "PHILATELY", "PHILOSOPHY", "POLITICS", 
-  "PSYCHOLOGY", "SCIENCE", "SERVICE STORY", "STUDY", "VETERINARY"
-])
-
-const dynamicCommunityGenres = ref<string[]>([])
-
-const selectedGroupAGenre = ref("")
-const selectedGroupBGenre = ref("")
-const selectedGroupCGenre = ref("")
-const showCustomManualGenreField = ref(false)
-const customManualGenreText = ref("")
-
-// Typeahead suggestions
-
-interface AuthoritySuggestion {
-  authority_id: number
-  authority_code: string
-  preferred_name: string
-  full_name?: string
-  authority_type?: string
-  status: string
-}
-
-const authorSuggestions = ref<AuthoritySuggestion[]>([])
-const publisherSuggestions = ref<string[]>([])
-
-const showAuthorSuggestions = ref(false)
-const showPublisherSuggestions = ref(false)
-
-let debounceAuthorTimeout: any = null
-let debouncePublisherTimeout: any = null
-
-
-
-// Active compiled chips from book genre string - explicitly typed string[]
-const liveCompiledGenreChips = computed<string[]>(() => {
+const currentGenreList = computed<string[]>(() => {
   if (!editableBook.value?.genre) return []
   return String(editableBook.value.genre)
     .split('/')
@@ -216,7 +1046,143 @@ const liveCompiledGenreChips = computed<string[]>(() => {
     .filter((g: string) => g.length > 0)
 })
 
-// Field definition schema for change detection
+function addGenreFromInput() {
+  const raw = newGenreInput.value.replace(/,/g, '').trim().toUpperCase()
+  if (!raw) return
+  if (!currentGenreList.value.includes(raw)) {
+    const updated = [...currentGenreList.value, raw]
+    editableBook.value.genre = updated.join('/')
+  }
+  newGenreInput.value = ""
+}
+
+function toggleGenrePill(tag: string) {
+  if (currentGenreList.value.includes(tag)) {
+    removeGenreChip(tag)
+  } else {
+    editableBook.value.genre = [...currentGenreList.value, tag].join('/')
+  }
+}
+
+function removeGenreChip(tag: string) {
+  const updated = currentGenreList.value.filter(t => t !== tag)
+  editableBook.value.genre = updated.length ? updated.join('/') : null
+}
+
+function clearAllGenres() {
+  editableBook.value.genre = null
+}
+
+// Dimensions handling (Height × Width cm)
+const dimHeight = ref("")
+const dimWidth = ref("")
+const dimUnit = ref("cm")
+
+function parseInitialDimensions(raw: string | undefined) {
+  if (!raw) return
+  const match = String(raw).match(/(\d+(?:\.\d+)?)\s*(?:[x×*])\s*(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?/)
+  if (match) {
+    dimHeight.value = match[1] || ""
+    dimWidth.value = match[2] || ""
+    dimUnit.value = match[3] || "cm"
+  } else {
+    dimHeight.value = raw.replace(/\D/g, '')
+  }
+}
+
+function syncDimensions() {
+  if (!dimHeight.value && !dimWidth.value) {
+    editableBook.value.physical_dimensions = null
+    return
+  }
+  editableBook.value.physical_dimensions = `${dimHeight.value.trim()} × ${dimWidth.value.trim()} ${dimUnit.value}`
+}
+
+// Strictly numbers-only helper
+function enforceNumbersOnly(event: Event, fieldKey: string, maxLen?: number) {
+  const input = event.target as HTMLInputElement
+  let digits = input.value.replace(/\D/g, "")
+  if (maxLen && digits.length > maxLen) {
+    digits = digits.slice(0, maxLen)
+  }
+  editableBook.value[fieldKey] = digits ? digits : null
+  input.value = digits
+}
+
+// DDC validation: 3 digits before decimal, optional decimal parts
+const isDdcValid = computed(() => {
+  const val = editableBook.value?.ddc
+  if (!val || String(val).trim() === "") return true
+  return /^\d{3}(\.\d+)?$/.test(String(val).trim())
+})
+
+// ISBN Formatter & Validator
+const isIsbnValid = computed(() => {
+  const raw = editableBook.value?.isbn
+  if (!raw || String(raw).trim() === "") return true
+  const clean = String(raw).replace(/[-\s]/g, "")
+  return clean.length === 10 || clean.length === 13
+})
+
+function formatIsbnOnBlur() {
+  const raw = editableBook.value?.isbn
+  if (!raw) return
+  const clean = String(raw).replace(/[-\s]/g, "")
+  if (clean.length === 13) {
+    editableBook.value.isbn = `${clean.slice(0, 3)}-${clean.slice(3, 5)}-${clean.slice(5, 9)}-${clean.slice(9, 12)}-${clean.slice(12)}`
+  } else if (clean.length === 10) {
+    editableBook.value.isbn = `${clean.slice(0, 1)}-${clean.slice(1, 4)}-${clean.slice(4, 9)}-${clean.slice(9)}`
+  }
+}
+
+// Combobox Sync Initializers
+function setupComboboxValues() {
+  categorySelectValue.value = categoryOptions.includes(editableBook.value.category) ? editableBook.value.category : (editableBook.value.category ? '__CUSTOM__' : '')
+  copyrightSelectValue.value = copyrightOptions.includes(editableBook.value.copyright_status) ? editableBook.value.copyright_status : (editableBook.value.copyright_status ? '__CUSTOM__' : '')
+  conditionSelectValue.value = conditionOptions.includes(editableBook.value.physical_condition) ? editableBook.value.physical_condition : (editableBook.value.physical_condition ? '__CUSTOM__' : '')
+  bindingSelectValue.value = bindingOptions.includes(editableBook.value.binding_type) ? editableBook.value.binding_type : (editableBook.value.binding_type ? '__CUSTOM__' : '')
+  provenanceSelectValue.value = provenanceOptions.includes(editableBook.value.provenance_source) ? editableBook.value.provenance_source : (editableBook.value.provenance_source ? '__CUSTOM__' : '')
+  restrictionsSelectValue.value = restrictionOptions.includes(editableBook.value.access_restrictions) ? editableBook.value.access_restrictions : (editableBook.value.access_restrictions ? '__CUSTOM__' : '')
+  parseInitialDimensions(editableBook.value.physical_dimensions)
+}
+
+function handleCategorySelectChange() {
+  if (categorySelectValue.value !== '__CUSTOM__') {
+    editableBook.value.category = categorySelectValue.value || null
+  }
+}
+
+function handleCopyrightSelectChange() {
+  if (copyrightSelectValue.value !== '__CUSTOM__') {
+    editableBook.value.copyright_status = copyrightSelectValue.value || null
+  }
+}
+
+function handleConditionSelectChange() {
+  if (conditionSelectValue.value !== '__CUSTOM__') {
+    editableBook.value.physical_condition = conditionSelectValue.value || null
+  }
+}
+
+function handleBindingSelectChange() {
+  if (bindingSelectValue.value !== '__CUSTOM__') {
+    editableBook.value.binding_type = bindingSelectValue.value || null
+  }
+}
+
+function handleProvenanceSelectChange() {
+  if (provenanceSelectValue.value !== '__CUSTOM__') {
+    editableBook.value.provenance_source = provenanceSelectValue.value || null
+  }
+}
+
+function handleRestrictionsSelectChange() {
+  if (restrictionsSelectValue.value !== '__CUSTOM__') {
+    editableBook.value.access_restrictions = restrictionsSelectValue.value || null
+  }
+}
+
+// Tracked Changes
 interface TrackedFieldConfig {
   key: string
   label: string
@@ -227,6 +1193,7 @@ interface TrackedFieldConfig {
 const trackedFieldsConfig: TrackedFieldConfig[] = [
   { key: 'title', label: 'Work Title', tab: 'work', tabLabel: '01 Core' },
   { key: 'author', label: 'Author / Creator', tab: 'work', tabLabel: '01 Core' },
+  { key: 'work_nature', label: 'Work Nature', tab: 'work', tabLabel: '01 Core' },
   { key: 'category', label: 'Collection Category', tab: 'taxonomy', tabLabel: '02 Taxonomy' },
   { key: 'ddc', label: 'Dewey Decimal (DDC)', tab: 'taxonomy', tabLabel: '02 Taxonomy' },
   { key: 'genre', label: 'Genre Tags', tab: 'taxonomy', tabLabel: '02 Taxonomy' },
@@ -235,9 +1202,37 @@ const trackedFieldsConfig: TrackedFieldConfig[] = [
   { key: 'publisher', label: 'Imprint Publisher', tab: 'publication', tabLabel: '04 Imprint' },
   { key: 'year', label: 'Publication Year', tab: 'publication', tabLabel: '04 Imprint' },
   { key: 'isbn', label: 'ISBN Identifier', tab: 'publication', tabLabel: '04 Imprint' },
-  { key: 'shelf', label: 'Shelf Location', tab: 'location', tabLabel: '05 Location' },
-  { key: 'call_no', label: 'Call Signature Number', tab: 'location', tabLabel: '05 Location' },
-  { key: 'notes', label: 'Conservation Notes', tab: 'notes', tabLabel: '06 Remarks' },
+  { key: 'edition_statement', label: 'Edition Statement', tab: 'publication', tabLabel: '04 Imprint' },
+  { key: 'series_title', label: 'Academic Series', tab: 'publication', tabLabel: '04 Imprint' },
+  { key: 'series_volume', label: 'Series Volume', tab: 'publication', tabLabel: '04 Imprint' },
+  { key: 'lccn', label: 'LCCN', tab: 'publication', tabLabel: '04 Imprint' },
+  { key: 'oclc_no', label: 'OCLC No.', tab: 'publication', tabLabel: '04 Imprint' },
+  { key: 'original_title', label: 'Original Title', tab: 'lineage', tabLabel: '05 Lineage' },
+  { key: 'original_author', label: 'Original Author', tab: 'lineage', tabLabel: '05 Lineage' },
+  { key: 'translator', label: 'Translator', tab: 'lineage', tabLabel: '05 Lineage' },
+  { key: 'compiler_editor', label: 'Compiler / Editor', tab: 'lineage', tabLabel: '05 Lineage' },
+  { key: 'translation_compilation', label: 'Translation/Compilation', tab: 'lineage', tabLabel: '05 Lineage' },
+  { key: 'subject_headings', label: 'Subject Headings', tab: 'lineage', tabLabel: '05 Lineage' },
+  { key: 'target_audience_era', label: 'Target Audience / Era', tab: 'lineage', tabLabel: '05 Lineage' },
+  { key: 'copyright_status', label: 'Copyright Status', tab: 'lineage', tabLabel: '05 Lineage' },
+  { key: 'series_name', label: 'Series Group Name', tab: 'series', tabLabel: '06 Series' },
+  { key: 'series_number', label: 'Series Number', tab: 'series', tabLabel: '06 Series' },
+  { key: 'volume_number', label: 'Volume Number', tab: 'series', tabLabel: '06 Series' },
+  { key: 'related_work_id', label: 'Related Work ID', tab: 'series', tabLabel: '06 Series' },
+  { key: 'shelf', label: 'Shelf Location', tab: 'location', tabLabel: '07 Location' },
+  { key: 'call_no', label: 'Call Number', tab: 'location', tabLabel: '07 Location' },
+  { key: 'extent_page_count', label: 'Extent / Pages', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'physical_dimensions', label: 'Physical Dimensions', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'date_acquired', label: 'Date Acquired', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'collection_fonds', label: 'Collection / Fonds', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'physical_condition', label: 'Physical Condition', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'binding_type', label: 'Binding Type', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'provenance_source', label: 'Provenance Source', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'access_restrictions', label: 'Access Restrictions', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'digital_scan_available', label: 'Digital Scan Available', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'ocr_status', label: 'OCR Status', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'artifactual_notes', label: 'Artifactual Notes', tab: 'preservation', tabLabel: '08 Holding' },
+  { key: 'notes', label: 'Catalogue Notes', tab: 'notes', tabLabel: '09 Notes' }
 ]
 
 function normalizeValue(val: any): string {
@@ -245,25 +1240,16 @@ function normalizeValue(val: any): string {
   return String(val).trim()
 }
 
-// Compute live modified fields comparing editableBook against pristineBook
 const modifiedFieldsList = computed(() => {
   if (!editableBook.value || !pristineBook.value) return []
-
   const changes: Array<TrackedFieldConfig & { oldValue: string; newValue: string }> = []
-
   trackedFieldsConfig.forEach((cfg) => {
     const oldNorm = normalizeValue(pristineBook.value[cfg.key])
     const newNorm = normalizeValue(editableBook.value[cfg.key])
-
     if (oldNorm !== newNorm) {
-      changes.push({
-        ...cfg,
-        oldValue: oldNorm,
-        newValue: newNorm,
-      })
+      changes.push({ ...cfg, oldValue: oldNorm, newValue: newNorm })
     }
   })
-
   return changes
 })
 
@@ -275,95 +1261,85 @@ function tabChangesCount(tabKey: TabKey): number {
   return modifiedFieldsList.value.filter(item => item.tab === tabKey).length
 }
 
-function jumpToField(tabKey: TabKey, fieldKey: string) {
-  setTab(tabKey)
-  nextTick(() => {
-    const el = document.getElementById(`field-${fieldKey}`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      el.focus()
-    }
-  })
-}
-
-function revertSingleField(fieldKey: string) {
+async function revertSingleField(fieldKey: string) {
   if (!pristineBook.value || !editableBook.value) return
   editableBook.value[fieldKey] = pristineBook.value[fieldKey]
+  setupComboboxValues()
+  
+  await nextTick()
+  const el = document.getElementById(`field-${fieldKey}`)
+  el?.focus()
 
-  if (fieldKey === 'genre') {
-    parseCurrentGenresIntoDropdowns(editableBook.value.genre)
-  }
-
-  triggerToastNotification(`Field '${fieldKey}' restored to original value.`, 'success')
+  triggerToastNotification(`Field '${fieldKey}' restored.`, 'success')
 }
 
 function revertAllModifications() {
   if (!pristineBook.value) return
   editableBook.value = JSON.parse(JSON.stringify(pristineBook.value))
-  parseCurrentGenresIntoDropdowns(editableBook.value.genre)
-  triggerToastNotification("All modifications reverted to original baseline.", "success")
+  setupComboboxValues()
+  triggerToastNotification("All modifications reverted.", "success")
 }
 
 function setTab(tabKey: TabKey) {
   activeTab.value = tabKey
-  searchQuery.value = ''
+  showAllSections.value = false
 }
 
-const sectionOrder: TabKey[] = ['work', 'taxonomy', 'languages', 'publication', 'location', 'notes']
+function handleBackNavigation() {
+  if (modifiedFieldsList.value.length > 0) {
+    triggerActionConfirm('abort')
+  } else {
+    router.push(`/details/${route.params.id || editableBook.value?.serial_no}`)
+  }
+}
+
+function navigateSection(direction: "next" | "prev") {
+  const currentIndex = navTabs.findIndex(tab => tab.key === activeTab.value)
+  if (currentIndex === -1) return
+
+  let targetIndex = direction === "next" ? currentIndex + 1 : currentIndex - 1
+
+  if (targetIndex < 0) targetIndex = 0
+  if (targetIndex >= navTabs.length) targetIndex = navTabs.length - 1
+
+  setTab(navTabs[targetIndex].key as TabKey)
+}
 
 function handleEditorKeyboard(event: KeyboardEvent) {
-  if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return
-
   const target = event.target as HTMLElement | null
-  const tagName = target?.tagName?.toLowerCase()
-  const isTyping = !!target && (
-    tagName === 'input' ||
-    tagName === 'textarea' ||
-    tagName === 'select' ||
-    target.isContentEditable
-  )
+  const tagName = target?.tagName?.toUpperCase()
+  const isTyping = tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT" || target?.isContentEditable
 
   if (event.key === 'Escape') {
     event.preventDefault()
     if (activeModalType.value) {
       closeModalPrompt()
     } else {
-      triggerActionConfirm('abort')
+      handleBackNavigation()
     }
     return
   }
 
-  if (event.key === 'Enter' && activeModalType.value) {
-    event.preventDefault()
-    executeConfirmedAction()
-    return
-  }
-
-  const isMultilineOrSelect = tagName === 'textarea' || tagName === 'select' || !!target?.isContentEditable
-  const suggestionsOpen = showAuthorSuggestions.value || showPublisherSuggestions.value
-  if (event.key === 'Enter' && !isMultilineOrSelect && !suggestionsOpen) {
-    event.preventDefault()
-    triggerActionConfirm('commit')
-    return
-  }
-
-  // Keep normal cursor movement and text editing intact inside form controls.
+  // Prevent section navigation when the user is typing in a field or has a modal open
   if (isTyping || activeModalType.value) return
 
-  if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+  if (event.key === "ArrowLeft") {
     event.preventDefault()
-    const currentIndex = sectionOrder.indexOf(activeTab.value)
-    const direction = event.key === 'ArrowRight' ? 1 : -1
-    const nextIndex = Math.min(sectionOrder.length - 1, Math.max(0, currentIndex + direction))
-    if (nextIndex !== currentIndex) {
-      setTab(sectionOrder[nextIndex])
-      showAllSections.value = false
-      nextTick(() => window.scrollTo({ top: 0, behavior: 'smooth' }))
-    }
+    navigateSection("prev")
+  } else if (event.key === "ArrowRight") {
+    event.preventDefault()
+    navigateSection("next")
   }
 }
 
-// Determines if a section card should be shown given the current tab or active search
+watch(() => route.params.id, (newId: string | string[] | undefined) => {
+  if (newId) {
+    editableBook.value = null
+    pristineBook.value = null
+    fetchRecordData()
+  }
+})
+
 function isSectionVisible(sectionKey: string, fieldKeywords: string[]): boolean {
   if (searchQuery.value.trim() !== '') {
     const q = searchQuery.value.toLowerCase().trim()
@@ -375,196 +1351,50 @@ function isSectionVisible(sectionKey: string, fieldKeywords: string[]): boolean 
 
 function triggerToastNotification(message: string, type: 'success' | 'error') {
   toast.value = { message, type }
-  setTimeout(() => {
+  if (toastTimeout) clearTimeout(toastTimeout)
+  toastTimeout = setTimeout(() => {
     toast.value = null
   }, 4000)
 }
 
-function parseCurrentGenresIntoDropdowns(genreString: string) {
-  if (!genreString) {
-    selectedGroupAGenre.value = ""
-    selectedGroupBGenre.value = ""
-    selectedGroupCGenre.value = ""
-    customManualGenreText.value = ""
-    showCustomManualGenreField.value = false
-    return
-  }
-  const currentTokens = genreString.split('/').map((g: string) => g.trim().toUpperCase())
-  
-  let matchedAny = false
-  currentTokens.forEach((token: string) => {
-    if (genreGroupA.value.includes(token)) {
-      selectedGroupAGenre.value = token
-      matchedAny = true
-    } else if (genreGroupB.value.includes(token)) {
-      selectedGroupBGenre.value = token
-      matchedAny = true
-    } else if (dynamicCommunityGenres.value.includes(token)) {
-      selectedGroupCGenre.value = token
-      matchedAny = true
-    }
-  })
-
-  if (!matchedAny && genreString.trim() !== "") {
-    showCustomManualGenreField.value = true
-    selectedGroupCGenre.value = "CUSTOM_MANUAL_OVERRIDE"
-    customManualGenreText.value = genreString
-  }
+// Author & Publisher debounced search
+interface AuthoritySuggestion {
+  authority_id: number
+  authority_code: string
+  preferred_name: string
+  full_name?: string
+  status: string
 }
-
-function syncGenreSelection() {
-  if (selectedGroupCGenre.value === "CUSTOM_MANUAL_OVERRIDE") {
-    showCustomManualGenreField.value = true
-    editableBook.value.genre = customManualGenreText.value.trim().toUpperCase() || null
-    return
-  }
-  
-  showCustomManualGenreField.value = false
-  const activeSelectionArray: string[] = []
-  
-  if (selectedGroupAGenre.value) activeSelectionArray.push(selectedGroupAGenre.value)
-  if (selectedGroupBGenre.value) activeSelectionArray.push(selectedGroupBGenre.value)
-  if (selectedGroupCGenre.value && selectedGroupCGenre.value !== "CUSTOM_MANUAL_OVERRIDE") {
-    activeSelectionArray.push(selectedGroupCGenre.value)
-  }
-  
-  editableBook.value.genre = activeSelectionArray.join('/') || null
-  customManualGenreText.value = editableBook.value.genre || ""
-}
-
-function syncManualGenreInput() {
-  editableBook.value.genre = customManualGenreText.value.trim().toUpperCase() || null
-}
-
-function removeGenreChip(chipToRemove: string) {
-  const remaining = liveCompiledGenreChips.value.filter((chip: string) => chip !== chipToRemove)
-  editableBook.value.genre = remaining.join('/') || null
-  if (selectedGroupAGenre.value === chipToRemove) selectedGroupAGenre.value = ""
-  if (selectedGroupBGenre.value === chipToRemove) selectedGroupBGenre.value = ""
-  if (selectedGroupCGenre.value === chipToRemove) selectedGroupCGenre.value = ""
-}
-
-function clearAllGenres() {
-  editableBook.value.genre = null
-  selectedGroupAGenre.value = ""
-  selectedGroupBGenre.value = ""
-  selectedGroupCGenre.value = ""
-  customManualGenreText.value = ""
-  showCustomManualGenreField.value = false
-}
-
-interface CatalogueGenreRecord {
-  id?: number | string
-  work_id?: number | string
-  serial_no?: number | string
-  title?: string
-  author?: string
-  genre?: string | null
-}
-
-async function harvestSystemGenresMatrix() {
-  try {
-    const pageSize = 100
-    let offset = 0
-    const genresFound = new Set<string>()
-    const seenPageSignatures = new Set<string>()
-
-    while (true) {
-      const response = await axios.get('/catalogue', {
-        params: { limit: pageSize, offset }
-      })
-
-      const rawItems: unknown = response.data?.data ?? response.data
-      const items: CatalogueGenreRecord[] = Array.isArray(rawItems)
-        ? rawItems as CatalogueGenreRecord[]
-        : []
-
-      if (items.length === 0) break
-
-      const pageSignature = JSON.stringify(
-        items.map((item: CatalogueGenreRecord) =>
-          item.id ??
-          item.work_id ??
-          item.serial_no ??
-          `${item.title ?? ''}|${item.author ?? ''}`
-        )
-      )
-
-      if (seenPageSignatures.has(pageSignature)) {
-        console.warn(
-          'Catalogue pagination appears not to advance; stopping genre harvest.'
-        )
-        break
-      }
-      seenPageSignatures.add(pageSignature)
-
-      items.forEach((item: CatalogueGenreRecord) => {
-        if (typeof item.genre === 'string' && item.genre.trim()) {
-          item.genre.split('/').forEach((g: string) => {
-            const clean = g.trim().toUpperCase()
-            if (
-              clean &&
-              !genreGroupA.value.includes(clean) &&
-              !genreGroupB.value.includes(clean)
-            ) {
-              genresFound.add(clean)
-            }
-          })
-        }
-      })
-
-      if (items.length < pageSize) break
-      offset += items.length
-    }
-
-    dynamicCommunityGenres.value = Array.from(genresFound)
-      .sort((a: string, b: string) => a.localeCompare(b))
-  } catch (err) {
-    console.error(
-      'Failed to dynamically harvest taxonomy metrics:', err
-    )
-  }
-}
-
+const authorSuggestions = ref<AuthoritySuggestion[]>([])
+const publisherSuggestions = ref<string[]>([])
+const showAuthorSuggestions = ref(false)
+const showPublisherSuggestions = ref(false)
+let debounceAuthorTimeout: any = null
+let debouncePublisherTimeout: any = null
 
 function searchAuthorsDebounced() {
   if (debounceAuthorTimeout) clearTimeout(debounceAuthorTimeout)
-
   debounceAuthorTimeout = setTimeout(async () => {
     const query = editableBook.value?.author?.trim() || ""
-
     if (query.length < 2) {
       authorSuggestions.value = []
       showAuthorSuggestions.value = false
       return
     }
-
     try {
-      const response = await axios.get('/authority/search', {
-        params: {
-          q: query,
-          usable_only: true,
-          limit: 10
-        }
-      })
-
-      authorSuggestions.value = Array.isArray(response.data)
-      ? response.data
-      : []
-
+      const response = await axios.get('/authority/search', { params: { q: query, usable_only: true, limit: 10 } })
+      authorSuggestions.value = Array.isArray(response.data) ? response.data : []
       showAuthorSuggestions.value = authorSuggestions.value.length > 0
-    } catch (err) {
-      console.error("Authority search failed:", err)
+    } catch {
       authorSuggestions.value = []
     }
   }, 200)
 }
 
-
 function searchPublishersDebounced() {
   if (debouncePublisherTimeout) clearTimeout(debouncePublisherTimeout)
   debouncePublisherTimeout = setTimeout(async () => {
-    const query = editableBook.value.publisher?.trim() || ""
+    const query = editableBook.value?.publisher?.trim() || ""
     if (query.length < 2) {
       publisherSuggestions.value = []
       showPublisherSuggestions.value = false
@@ -574,23 +1404,15 @@ function searchPublishersDebounced() {
       const response = await axios.get(`/catalogue/publishers/search?q=${encodeURIComponent(query)}`)
       publisherSuggestions.value = response.data || []
       showPublisherSuggestions.value = publisherSuggestions.value.length > 0
-    } catch (err) {
-      console.error("Publisher micro-lookup breakdown:", err)
+    } catch {
+      publisherSuggestions.value = []
     }
   }, 200)
 }
 
-
-function selectSuggestion(
-  type: 'author' | 'publisher',
-  value: AuthoritySuggestion | string
-) {
+function selectSuggestion(type: 'author' | 'publisher', value: AuthoritySuggestion | string) {
   if (type === 'author' && typeof value !== 'string') {
     editableBook.value.author = value.preferred_name
-
-    // Keep the selected registry record available for the next step.
-    selectedAuthority.value = value
-
     authorSuggestions.value = []
     showAuthorSuggestions.value = false
   } else if (type === 'publisher' && typeof value === 'string') {
@@ -599,7 +1421,6 @@ function selectSuggestion(
     showPublisherSuggestions.value = false
   }
 }
-
 
 function hideSuggestionsWithDelay(type: 'author' | 'publisher') {
   setTimeout(() => {
@@ -610,127 +1431,64 @@ function hideSuggestionsWithDelay(type: 'author' | 'publisher') {
 
 async function fetchRecordData() {
   loading.value = true
+  loadError.value = ''
   const id = route.params.id
   try {
-    await harvestSystemGenresMatrix()
-    const response = await axios.get(`/catalogue/${id}`)
+    if (!id) throw new Error('Record identifier is missing.')
+    await fetchLanguageOptions()
+    const response = await axios.get(`/catalogue/holding/${encodeURIComponent(String(id))}`)
+    if (!response.data) throw new Error('The server returned an empty record.')
     editableBook.value = { ...response.data }
-    // Save pristine deep copy for change detection
     pristineBook.value = JSON.parse(JSON.stringify(response.data))
-    
-    if (editableBook.value) {
-      parseCurrentGenresIntoDropdowns(editableBook.value.genre)
-    }
-  } catch (err) {
-    console.error("Database loading exception:", err)
+    setupComboboxValues()
+  } catch (err: any) {
+    loadError.value = err?.response?.data?.message || err?.message || 'Failed to load record.'
   } finally {
     loading.value = false
   }
 }
 
 function triggerActionConfirm(actionType: 'commit' | 'abort') {
-  // Saving is only allowed when at least one tracked field differs from the original record.
-  if (actionType === 'commit' && modifiedFieldsList.value.length === 0) {
-    triggerToastNotification('No changes to save.', 'error')
-    return
-  }
-
   if (actionType === 'commit') {
-    const year = Number(editableBook.value?.year)
-    const currentYear = new Date().getFullYear()
-    if (editableBook.value?.year !== null && editableBook.value?.year !== undefined && String(editableBook.value.year).trim() !== '' && (!/^\d{4}$/.test(String(editableBook.value.year)) || !Number.isInteger(year) || year < 1000 || year > currentYear)) {
-      triggerToastNotification(`Year must be between 1000 and ${currentYear}.`, 'error')
-      setTab('publication')
-      nextTick(() => document.getElementById('field-year')?.focus())
-      return
-    }
-
-    // Validate mandatory Text Language
-    if (!editableBook.value?.language || !editableBook.value.language.trim()) {
-      triggerToastNotification("Validation Error: Text Language is required.", "error")
-      setTab('languages')
-      return
-    }
-
-    // Validate mandatory Title
     if (!editableBook.value?.title || !editableBook.value.title.trim()) {
-      triggerToastNotification("Validation Error: Book Title cannot be empty.", "error")
+      triggerToastNotification("Validation Error: Title cannot be empty.", "error")
       setTab('work')
       return
     }
+    if (!editableBook.value?.language) {
+      triggerToastNotification("Validation Error: Language is required.", "error")
+      setTab('languages')
+      return
+    }
+    if (!isDdcValid.value) {
+      triggerToastNotification("Validation Error: Check DDC format (e.g. 894.812).", "error")
+      setTab('taxonomy')
+      return
+    }
   }
-
-  if (nativeIntervalReference) clearInterval(nativeIntervalReference)
-  
   activeModalType.value = actionType
   changeReason.value = ""
-  countdownTimerSeconds.value = 15
-  
-  nativeIntervalReference = setInterval(() => {
-    countdownTimerSeconds.value--
-    if (countdownTimerSeconds.value <= 0) {
-      clearInterval(nativeIntervalReference)
-      executeConfirmedAction()
-    }
-  }, 1000)
 }
 
 function executeConfirmedAction() {
-  const targetAction = activeModalType.value
-  
-  if (targetAction === 'commit') {
-    saveRecord()
-  } else if (targetAction === 'abort') {
-    cancelEdit()
-  }
+  if (activeModalType.value === 'commit') saveRecord()
+  else if (activeModalType.value === 'abort') router.push(`/details/${route.params.id || editableBook.value?.serial_no}`)
   closeModalPrompt()
 }
 
 function closeModalPrompt() {
-  if (nativeIntervalReference) clearInterval(nativeIntervalReference)
+  if (isSaving.value) return
   activeModalType.value = null
 }
 
 async function saveRecord() {
-  // Guard against saving unchanged data, including calls outside the disabled button.
-  if (modifiedFieldsList.value.length === 0) {
-    triggerToastNotification('No changes to save.', 'error')
-    return
-  }
-
+  if (isSaving.value) return
   const id = route.params.id || editableBook.value?.serial_no
-
-  if (!editableBook.value?.language || !editableBook.value.language.trim()) {
-    triggerToastNotification("Validation Error: Text Language is required.", "error")
-    setTab('languages')
-    return
-  }
-
-  if (!editableBook.value?.title || !editableBook.value.title.trim()) {
-    triggerToastNotification("Validation Error: Book Title cannot be empty.", "error")
-    setTab('work')
-    return
-  }
-
-  // Publication year is optional, but must be valid when provided.
-  const yearValue = editableBook.value.year
-  const currentYear = new Date().getFullYear()
-  if (yearValue !== null && yearValue !== undefined && String(yearValue).trim() !== '') {
-    const year = Number(yearValue)
-    if (!/^\d{4}$/.test(String(editableBook.value.year)) || !Number.isInteger(year) || year < 1000 || year > currentYear) {
-      triggerToastNotification(`Year must be between 1000 and ${currentYear}.`, 'error')
-      setTab('publication')
-      nextTick(() => document.getElementById('field-year')?.focus())
-      return
-    }
-    editableBook.value.year = year
-  }
-
+  isSaving.value = true
   try {
-    const operationalReason = changeReason.value.trim() || "Routine operational adjustment"
+    const operationalReason = changeReason.value.trim() || "Routine archival update"
     const token = authStore.accessToken || authStore.access_token
     
-    // 1. Database update with Auth & Reason headers
     await axios.patch(`/catalogue/${id}`, editableBook.value, {
       headers: {
         'X-Change-Reason': operationalReason,
@@ -738,39 +1496,22 @@ async function saveRecord() {
       }
     })
     
-    // 2. Client audit telemetry (Fail-soft)
     try {
-      await dispatchAuditTrail(
-        'UPDATE',
-        'CATALOGUE',
-        id,
-        `Updated record details for ${editableBook.value.title}`,
-        operationalReason,
-        null,
-        editableBook.value
-      )
-    } catch (auditErr) {
-      console.warn("Client audit telemetry skipped:", auditErr)
-    }
-    
-    triggerToastNotification("Authority modifications saved successfully.", "success")
-    
-    setTimeout(() => {
-      router.push(`/details/${id}`)
-    }, 1200)
-  } catch (err) {
-    console.error("Transaction commit rejected:", err)
-    triggerToastNotification("Write Failure: Transaction rejected by registry.", "error")
-  }
-}
+      await dispatchAuditTrail('UPDATE', 'CATALOGUE', id, `Updated record details for ${editableBook.value.title}`, operationalReason, null, editableBook.value)
+    } catch {}
 
-function cancelEdit() {
-  router.push(`/details/${route.params.id}`)
+    triggerToastNotification("Record saved successfully.", "success")
+    setTimeout(() => { router.push(`/details/${id}`) }, 800)
+  } catch {
+    triggerToastNotification("Write Failure: Transaction rejected by registry.", "error")
+  } finally {
+    isSaving.value = false
+  }
 }
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleEditorKeyboard)
-  if (nativeIntervalReference) clearInterval(nativeIntervalReference)
+  if (toastTimeout) clearTimeout(toastTimeout)
   if (debounceAuthorTimeout) clearTimeout(debounceAuthorTimeout)
   if (debouncePublisherTimeout) clearTimeout(debouncePublisherTimeout)
 })
@@ -782,504 +1523,875 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* ==========================================================================
-   1. CORE PAGE VARIABLES & LAYOUT BASICS
-   ================================================================---------- */
 :global(*) { box-sizing: border-box; }
 
 .edit-page {
-  --page: #f1f5f9;
-  --surface: #ffffff;
-  --surface-soft: #f8fafc;
-  --ink: #0f172a;
-  --muted: #64748b;
-  --line: #e2e8f0;
-  --line-strong: #cbd5e1;
-  --accent: #2563eb;
-  --accent-dark: #1d4ed8;
-  --accent-pale: #eff6ff;
-  --rose: #e0e7ff;
+  --page: #201424;
+  --surface: #2e1d33;
+  --surface-soft: #38233e;
+  --ink: #fbf5fc;
+  --muted: #bda5c7;
+  --line: #4d2f59;
+  --line-strong: #6c417d;
+  --accent: #a855f7;
+  --accent-dark: #9333ea;
+  --accent-pale: #432454;
   min-height: 100vh;
   background: var(--page);
   color: var(--ink);
-  font-family: "Noto Sans Malayalam", "Noto Sans", "Nirmala UI", "Kartika", "Arial Unicode MS", sans-serif;
-  padding-bottom: 84px;
+  font-family: inherit;
+  padding-bottom: 96px;
 }
 
-/* ==========================================================================
-   2. TYPOGRAPHY HIERARCHY (Headings, Inputs, and Field Values)
-   ================================================================---------- */
-/* Field Headings & Labels */
-.label-line label, 
-.field-block > label, 
-.confirm-modal label, 
-.search-label,
-.document-field > .document-field-label,
-.section-heading h3,
-.topbar h1 {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
-  font-weight: 800 !important;
-  color: #7b586d !important;
-  font-size: 14px;
-  letter-spacing: .025em;
-}
-
-/* Field Values & Inputs */
-.input-control,
-.search-wrap input,
-.textarea-control,
-.read-only-value,
-.document-field > strong, 
-.document-value-comparison strong,
-.document-current-value,
-.review-values span {
-  font-family: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif !important;
-  font-size: 15px !important;
-  font-weight: 500;
-  color: #20131b !important;
-}
-
-.input-control {
-  width: 100%;
-  min-width: 0;
-  min-height: 48px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: #f7f0ed;
-  padding: 10px 12px;
-  outline: none;
-  transition: border-color .15s, box-shadow .15s;
-}
-.input-control::placeholder { color: #b0a1a8; }
-.input-control:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #94678320; }
-.textarea-control { resize: vertical; min-height: 115px; line-height: 1.7; }
-
-/* ==========================================================================
-   3. PLAYFUL SIDEBAR STYLING
-   ================================================================---------- */
-.sidebar {
-  align-self: start;
+.topbar {
+  height: 64px;
   display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
-  position: sticky;
-  top: 178px;
-  max-height: calc(100vh - 198px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-}
-
-.sidebar,
-.sidebar-intro h2,
-.sidebar-intro p,
-.search-label,
-.search-wrap input {
-  font-family: 'Comic Sans MS', 'Chalkboard SE', 'Comic Neue', 'Bubblegum Sans', 'Trebuchet MS', sans-serif !important;
-}
-
-.sidebar-intro {
-  width: 100%;
-  margin: 0 0 20px;
-  padding: 0 0 18px;
-  background: transparent;
-  border: 0;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  background: #28172d;
   border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
-.sidebar-intro h2 { font: 700 20px Manrope, sans-serif; letter-spacing: -.04em; margin: 8px 0; }
-.sidebar-intro p, .editor-heading p, .section-heading p { font-size: 13px; line-height: 1.6; color: var(--muted); margin: 0; }
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.button-back {
+  background: #392242;
+  border: 1px solid var(--line-strong);
+  color: #fbf5fc;
+  padding: 0.4rem 0.8rem;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.button-back:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.kbd-badge {
+  background: #201424;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 0.08rem 0.35rem;
+  font-size: 0.65rem;
+  color: #e9d5ff;
+}
+
+.topbar-title h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.eyebrow {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #d8b4fe;
+  display: block;
+}
+
+.topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.record-pill {
+  padding: 0.25rem 0.75rem;
+  background: #392242;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e11d48;
+}
+
+.record-identity-bar {
+  position: sticky;
+  top: 64px;
+  z-index: 90;
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.55rem 2rem;
+  background: #2b1830;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.75rem;
+}
+
+.identity-item {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.identity-item span {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-weight: 700;
+  font-size: 0.65rem;
+}
+
+.identity-item strong {
+  color: #ffffff;
+  font-family: monospace;
+}
+
+.highlight-code {
+  color: #fb7185 !important;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 1.5rem;
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem;
+}
+
+.sidebar {
+  position: sticky;
+  top: 120px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.15rem;
+}
+
+.sidebar-intro h2 {
+  font-size: 1.05rem;
+  margin: 0.35rem 0;
+  color: #ffffff;
+}
+
+.sidebar-intro p {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.95rem;
+}
+
+.search-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
 
 .search-wrap {
   display: flex;
   align-items: center;
-  gap: 10px;
-  background: #f0e7e4;
-  border: 1px solid var(--line-strong);
-  border-radius: 9px;
-  padding: 0 12px;
-  margin-bottom: 18px;
-  color: var(--accent);
-  font-size: 20px;
-  min-height: 44px;
+  gap: 0.5rem;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  margin-bottom: 1rem;
 }
-.search-wrap input { width: 100%; height: 42px; border: 0; outline: 0; background: transparent; color: var(--ink); }
+
+.search-wrap input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #ffffff;
+  font-size: 0.82rem;
+  width: 100%;
+}
 
 .section-nav {
   display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 5px;
+  gap: 0.35rem;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   width: 100%;
-  margin: 0;
+  padding: 0.55rem 0.75rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #fbf5fc;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.nav-item:hover {
+  background: var(--surface-soft);
+}
+
+.nav-item.active {
+  background: var(--accent-pale);
+  border-color: var(--accent);
+}
+
+.nav-number {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.nav-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.nav-copy strong {
+  font-size: 0.8rem;
+}
+
+.nav-copy small {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.change-count {
+  background: #db2777;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.4rem;
+  border-radius: 999px;
+}
+
+.sidebar-bottom {
+  margin-top: 1.25rem;
+  padding-top: 0.95rem;
+  border-top: 1px solid var(--line);
+}
+
+.change-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.65rem;
+  font-size: 0.75rem;
+}
+
+.text-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
   padding: 0;
 }
 
-.section-nav .nav-item {
-  font-family: 'Comic Sans MS', 'Chalkboard SE', 'Comic Neue', 'Trebuchet MS', sans-serif !important;
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 20px;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  min-height: 56px;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: 14px !important;
-  background: transparent;
-  color: var(--ink);
-  cursor: pointer;
-  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.15s ease !important;
+.text-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
-.section-nav .nav-item:hover { transform: translateX(4px) scale(1.02); background: #e5d8dc; }
-.section-nav .nav-item.active { background-color: #f7d6e0 !important; border-color: #e0b1c5 !important; box-shadow: 0 4px 12px rgba(129, 87, 111, 0.15) !important; }
-.nav-number { font-family: 'Comic Sans MS', 'Chalkboard SE', 'Trebuchet MS', sans-serif !important; font-weight: 700; letter-spacing: -0.05em; color: #a18b96; }
-.section-nav .nav-item.active .nav-number { color: var(--accent); }
-.nav-copy { display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; align-self: center; }
-.nav-copy strong { font-size: 13px; font-weight: 700; line-height: 1.4; }
-.nav-copy small { font-size: 11px; color: var(--muted); line-height: 1.4; }
-.nav-arrow, .change-count { justify-self: end; }
-.change-count { min-width: 20px; height: 20px; border-radius: 7px; display: grid; place-items: center; background: #e7cbd6; color: #704258; font-size: 10px; font-weight: 700; }
 
-.sidebar-bottom { margin-top: 22px; padding: 16px 0 0; border-top: 1px solid var(--line); width: 100%; }
-.change-summary { display: flex; align-items: center; gap: 10px; }
-.summary-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; background: #e2d1da; color: var(--accent); font-size: 16px; }
-.change-summary div { display: grid; gap: 3px; }
-.change-summary strong { font-size: 13px; }
-.change-summary small { font-size: 11px; color: var(--muted); }
-.text-button { border: 0; background: transparent; color: var(--accent-dark); font: 600 11px 'DM Sans', sans-serif; padding: 9px 0; cursor: pointer; }
-.text-button:disabled { opacity: .35; cursor: default; }
-.sidebar-bottom > .text-button { margin-left: 42px; }
+.editor-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 1.25rem;
+}
 
-/* ==========================================================================
-   4. TOPBAR & RECORD IDENTIFIER BAR
-   ================================================================---------- */
-.topbar {
-  height: 82px;
+.editor-heading h2 {
+  font-size: 1.45rem;
+  margin: 0.25rem 0 0.15rem 0;
+  color: #ffffff;
+}
+
+.editor-heading p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.heading-actions {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 clamp(20px, 4vw, 64px);
-  background: #eee5e2;
+  gap: 0.65rem;
+}
+
+.change-chip {
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.change-chip.has-changes {
+  background: #9d174d;
+  color: #ffffff;
+  border-color: #f43f5e;
+}
+
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.form-section, .review-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1.4rem;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding-bottom: 0.85rem;
+  margin-bottom: 1.15rem;
   border-bottom: 1px solid var(--line);
-  position: sticky;
-  top: 0;
-  z-index: 130;
 }
-.brand-mark { width: 38px; height: 38px; display: grid; place-items: center; background: var(--accent); color: white; border-radius: 12px; font: 800 19px Manrope, sans-serif; }
-.topbar-title { display: flex; flex-direction: column; gap: 2px; }
-.eyebrow { font-size: 11px; letter-spacing: .15em; font-weight: 700; color: var(--accent); display: block; }
-.topbar h1 { margin: 0; letter-spacing: -.03em; }
-.topbar-meta { margin-left: auto; display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
-.record-pill { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f0e7e4; color: var(--ink); }
-.status-dot, .save-indicator { width: 7px; height: 7px; border-radius: 50%; background: #b7a3ad; display: inline-block; }
 
-/* Record Identifier Bar */
-.record-identity-bar {
-  position: sticky;
-  top: 82px;
-  z-index: 120;
+.section-index {
+  width: 32px;
+  height: 32px;
+  background: var(--accent-pale);
+  color: var(--accent);
+  border-radius: 8px;
   display: grid;
-  grid-template-columns: minmax(190px, 1.15fr) repeat(4, minmax(120px, 1fr));
-  align-items: stretch;
+  place-items: center;
+  font-weight: 800;
+  font-size: 0.8rem;
+}
+
+.section-heading h3 {
   margin: 0;
-  padding: 12px clamp(20px, 3vw, 44px);
-  background: #eee2e5f5;
-  border-top: 1px solid #d9c4cc;
-  border-bottom: 1px solid #d2b7c2;
-  box-shadow: 0 5px 16px rgba(73, 62, 67, .09);
-  backdrop-filter: blur(12px);
-}
-.identity-heading { display: flex; align-items: center; gap: 11px; min-width: 0; padding-right: 16px; }
-.identity-mark { display: grid; place-items: center; flex: 0 0 38px; height: 38px; border-radius: 11px; background: #946783; color: #fff; font: 800 11px 'DM Sans', sans-serif; letter-spacing: .04em; }
-.identity-heading > div { display: grid; gap: 4px; min-width: 0; }
-.identity-heading strong { font-family: 'Trebuchet MS', 'Segoe UI', sans-serif !important; font-weight: 700 !important; font-size: 12px !important; color: #493e43 !important; }
-.identity-heading small { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; font-size: 10px !important; letter-spacing: 0.1em !important; color: #7b4f69 !important; }
-.identity-value { display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 0; padding: 3px 15px; border-left: 1px solid #d5c0c8; }
-.identity-value span { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important; font-size: 10px !important; font-weight: 800; letter-spacing: 0.1em !important; text-transform: uppercase; color: #7b4f69 !important; }
-
-/* Unique Selector Rule for Identifier Bar Values Color & Font */
-.record-identity-bar .identity-value strong {
-  font-family: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif !important;
-  font-size: 14px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.02em !important;
-  color: #20131b !important;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
+  font-size: 0.95rem;
+  color: #f472b6;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-/* ==========================================================================
-   5. WORKSPACE & EDITOR CONTENT AREA
-   ================================================================---------- */
-.workspace {
+.section-heading p {
+  margin: 0.15rem 0 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.field-grid {
   display: grid;
-  grid-template-columns: minmax(230px, 250px) minmax(0, 1fr);
-  column-gap: 28px;
-  align-items: start;
-  width: 100%;
-  max-width: 1600px;
-  margin: 0 auto;
-  padding: 28px clamp(20px, 3vw, 44px) 42px;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.15rem 1.25rem;
 }
 
-.editor-area { width: 100%; min-width: 0; margin: 0; }
-.editor-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; margin: 0 0 24px; }
-.editor-heading h2 { font: 800 clamp(25px, 3vw, 32px) Manrope, sans-serif; letter-spacing: -.055em; margin: 7px 0 6px; }
-.required-star { color: #a94e6c; }
+.span-2 {
+  grid-column: span 2;
+}
 
-.heading-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-.change-chip { font-size: 11px; color: var(--muted); padding: 8px 10px; border: 1px solid var(--line); background: #f0e7e4; border-radius: 8px; white-space: nowrap; }
-.change-chip.has-changes { background: #ead3dc; border-color: #ebcbd6; color: #87465f; }
+.field-block {
+  display: flex;
+  flex-direction: column;
+}
 
-.button { min-height: 39px; border-radius: 9px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; font: 700 12px 'DM Sans', sans-serif; cursor: pointer; transition: background .15s, border-color .15s; }
-.button-quiet { border: 1px solid var(--line-strong); background: #f0e7e4; color: #6d5963; }
-.button-quiet:hover { background: #f7eef2; }
-.button-primary { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
-.button-primary:hover { background: var(--accent-dark); }
+.label-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
 
-.form-stack { display: grid; gap: 18px; }
-.form-section, .review-panel { background: #f0e7e4; border: 1px solid var(--line); border-radius: 14px; padding: 24px clamp(18px, 3vw, 30px); box-shadow: 0 3px 12px #5f40500a; min-width: 0; }
-.section-heading { display: flex; align-items: center; gap: 15px; padding-bottom: 19px; margin-bottom: 20px; border-bottom: 1px solid #eee4e7; }
-.section-index { flex: 0 0 36px; width: 36px; height: 36px; display: grid; place-items: center; background: #e2d1da; border-radius: 9px; color: var(--accent-dark); font: 800 11px Manrope, sans-serif; }
-.section-heading h3 { line-height: 1.35; margin: 0 0 4px; }
-.section-heading p { line-height: 1.5; }
+.label-line label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #e9d5ff;
+}
 
-.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 18px; }
-.field-block { min-width: 0; position: relative; }
-.span-2 { grid-column: span 2; }
-.label-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.label-line label { margin-bottom: 8px; }
+.required-star {
+  color: #f43f5e;
+}
 
-.field-help { font-size: 13px; color: var(--muted); margin: 9px 0 0; line-height: 1.5; }
-.read-only-value { min-height: 43px; height: 43px; display: flex; align-items: center; border: 1px dashed var(--line-strong); border-radius: 8px; background: #e8ddda; padding: 10px 12px; font-size: 12px; }
-.field-modified { padding: 10px; border: 1px solid #d6b2c1; background: #f0e1e5; border-radius: 10px; margin: -10px; }
-.modified-label { font-size: 9px; font-weight: 700; color: #704258; background: #e7cbd6; padding: 4px 7px; border-radius: 5px; margin-bottom: 7px; }
-.field-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; font-size: 10px; color: var(--muted); }
-.field-footer span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.field-footer button { border: 0; background: transparent; color: var(--accent-dark); font-size: 10px; font-weight: 700; cursor: pointer; }
+.modified-label {
+  font-size: 0.65rem;
+  background: #9d174d;
+  color: #fff;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
 
-#wrap-author { display: flex; flex-direction: column; gap: 0; padding-bottom: 2px; }
-#wrap-author .input-control { flex: 0 0 auto; }
-#wrap-author .field-footer { margin-top: 8px; }
-#wrap-title .input-control { font-size: 14px; line-height: 1.5; }
+.validation-error-tag {
+  font-size: 0.68rem;
+  color: #f87171;
+  font-weight: 700;
+}
 
-.genre-chips { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
-.genre-chip { display: inline-flex; align-items: center; gap: 8px; background: #e5d4de; border: 1px solid #cdb6c3; border-radius: 7px; padding: 6px 8px; color: #684257; font-size: 10px; font-weight: 700; }
-.genre-chip button { border: 0; background: transparent; color: #684257; font-size: 15px; line-height: 1; cursor: pointer; padding: 0; }
-.clear-genres { border: 0; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
-.genre-selects { gap: 14px; }
-.genre-selects .field-block label { font-size: 10px; }
+.input-control {
+  background: #231527;
+  border: 1px solid var(--line-strong);
+  color: #ffffff;
+  padding: 0.55rem 0.8rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  outline: none;
+  transition: all 0.15s ease;
+}
 
-.suggestion-list { position: absolute; top: calc(100% + 5px); left: 0; right: 0; z-index: 1000; background: #f0e7e4; border: 1px solid var(--line-strong); border-radius: 10px; box-shadow: 0 12px 28px #493e4320; overflow: hidden; max-height: 270px; overflow-y: auto; }
-.suggestion-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 0; border-bottom: 1px solid #f0e7eb; background: #f0e7e4; text-align: left; cursor: pointer; color: var(--ink); }
-.suggestion-item:last-child { border-bottom: 0; }
-.suggestion-item:hover { background: #f8edf3; }
-.suggestion-avatar { width: 30px; height: 30px; border-radius: 9px; background: #e2d1da; color: var(--accent-dark); display: grid; place-items: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
-.suggestion-copy { display: grid; gap: 4px; min-width: 0; flex: 1; }
-.suggestion-copy strong { font-size: 12px; overflow-wrap: anywhere; }
-.suggestion-copy small { font-size: 10px; color: var(--muted); }
-.suggestion-status { font-size: 9px; text-transform: uppercase; letter-spacing: .04em; color: #806274; background: #f3e9ef; border-radius: 5px; padding: 4px 6px; }
+.input-control:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.25);
+}
 
-.review-panel { margin-top: 18px; }
-.review-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.review-row { display: grid; grid-template-columns: minmax(130px, .7fr) minmax(0, 1.5fr) 28px; gap: 12px; align-items: center; padding: 12px 0; border-top: 1px solid #eee4e7; }
-.review-row > div:first-child { display: grid; gap: 4px; }
-.review-row strong { font-size: 11px; }
-.review-row small { font-size: 9px; color: var(--muted); }
-.review-values { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 10px; }
-.review-values span:not(.review-arrow) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; color: #887780; }
-.review-values span:last-child { color: #704a68; font-weight: 700; }
-.review-arrow { color: #b69eaa; }
-.undo-icon { width: 27px; height: 27px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--accent); font-size: 16px; cursor: pointer; }
+.input-invalid {
+  border-color: #ef4444 !important;
+  background: #34181f !important;
+}
 
-/* ==========================================================================
-   6. SAVE BAR & ACTION BUTTONS
-   ================================================================---------- */
+.custom-subfield {
+  margin-top: 0.45rem;
+  border-style: dashed;
+}
+
+.field-help {
+  margin: 0.35rem 0 0 0;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.field-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.field-footer button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+/* Genre Combobox Styles */
+.genre-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.genre-chip {
+  background: #9333ea;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.genre-chip button {
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.clear-genres {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.combobox-entry-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.quick-genre-hints {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+
+.quick-genre-hints small {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+
+.quick-pill {
+  background: #392242;
+  border: 1px solid var(--line);
+  color: #d8b4fe;
+  padding: 0.18rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.quick-pill:hover, .quick-pill.selected {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+/* Dimensions Row */
+.dimension-input-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dim-box {
+  width: 90px;
+  text-align: center;
+}
+
+.dim-separator {
+  font-size: 1.1rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.dim-unit-select {
+  width: 80px;
+}
+
+.input-with-unit {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-unit .input-control {
+  width: 100%;
+  padding-right: 3.5rem;
+}
+
+.unit-tag {
+  position: absolute;
+  right: 0.8rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.advanced-drawer {
+  background: #25162a;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.65rem 0.95rem;
+  font-size: 0.8rem;
+}
+
+.advanced-drawer summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #d8b4fe;
+  user-select: none;
+}
+
+.drawer-grid {
+  margin-top: 0.85rem;
+}
+
+/* Button & Savebar */
+.button {
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.button-quiet {
+  background: #362240;
+  border-color: var(--line-strong);
+  color: #fbf5fc;
+}
+
+.button-quiet:hover {
+  background: #472b54;
+}
+
+.button-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
 .savebar {
   position: fixed;
-  z-index: 20;
   bottom: 0;
   left: 0;
   right: 0;
-  min-height: 68px;
-  padding: 12px clamp(16px, 3vw, 44px);
+  height: 64px;
+  background: #28172d;
+  border-top: 1px solid var(--line);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 15px;
-  background: #eee5e2;
-  backdrop-filter: blur(14px);
-  border-top: 1px solid var(--line);
+  padding: 0 2rem;
+  z-index: 100;
 }
-.savebar-info { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; min-width: 0; flex: 1 1 auto; overflow: hidden; }
-.savebar-info .save-indicator { flex: 0 0 7px; }
-.savebar-info > span:last-child { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.save-indicator.dirty { background: #b85b79; box-shadow: 0 0 0 4px #f8e8ed; }
-.savebar-actions { display: flex; gap: 9px; flex: 0 0 auto; min-width: 0; }
+
+.save-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #734e87;
+  display: inline-block;
+  margin-right: 0.5rem;
+}
+
+.save-indicator.dirty {
+  background: #e11d48;
+  box-shadow: 0 0 6px #e11d48;
+}
 
 .button-save-action {
+  background: #c026d3;
   color: #ffffff;
-  background: #176b67;
-  border: 1px solid #176b67;
-  box-shadow: 0 3px 8px rgba(23, 107, 103, 0.18);
-}
-.button-save-action:hover:not(:disabled) { background: #10534f; border-color: #10534f; }
-.button-save-action:focus-visible { outline: 3px solid rgba(23, 107, 103, 0.28); outline-offset: 2px; }
-.button-save-action:disabled { color: #777b7b; background: #e3e5e4; border-color: #d4d8d6; box-shadow: none; cursor: not-allowed; opacity: 1; }
-
-/* ==========================================================================
-   7. MODALS, TOASTS & PREVIEW WINDOW
-   ================================================================---------- */
-.loading-state { min-height: 70vh; display: grid; align-content: center; justify-items: center; gap: 12px; color: var(--muted); font-size: 13px; }
-.loader { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.toast-message { position: fixed; z-index: 10002; top: 20px; right: 22px; max-width: min(420px, calc(100vw - 40px)); padding: 14px 18px; border-radius: 10px; background: #f0e7e4; border: 1px solid var(--line-strong); box-shadow: 0 10px 30px #493e4320; font-size: 12px; }
-.toast-message.success { border-left: 4px solid #946783; }
-.toast-message.error { border-left: 4px solid #ad526c; }
-
-.modal-backdrop { position: fixed; inset: 0; z-index: 10001; background: #352a31a6; display: grid; place-items: center; padding: 20px; }
-.confirm-modal { width: min(460px, 100%); background: #f0e7e4; border: 1px solid var(--line); border-radius: 16px; padding: 28px; box-shadow: 0 24px 70px #26172040; }
-.modal-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; background: #e2d1da; color: var(--accent-dark); font-size: 20px; margin-bottom: 17px; }
-.confirm-modal h2 { font: 800 23px Manrope, sans-serif; letter-spacing: -.04em; margin: 8px 0; }
-.confirm-modal p { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 0 0 20px; }
-.optional-label { font-weight: 400; color: var(--muted); }
-.countdown-note { font-size: 10px; color: var(--muted); margin-top: 10px; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 22px; }
-
-.search-results-note, .all-sections-note { background: #e6d8df; border: 1px solid #d0bbc6; border-radius: 9px; padding: 10px 13px; font-size: 11px; color: #5e4b55; margin: -10px 0 18px; }
-.search-results-note button { border: 0; background: transparent; color: var(--accent-dark); font-weight: 700; cursor: pointer; }
-.all-sections-note { background: #f0e7e4; color: var(--muted); }
-
-/* Document Preview Styles */
-.preview-backdrop { position: fixed; inset: 0; z-index: 10000; background: rgba(35, 26, 32, .72); display: grid; place-items: center; padding: 18px; }
-.document-preview { width: min(1050px, 100%); max-height: calc(100vh - 36px); display: flex; flex-direction: column; overflow: hidden; border-radius: 16px; background: #e8dfdc; box-shadow: 0 24px 80px rgba(20, 10, 18, .35); }
-.preview-toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 20px 26px; border-bottom: 1px solid #d0c0c5; background: #f2eae7; }
-.preview-toolbar h2 { margin: 5px 0; font: 800 22px Manrope, sans-serif; color: #40363b; }
-.preview-toolbar p { margin: 0; color: #76676e; font-size: 13px; }
-.preview-close { width: 36px; height: 36px; flex: 0 0 auto; border: 1px solid #cbb8c1; border-radius: 9px; background: #f8f1ee; color: #684257; font-size: 25px; cursor: pointer; }
-.document-sheet { width: min(820px, calc(100% - 32px)); margin: 22px auto; padding: 34px 42px; overflow-y: auto; background: #fffdf9; color: #393137; box-shadow: 0 5px 24px rgba(61, 41, 51, .13); }
-.document-brand { display: flex; align-items: center; gap: 12px; padding-bottom: 22px; border-bottom: 2px solid #81576f; }
-.document-monogram { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 10px; background: #81576f; color: white; font: 800 19px Manrope, sans-serif; }
-.document-brand div { display: grid; gap: 4px; }
-.document-brand strong { color: #684257; font: 800 12px Manrope, sans-serif; letter-spacing: .12em; }
-.document-brand small { color: #76676e; font-size: 11px; }
-.document-record-id { margin-left: auto; color: #76676e; font-size: 11px; text-align: right; }
-.document-title { margin: 28px 0 7px; color: #352b31; font: 800 30px/1.25 Manrope, sans-serif; overflow-wrap: anywhere; }
-.document-subtitle { margin: 0 0 24px; color: #76676e; font: 500 16px 'DM Sans', sans-serif; }
-.document-rule { height: 1px; background: #e4d8dd; margin-bottom: 24px; }
-.document-group { margin: 0 0 22px; }
-.document-group h3 { margin: 0 0 10px; color: #684257; font: 800 13px Manrope, sans-serif; letter-spacing: .035em; }
-.document-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-.document-field { position: relative; min-width: 0; display: grid; gap: 6px; padding: 12px 13px; border: 1px solid #e7dfe0; border-radius: 7px; background: #fffdfa; }
-.document-field > .document-field-label { display: block; color: #762b50; font: 800 13px/1.4 Manrope, sans-serif; letter-spacing: .025em; text-transform: uppercase; border-bottom: 1px solid #ead6df; padding-bottom: 7px; }
-.document-field > strong, .document-value-comparison strong { display: block; color: #29212a; font: 500 15px/1.65 'DM Sans', sans-serif; overflow-wrap: anywhere; white-space: pre-wrap; }
-.document-field-changed { border: 1.5px solid #c45b7a; background: #fff0f4; box-shadow: inset 4px 0 #c45b7a; padding-left: 16px; }
-.document-value-comparison { display: grid; gap: 8px; }
-.document-previous, .document-current { min-width: 0; padding: 9px 10px; border-radius: 6px; }
-.document-previous { background: #f2eeee; border: 1px solid #ded5d9; }
-.document-previous small, .document-current small { display: block; margin-bottom: 4px; font: 800 9px/1.4 Manrope, sans-serif; letter-spacing: .09em; }
-.document-previous small { color: #796c73; }
-.document-previous strong { color: #6e6269; font-size: 13px; font-weight: 400; text-decoration: line-through; text-decoration-color: #a99aa2; }
-.document-current { background: #ffe2eb; border: 1px solid #e5a8bc; box-shadow: inset 3px 0 #bd3f69; }
-.document-current small { color: #9c3157; }
-.document-current strong { color: #552039; font-weight: 700; }
-.document-current-value { padding-top: 2px; }
-.document-field em { justify-self: start; padding: 3px 6px; border-radius: 4px; background: #f4d5df; color: #8e3454; font: 800 9px Manrope, sans-serif; letter-spacing: .06em; font-style: normal; }
-.document-long-value { min-height: 24px; }
-.document-footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 28px; padding-top: 14px; border-top: 1px solid #e4d8dd; color: #76676e; font-size: 10px; }
-.preview-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 14px 22px; border-top: 1px solid #d0c0c5; background: #f2eae7; }
-.preview-legend { margin-right: auto; display: flex; align-items: center; gap: 8px; color: #76676e; font-size: 11px; }
-.preview-legend i { width: 12px; height: 12px; border: 1px solid #c45b7a; background: #fff0f4; border-radius: 3px; }
-
-/* ==========================================================================
-   8. MEDIA QUERIES & RESPONSIVENESS
-   ================================================================---------- */
-@media (max-width: 1050px) {
-  .record-identity-bar { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 10px; }
-  .identity-heading { grid-column: 1 / -1; padding: 0 0 9px; }
-  .identity-value:first-of-type { border-left: 0; padding-left: 0; }
+  border-color: #e879f9;
 }
 
-@media (max-width: 980px) {
-  .workspace { grid-template-columns: 220px minmax(0, 1fr); column-gap: 20px; padding: 24px 20px 38px; }
-  .editor-heading { align-items: flex-start; flex-direction: column; }
-  .heading-actions { justify-content: flex-start; align-items: flex-end; }
-  .section-nav .nav-copy small { display: none; }
+.button-save-action:hover:not(:disabled) {
+  background: #a21caf;
 }
 
-@media (max-width: 700px) {
-  .topbar { height: 70px; padding: 0 16px; }
-  .topbar-meta > span:not(.record-pill):not(.status-dot) { display: none; }
-  .record-identity-bar { position: sticky; top: 70px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px 14px; }
-  .identity-heading { grid-column: 1 / -1; }
-  .identity-value { min-height: 48px; padding: 7px 10px; border-left: 1px solid #d5c0c8; border-top: 1px solid #d5c0c8; }
-  .identity-value:nth-of-type(2n) { border-left: 0; padding-left: 0; }
-  .identity-value strong { font-size: 12px; }
-  
-  .workspace { display: block; width: 100%; padding: 20px 14px 28px; }
-  .sidebar { width: 100%; position: static; margin: 0 0 22px; max-height: none; overflow: visible; }
-  .sidebar-intro { border-bottom: 1px solid var(--line); padding-bottom: 14px; }
-  .sidebar-intro p { max-width: 420px; }
-  .search-label, .sidebar-bottom { display: none; }
-  .search-wrap { margin-bottom: 12px; }
-  
-  .section-nav { display: flex; flex-direction: row; align-items: stretch; overflow-x: auto; gap: 6px; padding-bottom: 5px; }
-  .section-nav .nav-item { display: flex; flex: 0 0 auto; width: auto; min-width: max-content; padding: 10px; background: #f0e7e4; }
-  .nav-number, .nav-arrow, .change-count { display: none; }
-  .nav-copy strong { white-space: nowrap; }
-
-  .editor-area { width: 100%; }
-  .editor-heading h2 { font-size: 27px; }
-  .form-section { padding: 19px 16px; }
-  .field-grid { grid-template-columns: minmax(0, 1fr); gap: 17px; }
-  .span-2 { grid-column: auto; }
-  .genre-selects { grid-template-columns: minmax(0, 1fr); }
-  
-  .review-row { grid-template-columns: 1fr 26px; }
-  .review-values { grid-column: 1/2; grid-row: 2; }
-  .undo-icon { grid-column: 2; grid-row: 1/3; }
-  .review-values span:not(.review-arrow) { max-width: 44%; }
-
-  .savebar { padding: 10px 14px; min-height: 68px; gap: 10px; }
-  .savebar-info { font-size: 10px; flex-basis: 0; }
-  .savebar-actions { gap: 6px; }
-  .button { padding: 0 10px; font-size: 11px; }
-
-  .preview-backdrop { padding: 0; }
-  .document-preview { width: 100%; max-height: 100vh; height: 100vh; border-radius: 0; }
-  .preview-toolbar { padding: 16px; }
-  .document-sheet { width: calc(100% - 20px); margin: 10px auto; padding: 22px 17px; }
-  .document-title { font-size: 24px; }
-  .document-fields { grid-template-columns: 1fr; }
-  .document-record-id { max-width: 100px; overflow-wrap: anywhere; }
-  .preview-actions { flex-wrap: wrap; padding: 12px; }
-  .preview-legend { flex: 1 0 100%; }
-  .preview-actions .button { flex: 1; }
-}
-/* --- PROPER SCOPED FIX FOR RECORD IDENTIFIER VALUES --- */
-:deep(.record-identity-bar) .identity-value strong {
-  font-family: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif !important;
-  font-size: 16px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.02em !important;
-  color: #14be47 !important;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
+.button-save-action:disabled {
+  background: #3b2842;
+  border-color: var(--line);
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
-@media (max-width: 420px) {
-  .savebar { align-items: flex-start; flex-direction: column; padding-top: 9px; padding-bottom: 9px; }
-  .savebar-info { width: 100%; flex: 0 0 auto; }
-  .savebar-actions { width: 100%; justify-content: flex-end; }
-  .edit-page { padding-bottom: 116px; }
+/* Modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(14, 7, 18, 0.78);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 1.5rem;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+.confirm-modal {
+  background: #321c38;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  padding: 1.6rem;
+  max-width: 440px;
+  width: 100%;
+}
+
+.modal-mark {
+  width: 36px;
+  height: 36px;
+  background: var(--accent-pale);
+  color: var(--accent);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 0.65rem;
+}
+
+.confirm-modal h2 {
+  margin: 0.25rem 0 0.5rem 0;
+  font-size: 1.25rem;
+  color: #fff;
+}
+
+.confirm-modal p {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-bottom: 1rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.toast-message {
+  position: fixed;
+  top: 1.5rem;
+  right: 1.5rem;
+  background: #362240;
+  border: 1px solid var(--line-strong);
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  z-index: 2000;
+}
+
+.toast-message.success {
+  border-left: 4px solid #10b981;
+}
+
+.toast-message.error {
+  border-left: 4px solid #ef4444;
+}
+/* Ensure the input container can hold an absolute dropdown */
+.relative-position {
+  position: relative;
+}
+
+/* Floating Suggestion Menu */
+.suggestion-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  margin-top: 4px;
+  background: #2b1830;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Individual Suggestion Item */
+.suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.suggestion-item:hover {
+  background: var(--accent-pale);
+}
+
+/* Avatar Badge (First Letter) */
+.suggestion-avatar {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 50%;
+  background: #472b54;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.8rem;
+  border: 1px solid var(--line-strong);
+}
+
+.suggestion-item:hover .suggestion-avatar {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+/* Text Container (Name & Subtitle) */
+.suggestion-copy {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.suggestion-copy strong {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-copy small {
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Status Badge (VERIFIED, etc.) */
+.suggestion-status {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #1e3a2f;
+  color: #34d399;
+  border: 1px solid #065f46;
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    position: static;
+    max-height: none;
+  }
+  .field-grid {
+    grid-template-columns: 1fr;
+  }
+  .span-2 {
+    grid-column: span 1;
+  }
 }
 </style>

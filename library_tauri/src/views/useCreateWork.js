@@ -49,18 +49,6 @@ export function useCreateWork() {
     series_number: "",
     volume_number: "",
     related_work_id: null,
-
-    extent_page_count: "",
-    physical_dimensions: "",
-    date_acquired: "",
-    collection_fonds: "",
-    physical_condition: "",
-    binding_type: "",
-    provenance_source: "",
-    artifactual_notes: "",
-    access_restrictions: "",
-    digital_scan_available: false,
-    ocr_status: "Unindexed"
   })
 
   const previewNumbers = ref({
@@ -83,7 +71,7 @@ export function useCreateWork() {
   let authorLocalSearchTimer = null
   let authorSearchGeneration = 0
 
-  function clearTitleLookupResults(resetQuery = true) {
+  function clearTitleLookupResults() {
     clearTimeout(titleLookupDebounceTimer)
     titleLookupRequestId++
     titleLookupResults.value = []
@@ -96,7 +84,7 @@ export function useCreateWork() {
     const currentId = ++titleLookupRequestId
     const q = String(query || form.value.title || "").trim()
     if (q.length < 2) {
-      clearTitleLookupResults(false)
+      clearTitleLookupResults()
       return
     }
     titleLookupLoading.value = true
@@ -128,9 +116,6 @@ export function useCreateWork() {
     clearTitleLookupResults()
   }
 
-  const lastImportedIsbn = ref("")
-  let isbnLookupRequestId = 0
-
   const metadataConflicts = ref([])
   const importedFieldNames = ref([])
   const lastImportedValues = ref({})
@@ -159,14 +144,6 @@ export function useCreateWork() {
   }
 
   const MAX_DRAFT_VERSIONS = 5
-
-  const scannerBuffer = ref("")
-  const scannerLastKeyAt = ref(0)
-  const scannerStartedAt = ref(0)
-  const scannerDetected = ref(false)
-  let scannerResetTimer = null
-
-  const callNumberPattern = ref("LANG-AUTHOR-YEAR")
   const callNumberPrefix = ref("")
 
   const seriesName = ref("")
@@ -175,16 +152,6 @@ export function useCreateWork() {
   const relatedWorkId = ref("")
 
   const extraLanguages = ref([])
-  const genreGroupA = ref(["Fiction", "Non-Fiction", "Reference", "Religious", "Poetry"])
-  const genreGroupB = ref([])
-  const dynamicCommunityGenres = ref([])
-
-  const selectedGroupAGenre = ref("")
-  const selectedGroupBGenre = ref("")
-  const selectedGroupCGenre = ref("")
-  const showCustomManualGenreField = ref(false)
-  const customManualGenreText = ref("")
-
   const adminOverride = ref(false)
   const isFrozen = ref(false)
 
@@ -202,7 +169,49 @@ export function useCreateWork() {
 
   let typingTimer = null
 
+  // Deduplicated & Normalized Language Registry
+  const standardLanguages = [
+    "Malayalam", "English", "Sanskrit", "Tamil", "Hindi",
+    "Arabic", "Bengali", "French", "German", "Gujarati",
+    "Kannada", "Latin", "Marathi", "Persian", "Prakrit",
+    "Punjabi", "Russian", "Spanish", "Telugu", "Urdu", "Multilingual"
+  ]
+
+  const availableLanguages = computed(() => {
+    const rawList = [
+      ...standardLanguages,
+      ...(Array.isArray(extraLanguages.value) ? extraLanguages.value : [])
+    ]
+    const cleaned = rawList
+      .map(lang => {
+        if (!lang) return ""
+        const trimmed = String(lang).trim()
+        if (trimmed.toLowerCase().replace(/[\s-]/g, "") === "multilingual") return "Multilingual"
+        return trimmed
+      })
+      .filter(Boolean)
+
+    const unique = Array.from(new Set(cleaned))
+    const priority = ["Malayalam", "English", "Sanskrit", "Tamil", "Hindi", "Multilingual"]
+
+    return unique.sort((a, b) => {
+      const idxA = priority.indexOf(a)
+      const idxB = priority.indexOf(b)
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB
+      if (idxA !== -1) return -1
+      if (idxB !== -1) return 1
+      return a.localeCompare(b)
+    })
+  })
+
+  // Strict Validation Rules
   const isYearValid = computed(() => !form.value.year || /^\d{4}$/.test(String(form.value.year)))
+  const isDdcValid = computed(() => {
+    const val = form.value.ddc
+    if (!val || String(val).trim() === "") return true
+    return /^\d{3}(\.\d+)?$/.test(String(val).trim())
+  })
+
   const cleanIsbnValue = computed(() => String(form.value.isbn || "").replace(/[^0-9X]/gi, "").toUpperCase())
 
   const isIsbnChecksumValid = computed(() => {
@@ -223,14 +232,6 @@ export function useCreateWork() {
     }
     return false
   })
- 
-  const fieldHints = {
-    isbn: "Enter 10 digits for ISBN-10 or 13 digits for ISBN-13.",
-    year: "Use the four-digit publication year.",
-    ddc: "Optional Dewey Decimal Classification.",
-    call_no: "Library call number.",
-    shelf: "Physical shelf location identifier."
-  }
 
   const isIsbnValid = computed(() => isIsbnChecksumValid.value)
   const isPasteIsbnReady = computed(() => {
@@ -239,12 +240,14 @@ export function useCreateWork() {
   })
   const isIsbnReadyForCatalogue = computed(() => !cleanIsbnValue.value || isIsbnChecksumValid.value)
 
+  // Non-empty readiness checks
   const readinessItems = computed(() => [
     { key: "title", value: !!String(form.value.title || "").trim() },
     { key: "language", value: !!String(form.value.language_id || "").trim() },
     { key: "author", value: !!String(form.value.author || "").trim() },
-    { key: "year", value: isYearValid.value },
-    { key: "isbn", value: isIsbnReadyForCatalogue.value }
+    { key: "year", value: !!String(form.value.year || "").trim() && isYearValid.value },
+    { key: "ddc", value: !!String(form.value.ddc || "").trim() && isDdcValid.value },
+    { key: "isbn", value: !!cleanIsbnValue.value && isIsbnChecksumValid.value }
   ])
 
   const readinessCount = computed(() => readinessItems.value.filter(item => item.value).length)
@@ -253,7 +256,6 @@ export function useCreateWork() {
 
   const hasDraftContent = computed(() =>
     Object.entries(form.value).some(([key, value]) => {
-      if (key === "digital_scan_available") return value === true
       return value !== null && value !== undefined && String(value).trim() !== ""
     }) || !!pasteInput.value.trim() || !!seriesName.value.trim() || !!seriesNumber.value.trim() || !!volumeNumber.value.trim() || !!relatedWorkId.value.trim()
   )
@@ -263,8 +265,62 @@ export function useCreateWork() {
   const publisherSuggestions = computed(() => autocompletePublishers.value)
 
   const liveCompiledGenreChips = computed(() =>
-    String(form.value.genre || "").split("/").map(s => s.trim()).filter(Boolean)
+    String(form.value.genre || "").split("/").map(s => s.trim().toUpperCase()).filter(Boolean)
   )
+
+  const popularIndianGenres = [
+    "NOVEL", "SHORT STORIES", "POETRY", "BIOGRAPHY", "DETECTIVE",
+    "HISTORICAL", "PHILOSOPHY", "DRAMA", "SATIRE", "FOLKLORE"
+  ]
+
+  function addGenreTag(tag) {
+    const raw = String(tag || "").replace(/,/g, '').trim().toUpperCase()
+    if (!raw) return
+    if (!liveCompiledGenreChips.value.includes(raw)) {
+      const updated = [...liveCompiledGenreChips.value, raw]
+      form.value.genre = updated.join('/')
+    }
+  }
+
+  function toggleGenrePill(tag) {
+    if (liveCompiledGenreChips.value.includes(tag)) {
+      removeGenreChip(tag)
+    } else {
+      addGenreTag(tag)
+    }
+  }
+
+  function removeGenreChip(tag) {
+    const updated = liveCompiledGenreChips.value.filter(t => t !== tag)
+    form.value.genre = updated.length ? updated.join('/') : ""
+  }
+
+  function clearAllGenres() {
+    form.value.genre = ""
+  }
+
+  function enforceNumbersOnly(event, fieldKey, maxLen) {
+    const input = event.target
+    let digits = input.value.replace(/\D/g, "")
+    if (maxLen && digits.length > maxLen) {
+      digits = digits.slice(0, maxLen)
+    }
+    if (fieldKey in form.value) {
+      form.value[fieldKey] = digits
+    }
+    input.value = digits
+  }
+
+  function formatIsbnOnBlur() {
+    const raw = form.value.isbn
+    if (!raw) return
+    const clean = String(raw).replace(/[-\s]/g, "")
+    if (clean.length === 13) {
+      form.value.isbn = `${clean.slice(0, 3)}-${clean.slice(3, 5)}-${clean.slice(5, 9)}-${clean.slice(9, 12)}-${clean.slice(12)}`
+    } else if (clean.length === 10) {
+      form.value.isbn = `${clean.slice(0, 1)}-${clean.slice(1, 4)}-${clean.slice(4, 9)}-${clean.slice(9)}`
+    }
+  }
 
   function markFieldImported(field, value) {
     if (!importedFieldNames.value.includes(field)) importedFieldNames.value.push(field)
@@ -298,27 +354,9 @@ export function useCreateWork() {
       const response = await axios.get("/catalogue/review/field-options")
       const data = response?.data || {}
       extraLanguages.value = Array.isArray(data.languages) ? data.languages : []
-      const genres = Array.isArray(data.genres) ? data.genres.map(value => String(value).trim()).filter(Boolean) : []
-      genreGroupB.value = genres.filter(g => !genreGroupA.value.some(a => a.toLowerCase() === g.toLowerCase())).slice(0, 100)
-      dynamicCommunityGenres.value = [...new Set(genres)].sort((a, b) => a.localeCompare(b))
     } catch (error) {
       console.warn("Could not load system options:", error)
     }
-  }
-
-  function syncGenreSelection() {
-    const values = [
-      selectedGroupAGenre.value,
-      selectedGroupBGenre.value,
-      selectedGroupCGenre.value,
-      ...String(customManualGenreText.value || "").split("/")
-    ].map(value => String(value || "").trim()).filter(Boolean)
-    form.value.genre = [...new Set(values)].join(" / ")
-    showCustomManualGenreField.value = true
-  }
-
-  function syncManualGenreInput() {
-    syncGenreSelection()
   }
 
   async function fetchNextNumbers() {
@@ -389,12 +427,28 @@ export function useCreateWork() {
         applyImportedField("year", "Publication year", res.data.year ? String(res.data.year) : "")
         if (res.data.genre) form.value.genre = String(res.data.genre).trim()
         applyImportedField("ddc", "DDC", res.data.ddc)
+        if (res.data.language) form.value.language_id = res.data.language
       }
       form.value.isbn = formatIsbnDisplay(normalizedIsbn)
     } catch (err) {
-      console.error(err)
+      console.error("ISBN Lookup failed:", err)
     } finally {
       isbnLoading.value = false
+    }
+  }
+
+  async function handleMetadataPaste() {
+    const raw = String(pasteInput.value || "").trim()
+    if (!raw) return
+
+    isParsing.value = true
+    try {
+      const digits = raw.replace(/[^0-9X]/gi, "").toUpperCase()
+      if (digits.length >= 10) {
+        await handleIsbnLookup(digits.slice(0, 13))
+      }
+    } finally {
+      isParsing.value = false
     }
   }
 
@@ -431,24 +485,6 @@ export function useCreateWork() {
     }
   }
 
-  async function auditDraftAction(action, snapshot) {
-    if (!snapshot?.draft_id) return
-    try {
-      await axios.post("/catalogue/draft-audit", {
-        draft_id: snapshot.draft_id,
-        action,
-        title: snapshot.form?.title || null,
-        mode: snapshot.mode || "manual",
-        fields: Object.keys(snapshot.form || {}),
-        changes: {},
-        saved_at: snapshot.saved_at || null,
-        note: "Local Work draft snapshot saved"
-      })
-    } catch (err) {
-      console.error("Draft audit failed:", err)
-    }
-  }
-
   function restoreDraftVersion(snapshot) {
     form.value = { ...form.value, ...snapshot.form }
     pasteInput.value = snapshot.pasteInput || ""
@@ -467,7 +503,6 @@ export function useCreateWork() {
     draftSavedAt.value = snapshot.saved_at
     setCleanDraftBaseline()
     if (!silent) result.value = { draft_saved: true, message: "Draft saved successfully." }
-    void auditDraftAction("SAVED", snapshot)
     return true
   }
 
@@ -475,6 +510,12 @@ export function useCreateWork() {
     const { silent = false } = options
     if (!hasDraftContent.value) return false
     return persistDraftSnapshot(draftSnapshot(silent ? "auto" : "manual"), { silent })
+  }
+
+  function hasMeaningfulDraftSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return false
+    const f = snapshot.form || {}
+    return Object.values(f).some(val => val !== null && val !== undefined && String(val).trim() !== "")
   }
 
   function loadPartialDraft() {
@@ -531,18 +572,6 @@ export function useCreateWork() {
     }
   }
 
-  async function handleMetadataPaste() {
-    const text = pasteInput.value.trim()
-    if (!text) return
-    isParsing.value = true
-    const isbnMatch = text.match(/(?:ISBN(?:[-\s]?1[03])?:?\s*)?([0-9X](?:[\s-]?[0-9X]){9,12})/i)
-    if (isbnMatch) {
-      const cleanIsbn = isbnMatch[1].replace(/[\s-]/g, "").toUpperCase()
-      await handleIsbnLookup(cleanIsbn)
-    }
-    isParsing.value = false
-  }
-
   function clearField(fieldName) {
     form.value[fieldName] = ""
     clearImportedFieldState(fieldName)
@@ -561,6 +590,10 @@ export function useCreateWork() {
   function triggerCreationPrompt() {
     if (!String(form.value.title || "").trim() || !String(form.value.language_id || "").trim()) {
       alert("Title and Language are mandatory fields.")
+      return
+    }
+    if (!isDdcValid.value) {
+      alert("Dewey Decimal (DDC) format error: Must be 3 digits followed by optional decimals (e.g. 894.812).")
       return
     }
     if (isChiefRegistration()) {
@@ -586,8 +619,12 @@ export function useCreateWork() {
       payload.language = form.value.language_id || null
       payload.series_name = seriesName.value.trim() || null
       payload.series_number = seriesNumber.value.trim() || null
-      payload.volume_number = volumeNumber.value.trim() || null
-      payload.related_work_id = relatedWorkId.value.trim() || null
+
+      const cleanVolume = String(volumeNumber.value || "").trim()
+      payload.volume_number = cleanVolume && !isNaN(cleanVolume) ? parseInt(cleanVolume, 10) : null
+
+      const cleanRelated = String(relatedWorkId.value || "").trim()
+      payload.related_work_id = cleanRelated && !isNaN(cleanRelated) ? parseInt(cleanRelated, 10) : null
 
       const isChief = isChiefRegistration()
       const operationalReason = String(creationReason.value || "").trim() || (isChief ? "Direct registration" : "Keeper submission")
@@ -605,11 +642,13 @@ export function useCreateWork() {
       await dispatchAuditTrail("CREATE", "CATALOGUE", result.value.work_id, `Registered work: ${payload.title}`, operationalReason)
 
       setTimeout(() => {
-        if (isChief) {
-          router.push({ path: "/chief/register-item", query: { work_id: result.value.work_id, language_id: payload.language } })
-        } else {
-          router.push("/docket")
-        }
+        router.push({
+          path: isChief ? "/chief/register-item" : "/catalogue/create-item",
+          query: {
+            work_id: result.value.work_id,
+            language_id: payload.language
+          }
+        })
       }, 400)
     } catch (err) {
       result.value = { error: err?.response?.data?.detail || err.message || "Submission failed" }
@@ -659,6 +698,33 @@ export function useCreateWork() {
     typingTimer = setTimeout(checkDuplicate, 350)
   })
 
+  watch(() => form.value.author, (newAuthor) => {
+    clearTimeout(authorLocalSearchTimer)
+    const query = String(newAuthor || "").trim()
+
+    if (query.length < 2) {
+      autocompleteAuthors.value = []
+      externalAuthorSuggestions.value = []
+      externalAuthorSearchLoading.value = false
+      return
+    }
+
+    const currentGeneration = ++authorSearchGeneration
+
+    authorLocalSearchTimer = setTimeout(async () => {
+      try {
+        const res = await axios.get("/authority/search", { 
+          params: { q: query, usable_only: true, limit: 10 } 
+        })
+        if (currentGeneration !== authorSearchGeneration) return
+        autocompleteAuthors.value = Array.isArray(res.data) ? res.data : []
+      } catch (err) {
+        if (currentGeneration !== authorSearchGeneration) return
+        autocompleteAuthors.value = []
+      }
+    }, 250)
+  })
+
   watch([duplicateResult, adminOverride], ([res, override]) => {
     isFrozen.value = res.severity === "strong" && !override
   }, { deep: true })
@@ -705,17 +771,11 @@ export function useCreateWork() {
     hasUnsavedChanges,
     draftOfferVisible,
     callNumberPrefix,
+    availableLanguages,
     extraLanguages,
-    genreGroupA,
-    genreGroupB,
-    dynamicCommunityGenres,
-    selectedGroupAGenre,
-    selectedGroupBGenre,
-    selectedGroupCGenre,
-    showCustomManualGenreField,
-    customManualGenreText,
     isFrozen,
     isIsbnValid,
+    isDdcValid,
     isPasteIsbnReady,
     cleanIsbnValue,
     isIsbnChecksumValid,
@@ -739,13 +799,19 @@ export function useCreateWork() {
     selectTitleCandidate,
     clearTitleLookupResults,
     liveCompiledGenreChips,
+    popularIndianGenres,
+    addGenreTag,
+    toggleGenrePill,
+    removeGenreChip,
+    clearAllGenres,
+    enforceNumbersOnly,
+    formatIsbnOnBlur,
     seriesName,
     seriesNumber,
     volumeNumber,
     relatedWorkId,
     duplicateResult,
     adminOverride,
-    fieldHints,
     savePartialDraft,
     clearPartialDrafts,
     restoreDraftVersion,
@@ -760,8 +826,6 @@ export function useCreateWork() {
     confirmPrefill,
     triggerCreationPrompt,
     executeConfirmedCreation,
-    syncGenreSelection,
-    syncManualGenreInput,
     applyGeneratedCallNumber,
     callNumberPreview,
     shelfSuggestion

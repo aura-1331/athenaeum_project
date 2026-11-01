@@ -1,12 +1,16 @@
+
 import { createApp } from "vue"
 import { createPinia } from "pinia"
 import piniaPluginPersistedstate from "pinia-plugin-persistedstate"
-import axios from "axios"
+import axios, {
+  type InternalAxiosRequestConfig,
+  type AxiosError,
+} from "axios"
 
 import App from "./App.vue"
-import router from "./router"
+import router from "./router/index.ts"
 
-import { useAuthStore } from "./stores/auth"
+import { useAuthStore } from "./stores/auth.ts"
 
 import "./assets/main.css"
 
@@ -28,7 +32,7 @@ const API_BASE =
 // CSRF
 // -------------------------
 
-function getCsrfToken() {
+function getCsrfToken(): string | null {
   const stored = localStorage.getItem("csrf_token")
 
   if (stored) {
@@ -44,30 +48,20 @@ function getCsrfToken() {
     : null
 }
 
-/*
- * Configure the main Axios client.
- *
- * All normal API requests such as:
- *   /dashboard/summary
- *   /catalogue/
- *   /status_audit/system-logs
- *
- * will now be sent to the backend API.
- */
+// -------------------------
+// API CONFIGURATION
+// -------------------------
+
 axios.defaults.baseURL = API_BASE
 axios.defaults.withCredentials = true
 
-/*
- * Attach the short-lived access token to normal
- * authenticated API requests.
- *
- * The access token exists only in Pinia memory.
- * It is NOT stored in localStorage.
- */
-// SECURITY: only talk "with the key in hand" to our own back office. Without this check,
-// any request made through axios to ANOTHER website (an update server, a lookup service,
-// a typo in a URL...) would also carry the user's login token and hand it over.
-function isRequestToOurApi(config) {
+// -------------------------
+// CHECK API REQUEST DESTINATION
+// -------------------------
+
+function isRequestToOurApi(
+  config: InternalAxiosRequestConfig
+): boolean {
   const url = String(config.url || "")
 
   if (/^https?:\/\//i.test(url)) {
@@ -75,44 +69,42 @@ function isRequestToOurApi(config) {
   }
 
   const base = String(config.baseURL || API_BASE)
+
   return base.startsWith(API_BASE)
 }
 
-axios.interceptors.request.use((config) => {
-  const token = auth.accessToken
+// -------------------------
+// REQUEST INTERCEPTOR
+// -------------------------
 
-  if (token && isRequestToOurApi(config)) {
-    config.headers = config.headers || {}
-    config.headers.Authorization = `Bearer ${token}`
+axios.interceptors.request.use(
+  (config: InternalAxiosRequestConfig) => {
+    const token = auth.accessToken
+
+    if (token && isRequestToOurApi(config)) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+
+    return config
   }
+)
 
-  return config
-})
+// -------------------------
+// REFRESH CLIENT
+// -------------------------
 
-/*
- * Separate Axios client for refresh operations.
- *
- * The refresh token is held by the browser in the
- * HttpOnly refresh_token cookie, so the frontend does
- * not read or store that token.
- */
 const refreshClient = axios.create({
   baseURL: API_BASE,
-  withCredentials: true
+  withCredentials: true,
 })
 
-let refreshPromise = null
+let refreshPromise: Promise<void> | null = null
 
-/*
- * Restore an existing authenticated session when the
- * application starts.
- *
- * The short-lived access token is intentionally kept
- * only in Pinia memory.
- *
- * The refresh token remains inside the HttpOnly cookie.
- */
-async function restoreSession() {
+// -------------------------
+// RESTORE SESSION
+// -------------------------
+
+async function restoreSession(): Promise<void> {
   const storedUser = localStorage.getItem("user")
 
   try {
@@ -124,13 +116,13 @@ async function restoreSession() {
       {
         headers: csrfToken
           ? {
-              "X-CSRF-Token": csrfToken
+              "X-CSRF-Token": csrfToken,
             }
-          : {}
+          : {},
       }
     )
 
-    const newAccessToken =
+    const newAccessToken: string | undefined =
       response.data?.access_token
 
     if (!newAccessToken) {
@@ -139,17 +131,10 @@ async function restoreSession() {
       )
     }
 
-    /*
-     * IMPORTANT:
-     * Access token is memory-only.
-     *
-     * Do NOT write it to localStorage.
-     */
+    // Access token remains memory-only.
     auth.accessToken = newAccessToken
 
-    /*
-     * Restore non-sensitive user identity information.
-     */
+    // Restore non-sensitive user information.
     if (storedUser) {
       try {
         const userObj = JSON.parse(storedUser)
@@ -184,12 +169,7 @@ async function restoreSession() {
     )
 
   } catch (error) {
-    /*
-     * No valid refresh session exists.
-     *
-     * Clear in-memory authentication state and remove
-     * any legacy access-token values left by older versions.
-     */
+    // Clear authentication state.
     auth.accessToken = null
     auth.refreshToken = null
 
@@ -203,21 +183,29 @@ async function restoreSession() {
   }
 }
 
-/*
- * Retry one authenticated request after an expired access token is
- * refreshed. Concurrent 401 responses share the same refresh operation.
- */
+// -------------------------
+// RESPONSE INTERCEPTOR
+// -------------------------
+
 axios.interceptors.response.use(
   (response) => response,
-  async (error) => {
-    const originalRequest = error.config
+
+  async (error: AxiosError) => {
+    const originalRequest = error.config as
+      | (InternalAxiosRequestConfig & {
+          _authRetry?: boolean
+        })
+      | undefined
+
     const status = error.response?.status
 
     if (
       status !== 401 ||
       !originalRequest ||
       originalRequest._authRetry ||
-      String(originalRequest.url || "").includes("/auth/refresh")
+      String(originalRequest.url || "").includes(
+        "/auth/refresh"
+      )
     ) {
       return Promise.reject(error)
     }
@@ -251,12 +239,10 @@ axios.interceptors.response.use(
   }
 )
 
-/*
- * Restore authentication before mounting the application.
- *
- * We deliberately do not use top-level await because
- * the current Vite build target does not support it.
- */
+// -------------------------
+// START APPLICATION
+// -------------------------
+
 restoreSession().finally(() => {
   app.use(router)
   app.mount("#app")

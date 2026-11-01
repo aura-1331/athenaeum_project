@@ -35,6 +35,7 @@
       </p>
     </div>
 
+    <!-- Section 01: Work Authority -->
     <section class="form-card">
       <div class="section-heading">
         <div class="section-number">01</div>
@@ -80,6 +81,7 @@
       </div>
     </section>
 
+    <!-- Section 02: Language Profile -->
     <section class="form-card">
       <div class="section-heading">
         <div class="section-number">02</div>
@@ -94,10 +96,14 @@
           <label>VOLUME COPY LANGUAGE</label>
           <select v-model="form.language_id">
             <option disabled value="">Select Language Profile</option>
-            <option value="ML">Malayalam (ML)</option>
-            <option value="EN">English (EN)</option>
-            <option value="MU">Multilingual (MU)</option>
-            <option value="GE">German (GE)</option>
+            <option value="Malayalam">Malayalam</option>
+            <option value="English">English</option>
+            <option value="Sanskrit">Sanskrit</option>
+            <option value="Tamil">Tamil</option>
+            <option value="Hindi">Hindi</option>
+            <option value="Multi -Lingual">Multilingual</option>
+            <option value="German">German</option>
+            <option value="French">French</option>
           </select>
         </div>
 
@@ -112,75 +118,161 @@
       </div>
     </section>
 
+    <!-- Section 03: Preservation & Physical Copy Artifact -->
     <section class="form-card">
       <div class="section-heading">
         <div class="section-number">03</div>
         <div>
-          <h2>Physical Artifact & Provenance</h2>
+          <h2>Physical Artifact & Preservation</h2>
           <p>Record physical dimensions, condition, acquisition history, and digital status.</p>
         </div>
       </div>
 
       <div class="section-body">
+        <!-- Strictly Numeric Extent/Pages -->
         <div class="field">
-          <label>EXTENT / PAGE COUNT</label>
-          <input v-model="form.extent_page_count" placeholder="e.g. xiv, 342 p." />
+          <label>EXTENT / PAGE COUNT (NUMBERS ONLY)</label>
+          <div class="input-with-unit">
+            <input 
+              v-model="form.extent_page_count" 
+              inputmode="numeric" 
+              placeholder="e.g. 420" 
+              @input="enforceNumbersOnly($event, 'extent_page_count')"
+            />
+            <span class="unit-tag">pages</span>
+          </div>
         </div>
 
+        <!-- Height × Width Dimensions -->
         <div class="field">
-          <label>PHYSICAL DIMENSIONS</label>
-          <input v-model="form.physical_dimensions" placeholder="e.g. 24 cm" />
+          <label>PHYSICAL DIMENSIONS (HEIGHT × WIDTH)</label>
+          <div class="dimension-input-group">
+            <input 
+              v-model="dimHeight" 
+              class="dim-box" 
+              inputmode="numeric" 
+              placeholder="Height" 
+              @input="syncDimensions" 
+            />
+            <span class="dim-separator">×</span>
+            <input 
+              v-model="dimWidth" 
+              class="dim-box" 
+              inputmode="numeric" 
+              placeholder="Width" 
+              @input="syncDimensions" 
+            />
+            <select v-model="dimUnit" class="dim-unit-select" @change="syncDimensions">
+              <option value="cm">cm</option>
+              <option value="mm">mm</option>
+              <option value="in">inches</option>
+            </select>
+          </div>
         </div>
 
+        <!-- Strict Date Acquired -->
         <div class="field">
           <label>DATE ACQUIRED</label>
-          <input v-model="form.date_acquired" type="date" />
+          <input v-model="form.date_acquired" type="date" :max="todayDateString" />
         </div>
 
+        <!-- Collection / Fonds -->
         <div class="field">
-          <label>COLLECTION / FONDS</label>
-          <input v-model="form.collection_fonds" placeholder="Named special collection" />
+          <label>COLLECTION / ARCHIVAL FONDS</label>
+          <input v-model="form.collection_fonds" placeholder="e.g. Rare Palm-Leaf Archival Fonds, Donor Collection" />
         </div>
 
+        <!-- Condition Combobox -->
         <div class="field">
           <label>PHYSICAL CONDITION</label>
-          <input v-model="form.physical_condition" placeholder="e.g. Fine, Good, Fragile" />
+          <select v-model="conditionSelectValue" @change="handleConditionSelectChange">
+            <option value="">Select Condition</option>
+            <option v-for="cond in conditionOptions" :key="cond" :value="cond">{{ cond }}</option>
+            <option value="__CUSTOM__">Other (Enter Manually)…</option>
+          </select>
+          <input 
+            v-if="conditionSelectValue === '__CUSTOM__'" 
+            v-model="form.physical_condition" 
+            class="custom-subfield" 
+            placeholder="Specify physical condition…" 
+          />
         </div>
 
+        <!-- Binding Type Combobox -->
         <div class="field">
           <label>BINDING TYPE</label>
-          <input v-model="form.binding_type" placeholder="e.g. Hardcover, Leather" />
+          <select v-model="bindingSelectValue" @change="handleBindingSelectChange">
+            <option value="">Select Binding</option>
+            <option v-for="b in bindingOptions" :key="b" :value="b">{{ b }}</option>
+            <option value="__CUSTOM__">Other (Enter Manually)…</option>
+          </select>
+          <input 
+            v-if="bindingSelectValue === '__CUSTOM__'" 
+            v-model="form.binding_type" 
+            class="custom-subfield" 
+            placeholder="Specify binding style…" 
+          />
         </div>
 
+        <!-- Provenance Source Combobox -->
         <div class="field full">
           <label>PROVENANCE SOURCE / DONOR</label>
-          <input v-model="form.provenance_source" placeholder="Source or vendor history" />
+          <select v-model="provenanceSelectValue" @change="handleProvenanceSelectChange">
+            <option value="">Select Provenance Source</option>
+            <option v-for="p in provenanceOptions" :key="p" :value="p">{{ p }}</option>
+            <option value="__CUSTOM__">Other (Specify Source/Donor)…</option>
+          </select>
+          <input 
+            v-if="provenanceSelectValue === '__CUSTOM__'" 
+            v-model="form.provenance_source" 
+            class="custom-subfield" 
+            placeholder="Enter donor name, vendor, or transfer authority…" 
+          />
+        </div>
+
+        <!-- Access Restrictions Combobox -->
+        <div class="field full">
+          <label>ACCESS RESTRICTIONS</label>
+          <select v-model="restrictionsSelectValue" @change="handleRestrictionsSelectChange">
+            <option value="">Select Circulation Policy</option>
+            <option v-for="r in restrictionOptions" :key="r" :value="r">{{ r }}</option>
+            <option value="__CUSTOM__">Other (Specify Restriction Policy)…</option>
+          </select>
+          <input 
+            v-if="restrictionsSelectValue === '__CUSTOM__'" 
+            v-model="form.access_restrictions" 
+            class="custom-subfield" 
+            placeholder="Specify restriction or reading room rule…" 
+          />
         </div>
 
         <div class="field full">
-          <label>ARTIFACTUAL NOTES</label>
-          <textarea v-model="form.artifactual_notes" placeholder="Bookplates, inscriptions, marginalia..." rows="2" style="width:100%; background:var(--input); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:10px;"></textarea>
+          <label>ARTIFACTUAL NOTES (INSCRIPTIONS, SEALS, MARGINALIA)</label>
+          <textarea v-model="form.artifactual_notes" placeholder="Bookplates, signatures, stamps, notations..." rows="2"></textarea>
         </div>
 
         <div class="field">
           <label>DIGITAL SCAN AVAILABLE</label>
           <select v-model="form.digital_scan_available">
-            <option :value="false">No</option>
-            <option :value="true">Yes</option>
+            <option :value="false">No (Unscanned)</option>
+            <option :value="true">Yes (Archived Scan Available)</option>
           </select>
         </div>
 
         <div class="field">
           <label>OCR STATUS</label>
           <select v-model="form.ocr_status">
-            <option value="Unindexed">Unindexed</option>
-            <option value="Indexed">Indexed</option>
-            <option value="Partial">Partial</option>
+            <option value="NOT_APPLICABLE">NOT_APPLICABLE</option>
+            <option value="PENDING">PENDING</option>
+            <option value="IN_PROGRESS">IN_PROGRESS</option>
+            <option value="COMPLETED">COMPLETED</option>
+            <option value="FAILED">FAILED</option>
           </select>
         </div>
       </div>
     </section>
 
+    <!-- Action Section -->
     <section class="action-card">
       <div>
         <span class="footer-label">
@@ -212,6 +304,7 @@
       </button>
     </section>
 
+    <!-- Results Display -->
     <div v-if="result && !result.error" class="result-card success">
       <div class="result-label">
         {{ isChief ? "ACCESSION NUMBER ALLOCATED" : "COPY SUBMITTED FOR VERIFICATION" }}
@@ -252,6 +345,7 @@
       <p>{{ result.error }}</p>
     </div>
 
+    <!-- Confirm Modal -->
     <div
       v-if="showPromptModal"
       class="modal-backdrop"
@@ -313,6 +407,7 @@ const authStore = useAuthStore()
 const { userRole: user_role } = storeToRefs(authStore)
 
 const isChief = computed(() => user_role.value === "The Chief")
+const todayDateString = computed(() => new Date().toISOString().split('T')[0])
 
 const themeMode = ref(
   document.documentElement.getAttribute("data-theme") ||
@@ -323,6 +418,90 @@ let themeObserver = null
 
 const showPromptModal = ref(false)
 const creationReason = ref("")
+
+// Dropdown options
+const conditionOptions = [
+  "Pristine / New",
+  "Good",
+  "Fair",
+  "Fragile / Brittle",
+  "Damaged / Requires Conservation",
+  "Restricted Handling"
+]
+const conditionSelectValue = ref("")
+
+const bindingOptions = [
+  "Hardcover",
+  "Paperback / Softcover",
+  "Leatherbound",
+  "Cloth / Buckram",
+  "Palm-Leaf Bundle",
+  "Spiral / Comb",
+  "Loose Sheets / Portfolio"
+]
+const bindingSelectValue = ref("")
+
+const provenanceOptions = [
+  "Purchase / Vendor",
+  "Gift / Personal Donation",
+  "Institutional Transfer",
+  "Bequest / Estate",
+  "Found in Collection"
+]
+const provenanceSelectValue = ref("")
+
+const restrictionOptions = [
+  "Open Access / General Circulation",
+  "Reference Room Only",
+  "Supervised Reading Room Only",
+  "Restricted / Rare Archive",
+  "Digitized Copy Only"
+]
+const restrictionsSelectValue = ref("")
+
+// Dimensions split
+const dimHeight = ref("")
+const dimWidth = ref("")
+const dimUnit = ref("cm")
+
+function syncDimensions() {
+  if (!dimHeight.value && !dimWidth.value) {
+    form.value.physical_dimensions = ""
+    return
+  }
+  form.value.physical_dimensions = `${dimHeight.value.trim()} × ${dimWidth.value.trim()} ${dimUnit.value}`
+}
+
+function enforceNumbersOnly(event, fieldKey) {
+  const input = event.target
+  const digits = input.value.replace(/\D/g, "")
+  form.value[fieldKey] = digits
+  input.value = digits
+}
+
+function handleConditionSelectChange() {
+  if (conditionSelectValue.value !== '__CUSTOM__') {
+    form.value.physical_condition = conditionSelectValue.value
+  }
+}
+
+function handleBindingSelectChange() {
+  if (bindingSelectValue.value !== '__CUSTOM__') {
+    form.value.binding_type = bindingSelectValue.value
+  }
+}
+
+function handleProvenanceSelectChange() {
+  if (provenanceSelectValue.value !== '__CUSTOM__') {
+    form.value.provenance_source = provenanceSelectValue.value
+  }
+}
+
+function handleRestrictionsSelectChange() {
+  if (restrictionsSelectValue.value !== '__CUSTOM__') {
+    form.value.access_restrictions = restrictionsSelectValue.value
+  }
+}
 
 const form = ref({
   work_id: "",
@@ -337,7 +516,7 @@ const form = ref({
   artifactual_notes: "",
   access_restrictions: "",
   digital_scan_available: false,
-  ocr_status: "Unindexed"
+  ocr_status: "NOT_APPLICABLE"
 })
 
 const result = ref(null)
@@ -350,9 +529,7 @@ watch(
   () => form.value.work_id,
   async (newVal) => {
     authority.value = null
-
     if (!newVal) return
-
     authorityLoading.value = true
 
     try {
@@ -387,7 +564,6 @@ function triggerCreationPrompt() {
 
 async function executeConfirmedCreation() {
   const reason = creationReason.value.trim()
-
   if (!reason) {
     alert("Reason for this catalogue action is required.")
     return
@@ -395,7 +571,6 @@ async function executeConfirmedCreation() {
 
   loading.value = true
   result.value = null
-
   showPromptModal.value = false
 
   try {
@@ -434,14 +609,13 @@ async function executeConfirmedCreation() {
       reason
     )
 
-    showPromptModal.value = false
-
     alert(
       isChief.value
         ? `Volume Copy Registered Successfully • ${res.data.accession_no}`
         : `Volume Copy Submitted for Verification • ${res.data.accession_no}`
     )
 
+    // Reset Form
     form.value.work_id = ""
     form.value.language_id = ""
     form.value.extent_page_count = ""
@@ -454,11 +628,18 @@ async function executeConfirmedCreation() {
     form.value.artifactual_notes = ""
     form.value.access_restrictions = ""
     form.value.digital_scan_available = false
-    form.value.ocr_status = "Unindexed"
+    form.value.ocr_status = "NOT_APPLICABLE"
+    
+    dimHeight.value = ""
+    dimWidth.value = ""
+    conditionSelectValue.value = ""
+    bindingSelectValue.value = ""
+    provenanceSelectValue.value = ""
+    restrictionsSelectValue.value = ""
+
     authority.value = null
     creationReason.value = ""
   } catch (err) {
-    showPromptModal.value = false
     result.value = {
       error: err.response?.data?.detail || "Failed to catalog copy"
     }
@@ -731,7 +912,8 @@ h1 {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   height: 50px;
   width: 100%;
   box-sizing: border-box;
@@ -745,20 +927,74 @@ h1 {
   transition: .18s ease;
 }
 
-.field input::placeholder {
+.field textarea {
+  height: auto;
+  padding: 10px 14px;
+  line-height: 1.5;
+}
+
+.field input::placeholder,
+.field textarea::placeholder {
   color: var(--muted);
   opacity: .82;
 }
 
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.field textarea:focus {
   border-color: var(--accent);
   background: var(--card-alt);
   box-shadow: 0 0 0 3px rgba(13, 148, 136, .11);
 }
 
+.custom-subfield {
+  margin-top: 8px;
+  border-style: dashed !important;
+}
+
+/* Dimensions Input Controls */
+.dimension-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dim-box {
+  width: 90px !important;
+  text-align: center;
+}
+
+.dim-separator {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.dim-unit-select {
+  width: 90px !important;
+}
+
+.input-with-unit {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-unit input {
+  padding-right: 65px;
+}
+
+.unit-tag {
+  position: absolute;
+  right: 14px;
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+}
+
 .theme-dark .field input,
-.theme-dark .field select {
+.theme-dark .field select,
+.theme-dark .field textarea {
   background: #181817;
 }
 

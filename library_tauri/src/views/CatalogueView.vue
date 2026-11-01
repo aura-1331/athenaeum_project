@@ -1,5 +1,694 @@
+<script setup>
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import axios from 'axios'
+
+const router = useRouter()
+const route = useRoute()
+
+// ---------- dropdown state ----------
+const pageDropdownOpen = ref(false)
+const allDropdownOpen = ref(false)
+
+function handleGlobalClick(e) {
+  if (!e.target.closest('.dropdown-wrapper')) {
+    pageDropdownOpen.value = false
+    allDropdownOpen.value = false
+  }
+}
+
+// ---------- toast state ----------
+const toastMessage = ref('')
+const toastType = ref('info')
+let toastTimer = null
+
+function showToast(msg, type = 'info', duration = 3500) {
+  clearTimeout(toastTimer)
+  toastMessage.value = msg
+  toastType.value = type
+  toastTimer = setTimeout(() => {
+    toastMessage.value = ''
+  }, duration)
+}
+
+// ---------- constants ----------
+const CATEGORIES = [
+  { name: 'Fiction', tone: 'rust' },
+  { name: 'Non-Fiction', tone: 'teal' },
+  { name: 'Reference', tone: 'ochre' },
+  { name: 'Religious', tone: 'plum' },
+  { name: 'Poetry', tone: 'moss' }
+]
+const SORTS = [
+  { key: 'serial_no', label: 'Serial number' },
+  { key: 'title', label: 'Title' },
+  { key: 'author', label: 'Author' },
+  { key: 'category', label: 'Category' },
+  { key: 'genre', label: 'Genre' },
+  { key: 'year', label: 'Year' },
+  { key: 'publisher', label: 'Publisher' },
+  { key: 'language', label: 'Language' },
+  { key: 'accession_no', label: 'Accession number' },
+  { key: 'work_id', label: 'Work ID' }
+]
+const SCOPES = [
+  { key: 'all', label: 'Everything', param: 'q', hint: 'Title, author, call no., ISBN, accession...' },
+  { key: 'title', label: 'Title', param: 'title', hint: 'Search titles...' },
+  { key: 'author', label: 'Author', param: 'author', hint: 'Search authors...' }
+]
+const FALLBACK_LANGUAGES = ['Malayalam', 'English', 'Multi -Lingual', 'Malay', 'Russian', 'Arabic', 'Marathi', 'German', 'Tamil']
+const PREF_KEY = 'athenaeum_catalogue_prefs'
+
+// ---------- state ----------
+const books = ref([])
+const total = ref(0)
+const grandTotal = ref(null)
+const loading = ref(true)
+const error = ref('')
+const exporting = ref(false)
+const exportProgress = ref('')
+const filtersOpen = ref(false)
+const copied = ref('')
+const searchEl = ref(null)
+const rootEl = ref(null)
+const isDark = ref(false)
+const listEl = ref(null)
+
+const text = ref('')
+const debouncedText = ref('')
+const scope = ref('all')
+const category = ref('')
+const language = ref('')
+const genre = ref('')
+const sortBy = ref('serial_no')
+const order = ref('asc')
+const pageSize = ref(15)
+const page = ref(1)
+const selectedSerial = ref(null)
+
+const details = ref({})
+const detailLoading = ref(false)
+const facets = ref({})
+const facetAll = ref(null)
+const languages = ref(FALLBACK_LANGUAGES)
+const genres = ref([])
+const isWide = ref(true)
+
+// ---------- full record metadata ----------
+const WORK_EXTRA = [
+  ['Original title', 'original_title'], ['Original author', 'original_author'], ['Translator', 'translator'],
+  ['Compiler / editor', 'compiler_editor'], ['Nature of work', 'work_nature'], ['Edition', 'edition_statement'],
+  ['Series', 'series_title'], ['Series volume', 'series_volume'], ['LCCN', 'lccn', true], ['OCLC no.', 'oclc_no', true],
+  ['Subjects', 'subject_headings'], ['Audience / era', 'target_audience_era'], ['Copyright', 'copyright_status']
+]
+const COPY_EXTRA = [
+  ['Condition', 'physical_condition'], ['Binding', 'binding_type'], ['Pages', 'extent_page_count'],
+  ['Dimensions', 'physical_dimensions'], ['Acquired', 'date_acquired'], ['Collection / fonds', 'collection_fonds'],
+  ['Provenance', 'provenance_source'], ['Access restrictions', 'access_restrictions'],
+  ['Digital scan', 'digital_scan_available'], ['OCR status', 'ocr_status'], ['Artifact notes', 'artifactual_notes']
+]
+function pickRows(source, spec) {
+  if (!source) return []
+  return spec
+    .map(([label, key, mono]) => {
+      let value = source[key]
+      if (typeof value === 'boolean') value = value ? 'Yes' : 'No'
+      return { label, value, mono: Boolean(mono) }
+    })
+    .filter(r => r.value !== null && r.value !== undefined && String(r.value).trim() !== '')
+}
+const extraGroups = computed(() => {
+  const d = details.value[selectedSerial.value]
+  const groups = [
+    { title: 'Bibliographic detail', rows: pickRows(d, WORK_EXTRA) },
+    { title: 'Physical copy', rows: pickRows(d, COPY_EXTRA) }
+  ]
+  return groups.filter(g => g.rows.length)
+})
+
+let detailTicket = 0
+async function fetchDetail(serial) {
+  if (serial === null || serial === undefined || details.value[serial] !== undefined) return
+  const ticket = ++detailTicket
+  detailLoading.value = true
+  try {
+    const res = await axios.get('/catalogue/' + serial)
+    details.value = { ...details.value, [serial]: res.data || {} }
+  } catch (e) {
+    details.value = { ...details.value, [serial]: null }
+  } finally {
+    if (ticket === detailTicket) detailLoading.value = false
+  }
+}
+watch(selectedSerial, fetchDetail)
+
+// ---------- derived ----------
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
+const from = computed(() => (total.value ? (page.value - 1) * pageSize.value + 1 : 0))
+const to = computed(() => Math.min(page.value * pageSize.value, total.value))
+const term = computed(() => debouncedText.value.trim())
+const hasFilters = computed(() => Boolean(term.value || category.value || language.value || genre.value))
+const activeCount = computed(() => [term.value, category.value, language.value, genre.value].filter(Boolean).length)
+const scopeObj = computed(() => SCOPES.find(s => s.key === scope.value) || SCOPES[0])
+const scopePlaceholder = computed(() => scopeObj.value.hint)
+const scopeLabel = computed(() => scopeObj.value.label)
+const selectedBook = computed(() => books.value.find(b => b.serial_no === selectedSerial.value) || null)
+
+const pageNumbers = computed(() => {
+  const n = totalPages.value, c = page.value
+  if (n <= 7) return Array.from({ length: n }, (_, i) => i + 1)
+  const set = new Set([1, 2, n - 1, n, c - 1, c, c + 1].filter(p => p >= 1 && p <= n))
+  const sorted = [...set].sort((a, b) => a - b)
+  const out = []
+  sorted.forEach((p, i) => { if (i && p - sorted[i - 1] > 1) out.push(-1); out.push(p) })
+  return out
+})
+
+// ---------- helpers ----------
+const PLACEHOLDER_AUTHOR = /^(author|unknown|n\/a|-+)$/i
+function hasAuthor(b) {
+  const a = String((b && b.author) || '').trim()
+  return Boolean(a) && !PLACEHOLDER_AUTHOR.test(a)
+}
+function authorText(b) { return hasAuthor(b) ? String(b.author).trim() : 'Author not recorded' }
+function metaLine(b) {
+  const year = Number(b.year) > 0 ? String(b.year) : ''
+  return [b.genre, year, b.publisher].filter(v => v && String(v).trim()).join(' \u00b7 ')
+}
+
+function toneOf(name) {
+  const hit = CATEGORIES.find(c => c.name === name)
+  return hit ? hit.tone : 'none'
+}
+
+function parts(value) {
+  const str = String(value ?? '')
+  const q = term.value
+  if (!q) return [{ t: str, hit: false }]
+  const lower = str.toLowerCase(), needle = q.toLowerCase()
+  const out = []
+  let i = 0
+  while (i < str.length) {
+    const at = lower.indexOf(needle, i)
+    if (at === -1) { out.push({ t: str.slice(i), hit: false }); break }
+    if (at > i) out.push({ t: str.slice(i, at), hit: false })
+    out.push({ t: str.slice(at, at + needle.length), hit: true })
+    i = at + needle.length
+  }
+  return out.length ? out : [{ t: str, hit: false }]
+}
+
+function factsOf(b) {
+  const rows = [
+    ['Author', b.author], ['Genre', b.genre], ['Year', b.year], ['Publisher', b.publisher],
+    ['Original language', b.original_language], ['Translation / compilation', b.translation_compilation],
+    ['ISBN', b.isbn, true], ['DDC', b.ddc, true], ['Call no.', b.call_no, true],
+    ['Accession no.', b.accession_no, true], ['Serial no.', b.serial_no, true], ['Work ID', b.work_id, true],
+    ['Shelf', b.shelf, true]
+  ]
+  return rows
+    .filter(r => r[1] !== null && r[1] !== undefined && String(r[1]).trim() !== '' && r[0] !== 'Author' && !(r[0] === 'Year' && !(Number(r[1]) > 0)))
+    .map(r => ({ label: r[0], value: r[1], mono: Boolean(r[2]) }))
+}
+
+function baseParams(withCategory) {
+  const p = {}
+  if (term.value) p[scopeObj.value.param] = term.value
+  if (withCategory && category.value) p.category = category.value
+  if (language.value) p.language = language.value
+  if (genre.value) p.genre = genre.value
+  return p
+}
+
+function friendly(err) {
+  const status = err && err.response && err.response.status
+  if (status === 401) return 'Your session has expired. Please sign in again.'
+  if (status === 403) return 'You do not have permission to view the catalogue.'
+  if (status === 400) return (err.response.data && err.response.data.detail) || 'The server did not accept that search.'
+  return 'The catalogue could not be loaded. Check your connection and try again.'
+}
+
+// ---------- loading ----------
+let requestId = 0
+
+async function fetchPage() {
+  const id = ++requestId
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await axios.get('/catalogue', {
+      params: { ...baseParams(true), page: page.value, limit: pageSize.value, sort_by: sortBy.value, order: order.value }
+    })
+    if (id !== requestId) return
+    const data = res.data || {}
+    books.value = Array.isArray(data.data) ? data.data : []
+    total.value = Number(data.total || 0)
+    if (!books.value.some(b => b.serial_no === selectedSerial.value)) {
+      selectedSerial.value = isWide.value && books.value.length ? books.value[0].serial_no : null
+    }
+  } catch (err) {
+    if (id !== requestId) return
+    books.value = []
+    total.value = 0
+    error.value = friendly(err)
+    if (err && err.response && err.response.status === 401) router.push('/login')
+  } finally {
+    if (id === requestId) loading.value = false
+  }
+}
+
+let facetId = 0
+async function fetchFacets() {
+  const id = ++facetId
+  const base = { ...baseParams(false), page: 1, limit: 1 }
+  const calls = [axios.get('/catalogue', { params: base }), ...CATEGORIES.map(c => axios.get('/catalogue', { params: { ...base, category: c.name } }))]
+  const results = await Promise.allSettled(calls)
+  if (id !== facetId) return
+  const count = r => (r.status === 'fulfilled' ? Number((r.value.data || {}).total || 0) : undefined)
+  facetAll.value = count(results[0]) ?? null
+  const next = {}
+  CATEGORIES.forEach((c, i) => { next[c.name] = count(results[i + 1]) })
+  facets.value = next
+}
+
+async function fetchEverythingCount() {
+  try {
+    const res = await axios.get('/catalogue', { params: { page: 1, limit: 1 } })
+    grandTotal.value = Number((res.data || {}).total || 0)
+  } catch (e) { /* silent */ }
+}
+
+async function fetchOptions() {
+  try {
+    const res = await axios.get('/catalogue/review/field-options')
+    const d = res.data || {}
+    if (Array.isArray(d.languages) && d.languages.length) languages.value = d.languages
+    if (Array.isArray(d.genres)) genres.value = d.genres
+  } catch (e) { /* silent */ }
+}
+
+function reload() { fetchPage(); fetchFacets() }
+
+// ---------- actions ----------
+function goTo(n) {
+  if (n < 1 || n > totalPages.value || n === page.value) return
+  page.value = n
+  fetchPage()
+  nextTick(() => { if (listEl.value) listEl.value.scrollIntoView({ block: 'start', behavior: 'smooth' }) })
+}
+function pick(book) {
+  if (isWide.value) selectedSerial.value = book.serial_no
+  else openBook(book)
+}
+function openBook(book) { router.push('/details/' + book.serial_no) }
+function clearSearch() { text.value = ''; debouncedText.value = '' }
+function clearAll() { clearSearch(); category.value = ''; language.value = ''; genre.value = '' }
+
+async function copy(value, key) {
+  try {
+    await navigator.clipboard.writeText(String(value))
+    copied.value = key
+    showToast('Accession number copied to clipboard!', 'success', 2000)
+    setTimeout(() => { if (copied.value === key) copied.value = '' }, 1600)
+  } catch (e) { 
+    copied.value = '' 
+    showToast('Failed to copy to clipboard', 'error', 2500)
+  }
+}
+
+
+function onListKey(e) {
+  if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return
+  if (!books.value.length) return
+
+  const idx = books.value.findIndex(
+    b => b.serial_no === selectedSerial.value
+  )
+
+  if (e.key === 'Enter') {
+    if (
+      idx >= 0 &&
+      e.target?.classList?.contains('row')
+    ) {
+      e.preventDefault()
+      openBook(books.value[idx])
+    }
+    return
+  }
+
+  e.preventDefault()
+
+  const nextIdx = idx < 0
+    ? 0
+    : Math.min(
+        books.value.length - 1,
+        Math.max(0, idx + (e.key === 'ArrowDown' ? 1 : -1))
+      )
+
+  selectedSerial.value = books.value[nextIdx].serial_no
+
+  nextTick(() => {
+    const rows = listEl.value?.querySelectorAll('.row') || []
+    rows[nextIdx]?.focus()
+  })
+}
+
+
+function onGlobalKey(e) {
+  const tag = (e.target && e.target.tagName) || ''
+  if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) {
+    e.preventDefault()
+    filtersOpen.value = true
+    nextTick(() => searchEl.value && searchEl.value.focus())
+  }
+}
+
+// ---------- export wrappers (CSV & backend-generated PDF) ----------
+function csvEscape(v) {
+  return '"' + String(v ?? '').replace(/"/g, '""') + '"'
+}
+
+const EXPORT_COLUMNS = [
+  'serial_no', 'work_id', 'accession_no', 'title', 'author',
+  'category', 'genre', 'language', 'year', 'publisher',
+  'isbn', 'ddc', 'call_no', 'shelf', 'record_id'
+]
+
+function makeCsv(rows) {
+  return [
+    EXPORT_COLUMNS.join(','),
+    ...rows.map(row => EXPORT_COLUMNS.map(key => csvEscape(row[key])).join(','))
+  ].join('\r\n')
+}
+
+function downloadFile(content, mimeType, filename) {
+  const blob = new Blob(
+    [mimeType.includes('csv') ? '\ufeff' : '', content],
+    { type: mimeType }
+  )
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+
+async function exportPdfFromServer(params, filename) {
+  try {
+    const response = await axios.get('/catalogue/export/pdf', {
+      params,
+      responseType: 'blob'
+    })
+
+    const contentType = response.headers?.['content-type'] || ''
+
+    // A successful PDF response should have a PDF content type.
+    if (
+      !contentType.toLowerCase().includes('application/pdf')
+    ) {
+      const body = await response.data.text()
+      let message = 'The server did not return a valid PDF.'
+
+      try {
+        const parsed = JSON.parse(body)
+        message = parsed.detail || message
+      } catch {
+        if (body.trim()) message = body.slice(0, 500)
+      }
+
+      throw new Error(message)
+    }
+
+    downloadBlob(response.data, filename)
+    showToast('PDF downloaded successfully.', 'success', 3500)
+  } catch (err) {
+    console.error('PDF export failed:', err)
+
+    let message = err.message || 'Could not generate the PDF. Please try again.'
+
+    if (err.response?.data instanceof Blob) {
+      try {
+        const body = await err.response.data.text()
+
+        try {
+          const parsed = JSON.parse(body)
+          message = parsed.detail || message
+        } catch {
+          if (body.trim()) message = body.slice(0, 500)
+        }
+      } catch {
+        // Retain the existing error message.
+      }
+    }
+
+    showToast(message, 'error', 5000)
+  }
+}
+
+
+async function exportPage(format) {
+  pageDropdownOpen.value = false
+
+  if (!books.value.length) {
+    showToast('There are no records to export on this page.', 'info')
+    return
+  }
+
+  if (format === 'csv') {
+    downloadFile(
+      makeCsv(books.value),
+      'text/csv;charset=utf-8;',
+      `catalogue-page-${page.value}.csv`
+    )
+    showToast('Page CSV downloaded.', 'success')
+    return
+  }
+
+  exporting.value = true
+  try {
+    await exportPdfFromServer(
+      {
+        ...baseParams(true),
+        page: page.value,
+        limit: pageSize.value,
+        sort_by: sortBy.value,
+        order: order.value,
+        scope: 'page'
+      },
+      `catalogue-page-${page.value}.pdf`
+    )
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function exportAll(format) {
+  allDropdownOpen.value = false
+
+  if (!total.value) {
+    showToast('There are no matching records to export.', 'info')
+    return
+  }
+
+  if (format === 'pdf') {
+    exporting.value = true
+    exportProgress.value = 'PDF'
+    try {
+      await exportPdfFromServer(
+        {
+          ...baseParams(true),
+          sort_by: sortBy.value,
+          order: order.value,
+          scope: 'all'
+        },
+        'catalogue-matches.pdf'
+      )
+    } finally {
+      exporting.value = false
+      exportProgress.value = ''
+    }
+    return
+  }
+
+  // CSV export retains the existing paginated API workflow and 5,000-row cap.
+  exporting.value = true
+  exportProgress.value = ''
+  const rows = []
+  const cap = 5000
+  const expected = Math.min(total.value, cap)
+
+  try {
+    for (let p = 1; rows.length < expected; p++) {
+      exportProgress.value = `${rows.length} / ${expected}`
+      const res = await axios.get('/catalogue', {
+        params: {
+          ...baseParams(true),
+          page: p,
+          limit: 100,
+          sort_by: sortBy.value,
+          order: order.value
+        }
+      })
+      const chunk = Array.isArray(res.data?.data) ? res.data.data : []
+      if (!chunk.length) break
+      rows.push(...chunk)
+      if (chunk.length < 100) break
+    }
+
+    if (!rows.length) {
+      showToast('No matching records were returned for export.', 'info')
+      return
+    }
+
+    downloadFile(makeCsv(rows), 'text/csv;charset=utf-8;', 'catalogue-matches.csv')
+
+    if (rows.length < total.value) {
+      showToast(
+        `Downloaded ${rows.length} records. The CSV export is capped at ${cap} records.`,
+        'info',
+        5000
+      )
+    } else {
+      showToast('All matching records exported to CSV.', 'success')
+    }
+  } catch (err) {
+    error.value = 'The export stopped early: ' + friendly(err)
+    showToast('CSV export interrupted: ' + friendly(err), 'error', 5000)
+  } finally {
+    exporting.value = false
+    exportProgress.value = ''
+  }
+}
+
+// ---------- remember state ----------
+function syncUrl() {
+  const q = {}
+  if (term.value) q.q = term.value
+  if (scope.value !== 'all') q.in = scope.value
+  if (category.value) q.cat = category.value
+  if (language.value) q.lang = language.value
+  if (genre.value) q.genre = genre.value
+  if (sortBy.value !== 'serial_no') q.sort = sortBy.value
+  if (order.value !== 'asc') q.order = order.value
+  if (page.value > 1) q.page = String(page.value)
+  if (pageSize.value !== 15) q.size = String(pageSize.value)
+  router.replace({ query: q }).catch(() => {})
+}
+function savePrefs() {
+  try { localStorage.setItem(PREF_KEY, JSON.stringify({ pageSize: pageSize.value, sortBy: sortBy.value, order: order.value })) } catch (e) { /* storage unavailable */ }
+}
+function loadState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PREF_KEY) || '{}')
+    if ([15, 30, 60, 100].includes(saved.pageSize)) pageSize.value = saved.pageSize
+    if (SORTS.some(s => s.key === saved.sortBy)) sortBy.value = saved.sortBy
+    if (saved.order === 'asc' || saved.order === 'desc') order.value = saved.order
+  } catch (e) { /* ignore */ }
+  const q = route.query
+  const one = v => (Array.isArray(v) ? v[0] : v) || ''
+  if (one(q.q)) { text.value = one(q.q); debouncedText.value = one(q.q) }
+  if (SCOPES.some(s => s.key === one(q.in))) scope.value = one(q.in)
+  if (CATEGORIES.some(c => c.name === one(q.cat))) category.value = one(q.cat)
+  language.value = one(q.lang)
+  genre.value = one(q.genre)
+  if (SORTS.some(s => s.key === one(q.sort))) sortBy.value = one(q.sort)
+  if (one(q.order) === 'asc' || one(q.order) === 'desc') order.value = one(q.order)
+  if ([15, 30, 60, 100].includes(Number(one(q.size)))) pageSize.value = Number(one(q.size))
+  const p = parseInt(one(q.page), 10)
+  if (p > 0) page.value = p
+}
+
+// ---------- reactions ----------
+let debounceTimer = null
+watch(text, v => {
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(() => { debouncedText.value = v }, 350)
+})
+
+let ready = false
+watch([debouncedText, scope, category, language, genre, sortBy, order, pageSize], (now, before) => {
+  if (!ready) return
+  const facetsChanged = now[0] !== before[0] || now[1] !== before[1] || now[3] !== before[3] || now[4] !== before[4]
+  page.value = 1
+  fetchPage()
+  if (facetsChanged) fetchFacets()
+  savePrefs()
+  syncUrl()
+})
+watch(page, () => { if (ready) syncUrl() })
+
+function channelsOf(css) {
+  const m = String(css).match(/rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)(?:[ ,/]+([\d.]+))?/)
+  return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null
+}
+function detectDark() {
+  const html = document.documentElement
+  const body = document.body
+  const hints = [html.getAttribute('data-theme'), body && body.getAttribute('data-theme'), html.className, body && body.className].join(' ').toLowerCase()
+  if (/(^|[^a-z])(dark|night)([^a-z]|$)/.test(hints)) { isDark.value = true; return }
+  let el = rootEl.value ? rootEl.value.parentElement : null
+  while (el) {
+    const c = channelsOf(getComputedStyle(el).backgroundColor)
+    if (c && c.a > 0.5) { isDark.value = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) < 115; return }
+    el = el.parentElement
+  }
+  isDark.value = false
+}
+let themeObserver = null
+function watchTheme() {
+  detectDark()
+  themeObserver = new MutationObserver(records => {
+    if (records.some(r => r.target.contains(rootEl.value) && r.target !== rootEl.value)) requestAnimationFrame(detectDark)
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ['class', 'data-theme', 'style'] })
+}
+
+function onResize() { isWide.value = window.matchMedia('(min-width: 1200px)').matches }
+
+onMounted(async () => {
+  onResize()
+  watchTheme()
+  window.addEventListener('resize', onResize)
+  window.addEventListener('keydown', onGlobalKey)
+  window.addEventListener('click', handleGlobalClick)
+  loadState()
+  await fetchPage()
+  ready = true
+  fetchFacets()
+  fetchEverythingCount()
+  fetchOptions()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  window.removeEventListener('keydown', onGlobalKey)
+  window.removeEventListener('click', handleGlobalClick)
+  clearTimeout(debounceTimer)
+  if (themeObserver) themeObserver.disconnect()
+})
+</script>
+
 <template>
   <div ref="rootEl" class="cat" :class="{ 'filters-open': filtersOpen, dark: isDark }">
+    <!-- ================= TOAST NOTIFICATION ================= -->
+    <div v-if="toastMessage" class="toast" :class="toastType" role="status" aria-live="polite">
+      <span>{{ toastMessage }}</span>
+    </div>
+
     <!-- ================= HEADER ================= -->
     <header class="cat-head">
       <div class="head-title">
@@ -14,10 +703,28 @@
         <button type="button" class="btn ghost filters-toggle" @click="filtersOpen = !filtersOpen">
           Filters<span v-if="activeCount" class="badge">{{ activeCount }}</span>
         </button>
-        <button type="button" class="btn ghost" :disabled="exporting || !books.length" @click="exportCsv(false)">Export page</button>
-        <button type="button" class="btn solid" :disabled="exporting || !total" @click="exportCsv(true)">
-          {{ exporting ? 'Exporting ' + exportProgress + '...' : 'Export all matches' }}
-        </button>
+
+        <!-- Export Page Dropdown -->
+        <div class="dropdown-wrapper">
+          <button type="button" class="btn ghost" :disabled="exporting || !books.length" @click.stop="pageDropdownOpen = !pageDropdownOpen; allDropdownOpen = false">
+            Export page ▼
+          </button>
+          <div v-if="pageDropdownOpen" class="dropdown-menu" @click.stop>
+            <button type="button" @click="exportPage('csv')">As CSV</button>
+            <button type="button" @click="exportPage('pdf')">As PDF</button>
+          </div>
+        </div>
+
+        <!-- Export All Matches Dropdown -->
+        <div class="dropdown-wrapper">
+          <button type="button" class="btn solid" :disabled="exporting || !total" @click.stop="allDropdownOpen = !allDropdownOpen; pageDropdownOpen = false">
+            {{ exporting ? 'Exporting ' + exportProgress + '...' : 'Export all matches ▼' }}
+          </button>
+          <div v-if="allDropdownOpen" class="dropdown-menu" @click.stop>
+            <button type="button" @click="exportAll('csv')">As CSV</button>
+            <button type="button" @click="exportAll('pdf')">As PDF</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -203,6 +910,18 @@
               <dd :class="{ mono: f.mono }">{{ f.value }}</dd>
             </template>
           </dl>
+          <template v-if="extraGroups.length">
+            <details v-for="g in extraGroups" :key="g.title" class="card-more" open>
+              <summary>{{ g.title }}</summary>
+              <dl class="card-facts">
+                <template v-for="f in g.rows" :key="f.label">
+                  <dt>{{ f.label }}</dt>
+                  <dd :class="{ mono: f.mono }">{{ f.value }}</dd>
+                </template>
+              </dl>
+            </details>
+          </template>
+          <p v-else-if="detailLoading" class="card-loading">Loading full record...</p>
           <div v-if="selectedBook.notes" class="card-notes"><b>Notes</b><p>{{ selectedBook.notes }}</p></div>
           <div class="card-actions">
             <button type="button" class="btn solid" @click="openBook(selectedBook)">Open full record &rarr;</button>
@@ -220,417 +939,14 @@
   </div>
 </template>
 
-<script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import axios from 'axios'
-
-const router = useRouter()
-const route = useRoute()
-
-// ---------- constants ----------
-const CATEGORIES = [
-  { name: 'Fiction', tone: 'rust' },
-  { name: 'Non-Fiction', tone: 'teal' },
-  { name: 'Reference', tone: 'ochre' },
-  { name: 'Religious', tone: 'plum' },
-  { name: 'Poetry', tone: 'moss' }
-]
-const SORTS = [
-  { key: 'serial_no', label: 'Serial number' },
-  { key: 'title', label: 'Title' },
-  { key: 'author', label: 'Author' },
-  { key: 'category', label: 'Category' },
-  { key: 'genre', label: 'Genre' },
-  { key: 'year', label: 'Year' },
-  { key: 'publisher', label: 'Publisher' },
-  { key: 'language', label: 'Language' },
-  { key: 'accession_no', label: 'Accession number' },
-  { key: 'work_id', label: 'Work ID' }
-]
-const SCOPES = [
-  { key: 'all', label: 'Everything', param: 'q', hint: 'Title, author, call no., ISBN, accession...' },
-  { key: 'title', label: 'Title', param: 'title', hint: 'Search titles...' },
-  { key: 'author', label: 'Author', param: 'author', hint: 'Search authors...' }
-]
-const FALLBACK_LANGUAGES = ['Malayalam', 'English', 'Multi -Lingual', 'Malay', 'Russian', 'Arabic', 'Marathi', 'German', 'Tamil']
-const PREF_KEY = 'athenaeum_catalogue_prefs'
-
-// ---------- state ----------
-const books = ref([])
-const total = ref(0)
-const grandTotal = ref(null)
-const loading = ref(true)
-const error = ref('')
-const exporting = ref(false)
-const exportProgress = ref('')
-const filtersOpen = ref(false)
-const copied = ref('')
-const searchEl = ref(null)
-const rootEl = ref(null)
-const isDark = ref(false)
-const listEl = ref(null)
-
-const text = ref('')
-const debouncedText = ref('')
-const scope = ref('all')
-const category = ref('')
-const language = ref('')
-const genre = ref('')
-const sortBy = ref('serial_no')
-const order = ref('asc')
-const pageSize = ref(15)
-const page = ref(1)
-const selectedSerial = ref(null)
-
-const facets = ref({})
-const facetAll = ref(null)
-const languages = ref(FALLBACK_LANGUAGES)
-const genres = ref([])
-const isWide = ref(true)
-
-// ---------- derived ----------
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
-const from = computed(() => (total.value ? (page.value - 1) * pageSize.value + 1 : 0))
-const to = computed(() => Math.min(page.value * pageSize.value, total.value))
-const term = computed(() => debouncedText.value.trim())
-const hasFilters = computed(() => Boolean(term.value || category.value || language.value || genre.value))
-const activeCount = computed(() => [term.value, category.value, language.value, genre.value].filter(Boolean).length)
-const scopeObj = computed(() => SCOPES.find(s => s.key === scope.value) || SCOPES[0])
-const scopePlaceholder = computed(() => scopeObj.value.hint)
-const scopeLabel = computed(() => scopeObj.value.label)
-const selectedBook = computed(() => books.value.find(b => b.serial_no === selectedSerial.value) || null)
-
-const pageNumbers = computed(() => {
-  const n = totalPages.value, c = page.value
-  if (n <= 7) return Array.from({ length: n }, (_, i) => i + 1)
-  const set = new Set([1, 2, n - 1, n, c - 1, c, c + 1].filter(p => p >= 1 && p <= n))
-  const sorted = [...set].sort((a, b) => a - b)
-  const out = []
-  sorted.forEach((p, i) => { if (i && p - sorted[i - 1] > 1) out.push(-1); out.push(p) })
-  return out
-})
-
-// ---------- helpers ----------
-const PLACEHOLDER_AUTHOR = /^(author|unknown|n\/a|-+)$/i
-function hasAuthor(b) {
-  const a = String((b && b.author) || '').trim()
-  return Boolean(a) && !PLACEHOLDER_AUTHOR.test(a)
-}
-function authorText(b) { return hasAuthor(b) ? String(b.author).trim() : 'Author not recorded' }
-function metaLine(b) {
-  const year = Number(b.year) > 0 ? String(b.year) : ''
-  return [b.genre, year, b.publisher].filter(v => v && String(v).trim()).join(' \u00b7 ')
-}
-
-function toneOf(name) {
-  const hit = CATEGORIES.find(c => c.name === name)
-  return hit ? hit.tone : 'none'
-}
-
-function parts(value) {
-  const str = String(value ?? '')
-  const q = term.value
-  if (!q) return [{ t: str, hit: false }]
-  const lower = str.toLowerCase(), needle = q.toLowerCase()
-  const out = []
-  let i = 0
-  while (i < str.length) {
-    const at = lower.indexOf(needle, i)
-    if (at === -1) { out.push({ t: str.slice(i), hit: false }); break }
-    if (at > i) out.push({ t: str.slice(i, at), hit: false })
-    out.push({ t: str.slice(at, at + needle.length), hit: true })
-    i = at + needle.length
-  }
-  return out.length ? out : [{ t: str, hit: false }]
-}
-
-function factsOf(b) {
-  const rows = [
-    ['Author', b.author], ['Genre', b.genre], ['Year', b.year], ['Publisher', b.publisher],
-    ['Original language', b.original_language], ['Translation / compilation', b.translation_compilation],
-    ['ISBN', b.isbn, true], ['DDC', b.ddc, true], ['Call no.', b.call_no, true],
-    ['Accession no.', b.accession_no, true], ['Serial no.', b.serial_no, true], ['Work ID', b.work_id, true],
-    ['Shelf', b.shelf, true]
-  ]
-  return rows
-    .filter(r => r[1] !== null && r[1] !== undefined && String(r[1]).trim() !== '' && r[0] !== 'Author' && !(r[0] === 'Year' && !(Number(r[1]) > 0)))
-    .map(r => ({ label: r[0], value: r[1], mono: Boolean(r[2]) }))
-}
-
-function baseParams(withCategory) {
-  const p = {}
-  if (term.value) p[scopeObj.value.param] = term.value
-  if (withCategory && category.value) p.category = category.value
-  if (language.value) p.language = language.value
-  if (genre.value) p.genre = genre.value
-  return p
-}
-
-function friendly(err) {
-  const status = err && err.response && err.response.status
-  if (status === 401) return 'Your session has expired. Please sign in again.'
-  if (status === 403) return 'You do not have permission to view the catalogue.'
-  if (status === 400) return (err.response.data && err.response.data.detail) || 'The server did not accept that search.'
-  return 'The catalogue could not be loaded. Check your connection and try again.'
-}
-
-// ---------- loading ----------
-let requestId = 0
-
-async function fetchPage() {
-  const id = ++requestId
-  loading.value = true
-  error.value = ''
-  try {
-    const res = await axios.get('/catalogue', {
-      params: { ...baseParams(true), page: page.value, limit: pageSize.value, sort_by: sortBy.value, order: order.value }
-    })
-    if (id !== requestId) return
-    const data = res.data || {}
-    books.value = Array.isArray(data.data) ? data.data : []
-    total.value = Number(data.total || 0)
-    if (!books.value.some(b => b.serial_no === selectedSerial.value)) {
-      selectedSerial.value = isWide.value && books.value.length ? books.value[0].serial_no : null
-    }
-  } catch (err) {
-    if (id !== requestId) return
-    books.value = []
-    total.value = 0
-    error.value = friendly(err)
-    if (err && err.response && err.response.status === 401) router.push('/login')
-  } finally {
-    if (id === requestId) loading.value = false
-  }
-}
-
-let facetId = 0
-async function fetchFacets() {
-  const id = ++facetId
-  const base = { ...baseParams(false), page: 1, limit: 1 }
-  const calls = [axios.get('/catalogue', { params: base }), ...CATEGORIES.map(c => axios.get('/catalogue', { params: { ...base, category: c.name } }))]
-  const results = await Promise.allSettled(calls)
-  if (id !== facetId) return
-  const count = r => (r.status === 'fulfilled' ? Number((r.value.data || {}).total || 0) : undefined)
-  facetAll.value = count(results[0]) ?? null
-  const next = {}
-  CATEGORIES.forEach((c, i) => { next[c.name] = count(results[i + 1]) })
-  facets.value = next
-}
-
-async function fetchEverythingCount() {
-  try {
-    const res = await axios.get('/catalogue', { params: { page: 1, limit: 1 } })
-    grandTotal.value = Number((res.data || {}).total || 0)
-  } catch (e) { /* the header simply keeps showing ... */ }
-}
-
-async function fetchOptions() {
-  try {
-    const res = await axios.get('/catalogue/review/field-options')
-    const d = res.data || {}
-    if (Array.isArray(d.languages) && d.languages.length) languages.value = d.languages
-    if (Array.isArray(d.genres)) genres.value = d.genres
-  } catch (e) { /* other roles keep the built-in language list */ }
-}
-
-function reload() { fetchPage(); fetchFacets() }
-
-// ---------- actions ----------
-function goTo(n) {
-  if (n < 1 || n > totalPages.value || n === page.value) return
-  page.value = n
-  fetchPage()
-  nextTick(() => { if (listEl.value) listEl.value.scrollIntoView({ block: 'start', behavior: 'smooth' }) })
-}
-function pick(book) {
-  if (isWide.value) selectedSerial.value = book.serial_no
-  else openBook(book)
-}
-function openBook(book) { router.push('/details/' + book.serial_no) }
-function clearSearch() { text.value = ''; debouncedText.value = '' }
-function clearAll() { clearSearch(); category.value = ''; language.value = ''; genre.value = '' }
-
-async function copy(value, key) {
-  try {
-    await navigator.clipboard.writeText(String(value))
-    copied.value = key
-    setTimeout(() => { if (copied.value === key) copied.value = '' }, 1600)
-  } catch (e) { copied.value = '' }
-}
-
-function onListKey(e) {
-  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return
-  const idx = books.value.findIndex(b => b.serial_no === selectedSerial.value)
-  if (e.key === 'Enter') {
-    if (idx >= 0 && e.target && e.target.classList && e.target.classList.contains('row')) { e.preventDefault(); openBook(books.value[idx]) }
-    return
-  }
-  e.preventDefault()
-  const nextIdx = Math.min(books.value.length - 1, Math.max(0, idx + (e.key === 'ArrowDown' ? 1 : -1)))
-  selectedSerial.value = books.value[nextIdx].serial_no
-  nextTick(() => {
-    const rows = listEl.value ? listEl.value.querySelectorAll('.row') : []
-    if (rows[nextIdx]) rows[nextIdx].focus()
-  })
-}
-
-function onGlobalKey(e) {
-  const tag = (e.target && e.target.tagName) || ''
-  if (e.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(tag)) {
-    e.preventDefault()
-    filtersOpen.value = true
-    nextTick(() => searchEl.value && searchEl.value.focus())
-  }
-}
-
-// ---------- export ----------
-function csvEscape(v) { return '"' + String(v ?? '').replace(/"/g, '""') + '"' }
-
-async function exportCsv(all) {
-  const columns = ['serial_no', 'work_id', 'accession_no', 'title', 'author', 'category', 'genre', 'language', 'year', 'publisher', 'isbn', 'ddc', 'call_no', 'shelf', 'record_id']
-  let rows = books.value
-  if (all) {
-    exporting.value = true
-    rows = []
-    try {
-      const cap = 5000
-      for (let p = 1; rows.length < Math.min(total.value, cap); p++) {
-        exportProgress.value = rows.length + ' / ' + Math.min(total.value, cap)
-        const res = await axios.get('/catalogue', { params: { ...baseParams(true), page: p, limit: 100, sort_by: sortBy.value, order: order.value } })
-        const chunk = (res.data && res.data.data) || []
-        if (!chunk.length) break
-        rows = rows.concat(chunk)
-      }
-    } catch (err) {
-      error.value = 'The export stopped early: ' + friendly(err)
-    } finally { exporting.value = false; exportProgress.value = '' }
-  }
-  if (!rows.length) return
-  const csv = [columns.join(','), ...rows.map(r => columns.map(k => csvEscape(r[k])).join(','))].join('\r\n')
-  const blob = new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = all ? 'catalogue-matches.csv' : 'catalogue-page-' + page.value + '.csv'
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-// ---------- remember state (URL + preferences) ----------
-function syncUrl() {
-  const q = {}
-  if (term.value) q.q = term.value
-  if (scope.value !== 'all') q.in = scope.value
-  if (category.value) q.cat = category.value
-  if (language.value) q.lang = language.value
-  if (genre.value) q.genre = genre.value
-  if (sortBy.value !== 'serial_no') q.sort = sortBy.value
-  if (order.value !== 'asc') q.order = order.value
-  if (page.value > 1) q.page = String(page.value)
-  if (pageSize.value !== 15) q.size = String(pageSize.value)
-  router.replace({ query: q }).catch(() => {})
-}
-function savePrefs() {
-  try { localStorage.setItem(PREF_KEY, JSON.stringify({ pageSize: pageSize.value, sortBy: sortBy.value, order: order.value })) } catch (e) { /* storage unavailable */ }
-}
-function loadState() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(PREF_KEY) || '{}')
-    if ([15, 30, 60, 100].includes(saved.pageSize)) pageSize.value = saved.pageSize
-    if (SORTS.some(s => s.key === saved.sortBy)) sortBy.value = saved.sortBy
-    if (saved.order === 'asc' || saved.order === 'desc') order.value = saved.order
-  } catch (e) { /* ignore broken preferences */ }
-  const q = route.query
-  const one = v => (Array.isArray(v) ? v[0] : v) || ''
-  if (one(q.q)) { text.value = one(q.q); debouncedText.value = one(q.q) }
-  if (SCOPES.some(s => s.key === one(q.in))) scope.value = one(q.in)
-  if (CATEGORIES.some(c => c.name === one(q.cat))) category.value = one(q.cat)
-  language.value = one(q.lang)
-  genre.value = one(q.genre)
-  if (SORTS.some(s => s.key === one(q.sort))) sortBy.value = one(q.sort)
-  if (one(q.order) === 'asc' || one(q.order) === 'desc') order.value = one(q.order)
-  if ([15, 30, 60, 100].includes(Number(one(q.size)))) pageSize.value = Number(one(q.size))
-  const p = parseInt(one(q.page), 10)
-  if (p > 0) page.value = p
-}
-
-// ---------- reactions ----------
-let debounceTimer = null
-watch(text, v => {
-  clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(() => { debouncedText.value = v }, 350)
-})
-
-let ready = false
-watch([debouncedText, scope, category, language, genre, sortBy, order, pageSize], (now, before) => {
-  if (!ready) return
-  const facetsChanged = now[0] !== before[0] || now[1] !== before[1] || now[3] !== before[3] || now[4] !== before[4]
-  page.value = 1
-  fetchPage()
-  if (facetsChanged) fetchFacets()
-  savePrefs()
-  syncUrl()
-})
-watch(page, () => { if (ready) syncUrl() })
-
-function channelsOf(css) {
-  const m = String(css).match(/rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)(?:[ ,/]+([\d.]+))?/)
-  return m ? { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : +m[4] } : null
-}
-function detectDark() {
-  const html = document.documentElement
-  const body = document.body
-  const hints = [html.getAttribute('data-theme'), body && body.getAttribute('data-theme'), html.className, body && body.className].join(' ').toLowerCase()
-  if (/(^|[^a-z])(dark|night)([^a-z]|$)/.test(hints)) { isDark.value = true; return }
-  // otherwise look at the colour the app paints behind this page
-  let el = rootEl.value ? rootEl.value.parentElement : null
-  while (el) {
-    const c = channelsOf(getComputedStyle(el).backgroundColor)
-    if (c && c.a > 0.5) { isDark.value = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) < 115; return }
-    el = el.parentElement
-  }
-  isDark.value = false
-}
-let themeObserver = null
-function watchTheme() {
-  detectDark()
-  themeObserver = new MutationObserver(records => {
-    if (records.some(r => r.target.contains(rootEl.value) && r.target !== rootEl.value)) requestAnimationFrame(detectDark)
-  })
-  themeObserver.observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ['class', 'data-theme', 'style'] })
-}
-
-function onResize() { isWide.value = window.matchMedia('(min-width: 1200px)').matches }
-
-onMounted(async () => {
-  onResize()
-  watchTheme()
-  window.addEventListener('resize', onResize)
-  window.addEventListener('keydown', onGlobalKey)
-  loadState()
-  await fetchPage()
-  ready = true
-  fetchFacets()
-  fetchEverythingCount()
-  fetchOptions()
-})
-onBeforeUnmount(() => {
-  window.removeEventListener('resize', onResize)
-  window.removeEventListener('keydown', onGlobalKey)
-  clearTimeout(debounceTimer)
-  if (themeObserver) themeObserver.disconnect()
-})
-</script>
-
 <style scoped>
-/* ===== design tokens: warm paper, forest ink, brass accents ===== */
+/* ===== design tokens ===== */
 .cat {
   --paper: #f5f0e4; --card: #fffdf7; --ink: #23312b; --muted: #6f776f; --line: #ddd4c1;
   --forest: #2f5d46; --forest-ink: #ffffff; --brass: #b08d3c; --soft: #ece5d3; --focus: #b08d3c;
   --rust: #b4533a; --teal: #2a7d74; --ochre: #9a7a1f; --plum: #7a4b8c; --moss: #4d7a3a; --none: #8b8b80;
   min-height: 100%; box-sizing: border-box; padding: 26px clamp(14px, 2.4vw, 36px) 40px;
-  background: var(--paper); color: var(--ink); font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif;
+  background: var(--paper); color: var(--ink); font-family: 'Segoe UI', system-ui, -apple-system, Arial, sans-serif; position: relative;
 }
 .cat.dark, :global(html[data-theme='dark']) .cat {
   --paper: #121a16; --card: #1a2520; --ink: #e9efe9; --muted: #98a59c; --line: #2c3a32;
@@ -645,15 +961,48 @@ onBeforeUnmount(() => {
 .tone-rust { --tone: var(--rust); } .tone-teal { --tone: var(--teal); } .tone-ochre { --tone: var(--ochre); }
 .tone-plum { --tone: var(--plum); } .tone-moss { --tone: var(--moss); } .tone-none { --tone: var(--none); }
 
-/* ===== header ===== */
+/* ===== toast notification ===== */
+.toast {
+  position: fixed; bottom: 24px; right: 24px; z-index: 1000;
+  background: var(--ink); color: var(--paper); padding: 12px 20px;
+  border-radius: 10px; font-size: 13px; font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  animation: slideUp 0.25s ease-out;
+  border-left: 4px solid var(--brass);
+}
+.toast.success { border-left-color: var(--forest); }
+.toast.error { border-left-color: var(--rust); }
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== header & dropdowns ===== */
 .cat-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; padding-bottom: 20px; border-bottom: 2px solid var(--ink); }
 .eyebrow { margin: 0 0 6px; font-size: 11px; letter-spacing: .18em; font-weight: 700; color: var(--brass); }
 .cat-head h1 { margin: 0; font: 400 clamp(34px, 4.4vw, 54px)/1 var(--serif); letter-spacing: -.02em; color: var(--ink); }
 .sub { margin: 10px 0 0; color: var(--muted); font-size: 14px; }
 .sub strong { color: var(--ink); }
-.head-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.head-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; position: relative; }
 .filters-toggle { display: none; }
 .badge { margin-left: 8px; background: var(--forest); color: var(--forest-ink); border-radius: 99px; padding: 1px 8px; font-size: 11px; font-weight: 700; }
+
+.dropdown-wrapper { position: relative; display: inline-block; }
+.dropdown-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 100;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.15); display: grid; min-width: 130px; overflow: hidden;
+  animation: fadeIn 0.15s ease-out;
+}
+.dropdown-menu button {
+  background: transparent; border: 0; padding: 10px 14px; text-align: left;
+  font-size: 13px; font-weight: 600; cursor: pointer; color: var(--ink);
+}
+.dropdown-menu button:hover { background: var(--soft); }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .btn { border: 1px solid var(--line); background: var(--card); padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; transition: transform .15s, filter .15s, background .15s; }
 .btn.solid { background: var(--forest); color: var(--forest-ink); border-color: var(--forest); }
@@ -757,6 +1106,14 @@ mark { background: color-mix(in srgb, var(--brass) 40%, transparent); color: inh
 .card-actions { display: grid; gap: 8px; margin-top: 18px; }
 .card-record { margin: 14px 0 0; text-align: right; font: 11px ui-monospace, Consolas, monospace; color: var(--muted); }
 .card-empty { padding: 40px 24px; text-align: center; border: 2px dashed var(--line); border-radius: 14px; color: var(--muted); }
+
+.card-more { margin-top: 14px; border-top: 1px dashed var(--line); padding-top: 8px; }
+.card-more summary { cursor: pointer; font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--tone, var(--forest)); padding: 4px 0; }
+.card-loading { margin: 14px 0 0; font-size: 12px; color: var(--muted); }
+.dropdown-menu button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
 /* ===== responsive ===== */
 @media (max-width: 1199px) {

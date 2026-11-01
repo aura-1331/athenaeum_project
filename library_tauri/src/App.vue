@@ -5,7 +5,7 @@ import { RouterLink, RouterView, useRoute, useRouter } from "vue-router"
 import { storeToRefs } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
 
-import BatchRegisterModal from '@/components/print/BatchRegisterModal.vue'
+
 import SystemStatus from './components/SystemStatus.vue'
 
 import {
@@ -561,7 +561,7 @@ onUnmounted(() => {
     </main>
 
     <!-- BATCH REGISTER MODAL (GLOBAL POPUP) -->
-    <BatchRegisterModal ref="batchModalRef" />
+    
   </div>
 </template>
 

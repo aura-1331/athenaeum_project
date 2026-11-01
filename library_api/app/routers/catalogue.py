@@ -10,6 +10,27 @@ from app.routers.accession_utils import get_language_prefix, get_category_code
 from app.routers.authority import search_authority_records
 from datetime import datetime
 
+import io
+import os
+import traceback
+from xml.sax.saxutils import escape
+
+from fastapi.responses import StreamingResponse
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Table,
+    TableStyle,
+    Paragraph,
+    Spacer,
+)
+
 router = APIRouter(prefix="/catalogue", tags=["catalogue"])
 class DuplicateCheckRequest(BaseModel):
     title: str
@@ -563,6 +584,285 @@ def get_catalogue_item_detail(
     finally:
         cur.close()
         conn.close()        
+
+
+
+@router.get("/export/pdf")
+def export_catalogue_pdf(
+    request: Request,
+    title: Optional[str] = None,
+    author: Optional[str] = None,
+    genre: Optional[str] = None,
+    language: Optional[str] = None,
+    category: Optional[str] = None,
+    q: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Export all matching eligible catalogue records as a PDF.
+    Does not modify catalogue records.
+    """
+    font_path = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "fonts",
+            "NotoSansMalayalam-Regular.ttf",
+        )
+    )
+
+    if not os.path.isfile(font_path):
+        raise HTTPException(
+            status_code=500,
+            detail="Malayalam PDF font is missing from the backend fonts directory.",
+        )
+
+    conn = get_connection(request=request)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        filters = [
+            "i.is_deleted = FALSE",
+            "UPPER(BTRIM(COALESCE(w.status, ''))) = 'APPROVED'",
+            "UPPER(BTRIM(COALESCE(i.availability_status, ''))) "
+            "NOT IN ('PENDING', 'REJECTED')",
+        ]
+        params = []
+
+        if title:
+            filters.append("w.title ILIKE %s")
+            params.append(f"%{title}%")
+
+        if author:
+            filters.append("w.author ILIKE %s")
+            params.append(f"%{author}%")
+
+        if genre:
+            filters.append("w.genre ILIKE %s")
+            params.append(f"%{genre}%")
+
+        if language:
+            filters.append("LOWER(BTRIM(w.language)) = LOWER(BTRIM(%s))")
+            params.append(language)
+
+        if category:
+            filters.append("LOWER(BTRIM(w.category)) = LOWER(BTRIM(%s))")
+            params.append(category)
+
+        if q and q.strip():
+            like = f"%{q.strip()}%"
+            filters.append(
+                "(w.title ILIKE %s OR w.author ILIKE %s "
+                "OR w.call_no ILIKE %s OR w.isbn ILIKE %s "
+                "OR w.publisher ILIKE %s OR i.accession_no ILIKE %s)"
+            )
+            params.extend([like] * 6)
+
+        where_clause = " AND ".join(filters)
+
+        cur.execute(
+            f"""
+            SELECT
+                i.serial_no,
+                i.accession_no,
+                w.title,
+                w.author,
+                w.category,
+                w.year,
+                w.language,
+                i.shelf
+            FROM public.items i
+            INNER JOIN public.works w ON i.work_id = w.work_id
+            WHERE {where_clause}
+            ORDER BY i.serial_no ASC
+            """,
+            tuple(params),
+        )
+        records = cur.fetchall()
+
+    except Exception as exc:
+        traceback.print_exc()
+        print(f"Catalogue PDF query failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to retrieve catalogue records for PDF export.",
+        )
+    finally:
+        cur.close()
+        conn.close()
+
+    try:
+        # Register a font with shaping support.
+        # Correct shaping depends on the installed ReportLab version and
+        # its HarfBuzz integration; successful registration alone is not proof.
+        if "MalayalamPDF" not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(
+                TTFont("MalayalamPDF", font_path, shapable=True)
+            )
+
+        buffer = io.BytesIO()
+        page_size = landscape(A4)
+
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=page_size,
+            rightMargin=10 * mm,
+            leftMargin=10 * mm,
+            topMargin=13 * mm,
+            bottomMargin=13 * mm,
+            title="Library Catalogue",
+            author="Library Catalogue System",
+        )
+
+        styles = getSampleStyleSheet()
+        styles.add(
+            ParagraphStyle(
+                name="MalayalamCell",
+                parent=styles["Normal"],
+                fontName="MalayalamPDF",
+                fontSize=7,
+                leading=10,
+                alignment=TA_LEFT,
+                wordWrap="CJK",
+                # ReportLab has a separate ParagraphStyle switch for shaping.
+                # TTFont(shapable=True) alone does not enable paragraph shaping.
+                shaping=True,
+            )
+        )
+        styles.add(
+            ParagraphStyle(
+                name="MalayalamTitle",
+                parent=styles["Title"],
+                fontName="MalayalamPDF",
+                fontSize=15,
+                leading=19,
+                alignment=TA_LEFT,
+                shaping=True,
+            )
+        )
+
+        def cell(value):
+            text = "" if value is None else str(value)
+            return Paragraph(escape(text), styles["MalayalamCell"])
+
+        story = [
+            Paragraph("Library Catalogue", styles["MalayalamTitle"]),
+            Spacer(1, 4 * mm),
+            Paragraph(
+                f"Records exported: {len(records)}",
+                styles["Normal"],
+            ),
+            Spacer(1, 4 * mm),
+        ]
+
+        headers = [
+            "Serial",
+            "Accession",
+            "Title",
+            "Author",
+            "Category",
+            "Language",
+            "Year",
+            "Shelf",
+        ]
+
+        table_data = [[
+            Paragraph(f"<b>{escape(header)}</b>", styles["MalayalamCell"])
+            for header in headers
+        ]]
+
+        for row in records:
+            table_data.append([
+                cell(row.get("serial_no")),
+                cell(row.get("accession_no")),
+                cell(row.get("title")),
+                cell(row.get("author")),
+                cell(row.get("category")),
+                cell(row.get("language")),
+                cell(row.get("year")),
+                cell(row.get("shelf")),
+            ])
+
+        available_width = page_size[0] - 20 * mm
+        column_widths = [
+            15 * mm,
+            25 * mm,
+            57 * mm,
+            43 * mm,
+            28 * mm,
+            25 * mm,
+            17 * mm,
+            available_width - 210 * mm,
+        ]
+
+        table = Table(
+            table_data,
+            colWidths=column_widths,
+            repeatRows=1,
+            hAlign="LEFT",
+        )
+
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#176B45")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#D6E0DA")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+
+        for row_index in range(1, len(table_data)):
+            if row_index % 2 == 0:
+                table.setStyle(TableStyle([
+                    (
+                        "BACKGROUND",
+                        (0, row_index),
+                        (-1, row_index),
+                        colors.HexColor("#F0F6F2"),
+                    )
+                ]))
+
+        story.append(table)
+
+        def draw_page_number(canvas, document):
+            canvas.saveState()
+            canvas.setFont("MalayalamPDF", 8)
+            canvas.drawRightString(
+                page_size[0] - 10 * mm,
+                6 * mm,
+                f"Page {document.page}",
+            )
+            canvas.restoreState()
+
+        doc.build(
+            story,
+            onFirstPage=draw_page_number,
+            onLaterPages=draw_page_number,
+        )
+
+        buffer.seek(0)
+
+        return StreamingResponse(
+            buffer,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition":
+                    'attachment; filename="library_catalogue.pdf"'
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        traceback.print_exc()
+        print(f"Catalogue PDF generation failed: {type(exc).__name__}: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to generate the catalogue PDF ({type(exc).__name__}). Check backend logs for details.",
+        )
 
 # ===========================================================================
 # REVIEW & CORRECTION WORKFLOW (Works)

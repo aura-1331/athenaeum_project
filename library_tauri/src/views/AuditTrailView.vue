@@ -1,969 +1,1646 @@
-<template>
-  <div class="audit-page-container">
-    
-    <header class="ledger-header">
-      <div class="header-left">
-        <div class="header-badge">
-          <span class="live-pulse"></span>
-          <span>SECURITY & COMPLIANCE // AUDIT LOG</span>
-        </div>
-        <h1 class="page-title">Forensic Audit Ledger</h1>
-        <p class="page-subtitle">
-          Tamper-evident operational event stream. Inspect field-level deltas, cryptographic identifiers, operator justifications, and terminal context.
-        </p>
-
-        <!-- Ledger Cryptographic Verification Badge -->
-        <div style="margin-top: 14px;">
-          <LedgerIntegrityBadge />
-        </div>
-      </div>
-
-      <div class="kpi-strip">
-        <div class="kpi-card">
-          <span class="kpi-label">TOTAL LOGGED</span>
-          <span class="kpi-val">{{ totalLogs }}</span>
-        </div>
-        <div class="kpi-card">
-          <span class="kpi-label">CRITICAL ACTIONS</span>
-          <span class="kpi-val text-red">{{ deleteCount }}</span>
-        </div>
-        <div class="kpi-card">
-          <span class="kpi-label">ACTIVE ACTORS</span>
-          <span class="kpi-val text-blue">{{ uniqueActorsCount }}</span>
-        </div>
-      </div>
-    </header>
-
-    <div class="controls-panel">
-      <div class="search-wrap">
-        <svg class="search-icon" viewBox="0 0 20 20" fill="currentColor">
-          <path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd" />
-        </svg>
-        <input 
-          type="text" 
-          v-model="searchQuery" 
-          @input="handleSearchDebounced" 
-          placeholder="Filter by operator, record ID, or action keywords..." 
-          class="search-input" 
-        />
-        <button v-if="searchQuery" @click="clearSearch" class="clear-btn">✕</button>
-      </div>
-
-      <div class="filter-actions">
-        <select v-model="selectedAction" @change="fetchLogs" class="filter-dropdown">
-          <option value="">ALL ACTION TYPES</option>
-          <option value="CREATE">CREATE (Record Initialized)</option>
-          <option value="UPDATE">UPDATE (State Modified)</option>
-          <option value="DELETE">DELETE (Record Decommissioned)</option>
-          <option value="AUTH">AUTH (Authentication Event)</option>
-        </select>
-
-        <button @click="fetchLogs" class="btn-refresh" :disabled="loading" title="Refresh Log Stream">
-          <svg class="icon-refresh" :class="{ 'spinning': loading }" viewBox="0 0 20 20" fill="currentColor">
-            <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/>
-          </svg>
-          <span>Refresh</span>
-        </button>
-      </div>
-    </div>
-
-    <div class="table-card">
-      <table class="audit-data-table">
-        <thead>
-          <tr>
-            <th style="width: 44px;"></th>
-            <th style="width: 80px;" class="text-center">NODE</th>
-            <th class="text-left">TIMESTAMP (IST)</th>
-            <th class="text-left">OPERATOR</th>
-            <th>ROLE</th>
-            <th>ACTION</th>
-            <th>TARGET ENTITY</th>
-            <th class="text-left">OPERATION SUMMARY</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="loading">
-            <td colspan="8" class="table-notice">
-              <div class="loading-state">
-                <span class="spinner-dot"></span>
-                <span>Retrieving encrypted audit sequence...</span>
-              </div>
-            </td>
-          </tr>
-
-          <tr v-else-if="logs.length === 0">
-            <td colspan="8" class="table-notice">
-              <div class="empty-state">
-                <span class="empty-icon">🛡️</span>
-                <p>No audit events match the specified filter query.</p>
-              </div>
-            </td>
-          </tr>
-          
-          <template v-else v-for="log in logs" :key="log.id">
-            <tr 
-              class="table-row main-row" 
-              @click="toggleRow(log.id)" 
-              :class="{ 'row-active': expandedRows.has(log.id) }"
-            >
-              <td class="text-center">
-                <span class="chevron-icon" :class="{ 'chevron-rotated': expandedRows.has(log.id) }">▶</span>
-              </td>
-              <td class="text-center">
-                <span class="node-pill">#{{ log.sequence_id ?? '—' }}</span>
-              </td>
-              <td class="font-mono text-muted text-left">
-                {{ formatDate(log.timestamp) }}
-              </td>
-              <td class="text-left">
-                <div class="actor-cell">
-                  <span class="actor-name">{{ log.actor_username || 'system_daemon' }}</span>
-                  <span class="actor-id">#{{ log.user_id || 'SYS' }}</span>
-                </div>
-              </td>
-              <td>
-                <span class="role-pill">{{ log.actor_role || 'OPERATOR' }}</span>
-              </td>
-              <td>
-                <span class="type-badge" :class="getActionBadgeClass(log.action_type)">
-                  {{ log.action_type }}
-                </span>
-              </td>
-              <td>
-                <span class="target-badge" @click.stop="copyToClipboard(log.target_id)">
-                  {{ log.target_id ? `#${log.target_id}` : 'GLOBAL' }}
-                  <span class="copy-hint" title="Copy ID">📋</span>
-                </span>
-              </td>
-              <td class="text-left desc-cell">
-                <span class="summary-text">{{ log.summary || 'Operational transaction committed.' }}</span>
-              </td>
-            </tr>
-
-            <tr v-if="expandedRows.has(log.id)" class="details-expansion-tray">
-              <td colspan="8">
-                <div class="tray-inner-wrapper">
-                  
-                  <div class="meta-grid-specs">
-                    <div class="spec-card">
-                      <span class="spec-label">TERMINAL & DEVICE ID</span>
-                      <span class="spec-value text-mono">{{ log.device_id || 'TERMINAL-LOCAL' }}</span>
-                    </div>
-                    <div class="spec-card">
-                      <span class="spec-label">NETWORK ORIGIN (IP)</span>
-                      <span class="spec-value text-mono text-blue">{{ log.ip_address || '127.0.0.1' }}</span>
-                    </div>
-                    <div class="spec-card">
-                      <span class="spec-label">EVENT TRANSACTION ID</span>
-                      <span class="spec-value text-mono text-muted text-xs">{{ log.id }}</span>
-                    </div>
-                    <div class="spec-card span-3 justification-card">
-                      <span class="spec-label text-amber">MANDATORY OPERATIONAL JUSTIFICATION</span>
-                      <p class="justification-text">
-                        {{ log.change_reason || 'No audit justification comment provided.' }}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div class="diff-inspector">
-                    <div class="diff-inspector-header">
-                      <div class="diff-title">
-                        <svg class="diff-icon" viewBox="0 0 20 20" fill="currentColor">
-                          <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h4a1 1 0 010 2H6.414l2.293 2.293a1 1 0 01-1.414 1.414L5 6.414V8a1 1 0 01-2 0V4zm9 1a1 1 0 110-2h4a1 1 0 011 1v4a1 1 0 11-2 0V6.414l-2.293 2.293a1 1 0 11-1.414-1.414L13.586 5H12zm-9 7a1 1 0 112 0v1.586l2.293-2.293a1 1 0 011.414 1.414L6.414 15H8a1 1 0 110 2H4a1 1 0 01-1-1v-4zm13-1a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 110-2h1.586l-2.293-2.293a1 1 0 011.414-1.414L15 13.586V12a1 1 0 011-1z" clip-rule="evenodd"/>
-                        </svg>
-                        <span>FIELD-LEVEL STATE DELTA</span>
-                      </div>
-                      <button class="raw-toggle-btn" @click="toggleRawView(log.id)">
-                        {{ rawViews.has(log.id) ? 'View Visual Delta' : 'View Raw JSON' }}
-                      </button>
-                    </div>
-
-                    <div v-if="!rawViews.has(log.id)">
-                      <div v-if="log.detailed_diffs && Object.keys(log.detailed_diffs).length > 0" class="diff-table-wrap">
-                        <table class="diff-table">
-                          <thead>
-                            <tr>
-                              <th style="width: 25%;">FIELD NAME</th>
-                              <th style="width: 37.5%;">PREVIOUS VALUE</th>
-                              <th style="width: 37.5%;">COMMITTED VALUE</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr v-for="(delta, fieldName) in parseDiffs(log.detailed_diffs)" :key="fieldName">
-                              <td class="field-key">{{ fieldName }}</td>
-                              <td class="val-old">
-                                <code>{{ delta.oldValue !== undefined ? delta.oldValue : 'null' }}</code>
-                              </td>
-                              <td class="val-new">
-                                <code>{{ delta.newValue !== undefined ? delta.newValue : 'null' }}</code>
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                      <div v-else class="diff-empty">
-                        No individual column variances detected for this operation type.
-                      </div>
-                    </div>
-
-                    <div v-else class="raw-json-block">
-                      <pre><code>{{ JSON.stringify(log, null, 2) }}</code></pre>
-                    </div>
-                  </div>
-
-                </div>
-              </td>
-            </tr>
-          </template>
-        </tbody>
-      </table>
-
-      <div class="pagination-footer">
-        <span class="pagination-info">Showing page {{ currentPage }} ({{ logs.length }} records loaded)</span>
-        <div class="pagination-controls">
-          <button class="btn-page" :disabled="currentPage <= 1 || loading" @click="changePage(currentPage - 1)">
-            ← Previous
-          </button>
-          <span class="page-indicator">{{ currentPage }}</span>
-          <button class="btn-page" :disabled="logs.length < pageLimit || loading" @click="changePage(currentPage + 1)">
-            Next →
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import LedgerIntegrityBadge from '@/components/LedgerIntegrityBadge.vue'
 
 const authStore = useAuthStore()
 
-const loading = ref(true)
+const loading = ref(false)
+const errorMessage = ref('')
 const logs = ref([])
 const totalLogs = ref(0)
+const totalEvents = ref(0)
+
 const searchQuery = ref('')
 const selectedAction = ref('')
+const selectedOutcome = ref('')
+const selectedCategory = ref('')
+const selectedPeriod = ref('all')
+const currentPage = ref(1)
+const pageLimit = ref(25)
+
 const expandedRows = ref(new Set())
 const rawViews = ref(new Set())
+const selectedEvent = ref(null)
 
-const currentPage = ref(1)
-const pageLimit = ref(50)
+const groupEvents = ref({})
+const groupLoading = ref(new Set())
+const groupErrors = ref({})
+
+const activeTab = ref('all')
+const mobileInspectorOpen = ref(false)
+
+const autoRefreshEnabled = ref(false)
+let autoRefreshTimer = null
+const searchInputRef = ref(null)
+
 let debounceTimer = null
+let requestController = null
 
-const maxPages = computed(() => Math.ceil(totalLogs.value / pageLimit.value) || 1)
+const baseUrl = (
+  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
+).replace(/\/$/, '')
 
-const deleteCount = computed(() => logs.value.filter(l => (l.action_type || '').toUpperCase() === 'DELETE').length)
-const uniqueActorsCount = computed(() => new Set(logs.value.map(l => l.actor_username || l.user_id)).size)
+const maxPages = computed(() =>
+  Math.max(1, Math.ceil(totalLogs.value / pageLimit.value))
+)
+
+const visibleFailureCount = computed(() =>
+  logs.value.filter(log => isFailure(log)).length
+)
+
+const visibleSecurityCount = computed(() =>
+  logs.value.filter(log => isSecurityAction(log.action_type)).length
+)
+
+const rangeStart = computed(() =>
+  totalLogs.value === 0 ? 0 : (currentPage.value - 1) * pageLimit.value + 1
+)
+
+const rangeEnd = computed(() =>
+  Math.min(currentPage.value * pageLimit.value, totalLogs.value)
+)
+
+const selectedOutcomeLabel = computed(() => {
+  if (!selectedEvent.value) return '—'
+  return getOutcome(selectedEvent.value) || 'Not recorded'
+})
+
+const selectedMetadata = computed(() => {
+  const event = selectedEvent.value
+  return event?.extra_metadata || {}
+})
 
 function getToken() {
   return authStore.accessToken || ''
+}
 
+function authHeaders() {
+  const token = getToken()
+  return {
+    Accept: 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  }
+}
+
+async function apiGet(path, signal) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'GET',
+    headers: authHeaders(),
+    signal
+  })
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}))
+    throw new Error(data.detail || `Request failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
+function buildLogUrl() {
+  const params = new URLSearchParams({
+    limit: String(pageLimit.value),
+    offset: String((currentPage.value - 1) * pageLimit.value)
+  })
+
+  if (searchQuery.value.trim()) {
+    params.set('actor_filter', searchQuery.value.trim())
+  }
+
+  if (selectedAction.value) {
+    params.set('action_filter', selectedAction.value)
+  }
+
+  if (selectedOutcome.value) {
+    params.set('outcome_filter', selectedOutcome.value)
+  }
+
+  if (selectedCategory.value) {
+    params.set('category_filter', selectedCategory.value)
+  }
+
+  if (selectedPeriod.value !== 'all') {
+    const now = Date.now()
+    const durations = {
+      hour: 60 * 60 * 1000,
+      day: 24 * 60 * 60 * 1000,
+      week: 7 * 24 * 60 * 60 * 1000
+    }
+
+    const duration = durations[selectedPeriod.value]
+
+    if (duration) {
+      params.set('from_timestamp', new Date(now - duration).toISOString())
+      params.set('to_timestamp', new Date(now).toISOString())
+    }
+  }
+
+  return `/status_audit/system-logs?${params.toString()}`
 }
 
 async function fetchLogs() {
+  if (requestController) requestController.abort()
+
+  requestController = new AbortController()
   loading.value = true
+  errorMessage.value = ''
+
   try {
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
-    const offset = (currentPage.value - 1) * pageLimit.value
-    let url = `${baseUrl}/status_audit/system-logs?limit=${pageLimit.value}&offset=${offset}`
-    
-    if (selectedAction.value) url += `&action_filter=${encodeURIComponent(selectedAction.value)}`
-    if (searchQuery.value) url += `&actor_filter=${encodeURIComponent(searchQuery.value)}`
+    const data = await apiGet(buildLogUrl(), requestController.signal)
 
-    const token = getToken()
+    logs.value = Array.isArray(data.items) ? data.items : []
+    totalLogs.value = Number(data.total ?? 0)
+    totalEvents.value = Number(data.total_events ?? data.total ?? 0)
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    if (selectedEvent.value) {
+      const stillVisible = logs.value.some(
+        log => log.id === selectedEvent.value.id
+      )
+
+      if (!stillVisible) {
+        selectedEvent.value = null
       }
-    })
-
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}))
-      throw new Error(errData.detail || `Server error ${response.status}`)
     }
-
-    const data = await response.json()
-    logs.value = data.items || []
-    totalLogs.value = data.total || 0
-  } catch (err) {
-    console.error("Failed to load audit telemetry stream:", err)
-    logs.value = []
-    totalLogs.value = 0
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      console.error('Failed to load audit records:', error)
+      errorMessage.value = error.message || 'Unable to load audit records.'
+      logs.value = []
+      totalLogs.value = 0
+      totalEvents.value = 0
+    }
   } finally {
     loading.value = false
   }
 }
 
+function applyFilters() {
+  currentPage.value = 1
+  expandedRows.value = new Set()
+  groupEvents.value = {}
+  groupErrors.value = {}
+  fetchLogs()
+}
+
 function handleSearchDebounced() {
   clearTimeout(debounceTimer)
+
   debounceTimer = setTimeout(() => {
-    currentPage.value = 1
-    fetchLogs()
+    applyFilters()
   }, 350)
 }
 
 function clearSearch() {
   searchQuery.value = ''
-  currentPage.value = 1
+  applyFilters()
+}
+
+function setTab(tab) {
+  activeTab.value = tab
+
+  selectedAction.value = ''
+  selectedCategory.value = ''
+  selectedOutcome.value = ''
+
+  if (tab === 'authentication') {
+    selectedAction.value = 'TOKEN_REFRESH'
+  } else if (tab === 'ledger') {
+    selectedAction.value = 'UPDATE_LEDGER'
+  }
+
+  applyFilters()
+}
+
+function changePage(page) {
+  if (page < 1 || page > maxPages.value || loading.value) return
+
+  currentPage.value = page
+  expandedRows.value = new Set()
+  groupEvents.value = {}
+  groupErrors.value = {}
+  selectedEvent.value = null
+
   fetchLogs()
 }
 
-function changePage(newPage) {
-  if (newPage < 1 || newPage > maxPages.value) return
-  currentPage.value = newPage
-  fetchLogs()
+function isGroup(log) {
+  return log?.display_type === 'group'
 }
 
-function toggleRow(id) {
-  if (expandedRows.value.has(id)) {
-    expandedRows.value.delete(id)
+function getOutcome(log) {
+  if (!log) return ''
+
+  const metadata = log.extra_metadata || {}
+  const diffs = log.detailed_diffs || log.diff_payload || {}
+
+  return String(
+    log.outcome ??
+    diffs.outcome ??
+    metadata.status ??
+    metadata.outcome ??
+    ''
+  ).toUpperCase()
+}
+
+function isFailure(log) {
+  if (!log || isGroup(log)) return false
+
+  const outcome = getOutcome(log)
+  const action = String(log.action_type || '').toUpperCase()
+
+  return (
+    ['FAILED', 'FAILURE', 'ERROR', 'DENIED', 'REJECTED'].includes(outcome) ||
+    action.includes('FAILED') ||
+    action.includes('REJECT') ||
+    action.includes('DENIED')
+  )
+}
+
+function isSecurityAction(action) {
+  const value = String(action || '').toUpperCase()
+
+  return [
+    'UPDATE_LEDGER',
+    'AUTHORITY_REJECT',
+    'USER_REVOKE',
+    'PASSWORD_CHANGE',
+    'LOGIN_FAILED',
+    'RESOLVE_INCIDENT',
+    'ITEM_REJECT',
+    'DELETE',
+    'REVOKE'
+  ].some(term => value.includes(term))
+}
+
+function isCritical(log) {
+  return isSecurityAction(log?.action_type) || isFailure(log)
+}
+
+function getActionBadgeClass(action) {
+  const value = String(action || '').toUpperCase()
+
+  if (value === 'TOKEN_REFRESH') return 'token'
+  if (value.includes('FAILED') || value.includes('REJECT') || value.includes('REVOKE') || value.includes('DELETE')) return 'danger'
+  if (value.includes('LEDGER')) return 'governance'
+  if (value.includes('PASSWORD')) return 'warning'
+  if (value.includes('LOGIN') || value.includes('LOGOUT')) return 'auth'
+  if (value.includes('CREATE') || value.includes('INSERT')) return 'success'
+  if (value.includes('UPDATE') || value.includes('MODIFY')) return 'update'
+
+  return 'default'
+}
+
+function formatDate(raw, includeSeconds = true) {
+  if (!raw) return '—'
+
+  const date = new Date(raw)
+
+  if (Number.isNaN(date.getTime())) return String(raw)
+
+  try {
+    return new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      ...(includeSeconds ? { second: '2-digit' } : {}),
+      hour12: false
+    }).format(date)
+  } catch {
+    return String(raw)
+  }
+}
+
+function formatRange(first, last) {
+  if (!first) return 'Time range unavailable'
+  if (!last || first === last) return formatDate(first)
+  return `${formatDate(first)} – ${formatDate(last)}`
+}
+
+function displayActor(log) {
+  return (
+    log?.actor_username ||
+    log?.username ||
+    log?.user_id ||
+    (isGroup(log) ? 'Grouped actor' : 'System process')
+  )
+}
+
+function displayRole(log) {
+  return log?.actor_role || log?.role || log?.designation || '—'
+}
+
+function displaySummary(log) {
+  if (isGroup(log)) {
+    return `Grouped successful token refreshes · ${log.event_count ?? 0} original events`
+  }
+
+  if (log?.summary) return log.summary
+
+  const outcome = getOutcome(log)
+
+  if (outcome === 'FAILED') {
+    return log.error_type
+      ? `Operation failed · ${log.error_type}`
+      : 'Operation failed'
+  }
+
+  const action = String(log?.action_type || '').toUpperCase()
+  if (action === 'LOGIN') return 'Authentication event recorded'
+  if (action === 'TOKEN_REFRESH') return 'Token refresh event recorded'
+
+  return log?.endpoint || log?.target_entity || 'Audit event recorded'
+}
+
+function displayTarget(log) {
+  if (isGroup(log)) return 'Authentication service'
+  return log?.target_id ? `#${log.target_id}` : log?.target_entity || 'Global'
+}
+
+function displaySequence(log) {
+  if (isGroup(log)) {
+    return log.first_sequence_id && log.last_sequence_id
+      ? `#${log.first_sequence_id}–#${log.last_sequence_id}`
+      : 'Grouped'
+  }
+  return log?.sequence_id != null ? `#${log.sequence_id}` : '—'
+}
+
+function displayEventId(log) {
+  return log?.id ?? log?.sequence_id ?? '—'
+}
+
+function displayIp(log) {
+  return log?.ip_address || 'Not recorded'
+}
+
+function displayDevice(log) {
+  return log?.device_id || log?.machine_name || 'Not recorded'
+}
+
+function getJustification(log) {
+  return log?.change_reason ||
+    log?.justification ||
+    log?.extra_metadata?.justification ||
+    'No justification recorded'
+}
+
+function toggleSetValue(source, id) {
+  const next = new Set(source.value)
+  if (next.has(id)) {
+    next.delete(id)
   } else {
-    expandedRows.value.add(id)
+    next.add(id)
+  }
+  source.value = next
+}
+
+function selectEvent(log) {
+  selectedEvent.value = log
+  mobileInspectorOpen.value = true
+}
+
+async function toggleRow(log) {
+  if (isGroup(log)) {
+    await toggleGroup(log)
+    return
+  }
+
+  toggleSetValue(expandedRows, log.id)
+  selectEvent(log)
+}
+
+async function toggleGroup(group) {
+  const id = group.id
+
+  if (expandedRows.value.has(id)) {
+    toggleSetValue(expandedRows, id)
+    return
+  }
+
+  toggleSetValue(expandedRows, id)
+  selectEvent(group)
+
+  if (groupEvents.value[id]) return
+
+  const groupStart = group.group_start
+  const groupUserId = group.group_user_id
+
+  if (!groupStart) {
+    groupErrors.value = {
+      ...groupErrors.value,
+      [id]: 'The backend did not provide a group start time.'
+    }
+    return
+  }
+
+  groupLoading.value = new Set([...groupLoading.value, id])
+
+  try {
+    const params = new URLSearchParams({ group_start: groupStart })
+
+    if (groupUserId != null) {
+      params.set('group_user_id', String(groupUserId))
+    }
+
+    if (group.endpoint) {
+      params.set('endpoint', group.endpoint)
+    }
+
+    const data = await apiGet(
+      `/status_audit/system-logs/group-events?${params.toString()}`
+    )
+
+    groupEvents.value = {
+      ...groupEvents.value,
+      [id]: Array.isArray(data.items) ? data.items : []
+    }
+  } catch (error) {
+    console.error('Failed to load original group events:', error)
+    groupErrors.value = {
+      ...groupErrors.value,
+      [id]: error.message || 'Unable to load original events.'
+    }
+  } finally {
+    const next = new Set(groupLoading.value)
+    next.delete(id)
+    groupLoading.value = next
   }
 }
 
 function toggleRawView(id) {
-  if (rawViews.value.has(id)) {
-    rawViews.value.delete(id)
-  } else {
-    rawViews.value.add(id)
-  }
-}
-
-function getActionBadgeClass(action) {
-  if (!action) return 'default'
-  const a = action.toLowerCase()
-  if (a.includes('create') || a.includes('insert')) return 'create'
-  if (a.includes('update') || a.includes('modify') || a.includes('patch')) return 'update'
-  if (a.includes('delete') || a.includes('remove') || a.includes('revoke')) return 'delete'
-  if (a.includes('auth') || a.includes('login') || a.includes('token')) return 'auth'
-  return 'default'
-}
-
-function formatDate(raw) {
-  if (!raw) return '—'
-  try {
-    const d = new Date(raw)
-    if (isNaN(d.getTime())) return raw
-
-    const parts = new Intl.DateTimeFormat('en-IN', {
-      timeZone: 'Asia/Kolkata',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      weekday: 'long',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    }).formatToParts(d)
-
-    const m = {}
-    for (const { type, value } of parts) {
-      m[type] = value
-    }
-
-    return `${m.day}-${m.month}-${m.year} ${m.weekday.toUpperCase()} ${m.hour}:${m.minute}:${m.second}`
-  } catch {
-    return raw
-  }
+  toggleSetValue(rawViews, id)
 }
 
 function parseDiffs(rawDiffs) {
-  if (!rawDiffs) return {}
-  if (typeof rawDiffs === 'object' && !Array.isArray(rawDiffs)) {
-    const formatted = {}
-    for (const [k, v] of Object.entries(rawDiffs)) {
-      if (v && typeof v === 'object') {
-        const oldVal = v.from !== undefined ? v.from : (v.old !== undefined ? v.old : '—')
-        const newVal = v.to !== undefined ? v.to : (v.new !== undefined ? v.new : JSON.stringify(v))
-        formatted[k] = { oldValue: oldVal, newValue: newVal }
-      } else {
-        formatted[k] = { oldValue: '—', newValue: String(v) }
+  if (!rawDiffs) return []
+
+  let data = rawDiffs
+
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data)
+    } catch {
+      return [{ field: 'Raw value', oldValue: '—', newValue: data }]
+    }
+  }
+
+  if (Array.isArray(data)) {
+    return data.map((item, index) => {
+      if (item && typeof item === 'object') {
+        return {
+          field: item.field || item.key || `Change ${index + 1}`,
+          oldValue: item.from ?? item.old ?? item.old_value ?? '—',
+          newValue: item.to ?? item.new ?? item.new_value ?? item.value ?? '—'
+        }
+      }
+      return { field: `Change ${index + 1}`, oldValue: '—', newValue: item }
+    })
+  }
+
+  if (typeof data !== 'object') return []
+
+  return Object.entries(data).map(([field, value]) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const hasOld = 'from' in value || 'old' in value || 'old_value' in value
+      const hasNew = 'to' in value || 'new' in value || 'new_value' in value
+
+      if (hasOld || hasNew) {
+        return {
+          field,
+          oldValue: value.from ?? value.old ?? value.old_value ?? '—',
+          newValue: value.to ?? value.new ?? value.new_value ?? '—'
+        }
       }
     }
-    return formatted
-  }
-  
-  if (Array.isArray(rawDiffs)) {
-    const formatted = {}
-    rawDiffs.forEach((item, idx) => {
-      formatted[`Delta #${idx + 1}`] = { oldValue: '—', newValue: typeof item === 'object' ? JSON.stringify(item) : String(item) }
-    })
-    return formatted
-  }
-  return {}
+    return { field, oldValue: '—', newValue: value }
+  })
 }
 
-function copyToClipboard(text) {
-  if (!text) return
-  navigator.clipboard.writeText(String(text))
+function jsonValue(value) {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
 }
 
-onMounted(() => fetchLogs())
+async function copyToClipboard(value) {
+  if (value === null || value === undefined || value === '') return
+  try {
+    await navigator.clipboard.writeText(String(value))
+  } catch (error) {
+    console.error('Clipboard copy failed:', error)
+  }
+}
+
+function closeInspector() {
+  mobileInspectorOpen.value = false
+}
+
+function exportCurrentView() {
+  if (!logs.value.length) return
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(logs.value, null, 2))
+  const downloadAnchor = document.createElement('a')
+  downloadAnchor.setAttribute("href", dataStr)
+  downloadAnchor.setAttribute("download", `audit_logs_page_${currentPage.value}.json`)
+  document.body.appendChild(downloadAnchor)
+  downloadAnchor.click()
+  downloadAnchor.remove()
+}
+
+function toggleAutoRefresh() {
+  autoRefreshEnabled.value = !autoRefreshEnabled.value
+  if (autoRefreshEnabled.value) {
+    autoRefreshTimer = setInterval(() => {
+      if (!loading.value) fetchLogs()
+    }, 15000)
+  } else {
+    clearInterval(autoRefreshTimer)
+  }
+}
+
+function handleGlobalKeydown(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    searchInputRef.value?.focus()
+  }
+  if (e.key === 'Escape' && mobileInspectorOpen.value) {
+    closeInspector()
+  }
+}
+
+onMounted(() => {
+  fetchLogs()
+  window.addEventListener('keydown', handleGlobalKeydown)
+})
+
+onBeforeUnmount(() => {
+  clearTimeout(debounceTimer)
+  clearInterval(autoRefreshTimer)
+  if (requestController) requestController.abort()
+  window.removeEventListener('keydown', handleGlobalKeydown)
+})
 </script>
 
-<style scoped>
-/* CONTAINER */
-.audit-page-container {
-  padding: 32px 40px;
-  background-color: #0b0c10;
+<template>
+  <div class="audit-console-view">
+    <!-- Header -->
+    <header class="view-header">
+      <div class="header-titles">
+        <div class="breadcrumb-trail">Security Command <span>/</span> Immutable Audit Ledger</div>
+        <h1>System Audit &amp; Compliance</h1>
+        <p>Real-time telemetry, cryptographic verification, and deep forensic event inspection.</p>
+      </div>
+
+      <div class="header-actions">
+        <button class="action-btn poll-btn" type="button" :class="{ active: autoRefreshEnabled }" @click="toggleAutoRefresh" title="Toggle 15s auto-poll">
+          <span>{{ autoRefreshEnabled ? '🟢 Auto-Sync On' : '⚪ Auto-Sync Off' }}</span>
+        </button>
+
+        <button class="action-btn export-btn" type="button" :disabled="!logs.length" @click="exportCurrentView" title="Export visible records">
+          <span>⬇ Export JSON</span>
+        </button>
+
+        <div class="live-status-pill">
+          <span class="pulse-dot"></span>
+          <span>Live Feed Active</span>
+        </div>
+        <button class="action-btn refresh-btn" type="button" :disabled="loading" @click="fetchLogs">
+          <span :class="{ spinning: loading }">↻</span>
+          <span>Sync Feed</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Metrics Grid -->
+    <section class="metrics-grid">
+      <article class="metric-card">
+        <div class="metric-top">
+          <span class="metric-label">MATCHING EVENTS</span>
+          <span class="metric-icon cyan">▤</span>
+        </div>
+        <div class="metric-value">{{ totalEvents.toLocaleString() }}</div>
+        <div class="metric-foot">Original stream items matched</div>
+        <div class="metric-bar cyan-bar"></div>
+      </article>
+
+      <article class="metric-card">
+        <div class="metric-top">
+          <span class="metric-label">FAILURES ON PAGE</span>
+          <span class="metric-icon red">!</span>
+        </div>
+        <div class="metric-value">{{ visibleFailureCount }}</div>
+        <div class="metric-foot">Detected errors or rejections</div>
+        <div class="metric-bar red-bar"></div>
+      </article>
+
+      <article class="metric-card">
+        <div class="metric-top">
+          <span class="metric-label">SECURITY ACTIONS</span>
+          <span class="metric-icon blue">⬡</span>
+        </div>
+        <div class="metric-value">{{ visibleSecurityCount }}</div>
+        <div class="metric-foot">Governance &amp; state changes</div>
+        <div class="metric-bar blue-bar"></div>
+      </article>
+
+      <article class="metric-card integrity-card">
+        <div class="metric-top">
+          <span class="metric-label">LEDGER CRYPTOGRAPHY</span>
+          <span class="metric-icon violet">◇</span>
+        </div>
+        <div class="integrity-badge-wrap">
+          <LedgerIntegrityBadge />
+        </div>
+      </article>
+    </section>
+
+    <!-- Workspace Grid -->
+    <div class="workspace-grid">
+      <section class="activity-panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Event Stream Matrix</h2>
+            <p>Grouped token refreshes remain cryptographically chained to their primary source records.</p>
+          </div>
+          <div class="record-badge">
+            <span>{{ totalLogs.toLocaleString() }}</span> records indexed
+          </div>
+        </div>
+
+        <div class="tab-strip">
+          <button type="button" :class="{ selected: activeTab === 'all' }" @click="setTab('all')">All Events</button>
+          <button type="button" :class="{ selected: activeTab === 'security' }" @click="setTab('security')">Security Events</button>
+          <button type="button" :class="{ selected: activeTab === 'authentication' }" @click="setTab('authentication')">Authentication</button>
+          <button type="button" :class="{ selected: activeTab === 'ledger' }" @click="setTab('ledger')">Ledger Updates</button>
+        </div>
+
+        <div class="filter-panel">
+          <div class="search-box">
+            <span class="search-symbol">⌕</span>
+            <input
+              ref="searchInputRef"
+              v-model="searchQuery"
+              type="search"
+              placeholder="Filter by operator username, action, or record ID (Ctrl+K)..."
+              @input="handleSearchDebounced"
+            />
+            <button v-if="searchQuery" type="button" @click="clearSearch" aria-label="Clear search">×</button>
+          </div>
+
+          <select v-model="selectedAction" aria-label="Filter by action" @change="applyFilters">
+            <option value="">All actions</option>
+            <option value="TOKEN_REFRESH">Token refresh</option>
+            <option value="LOGIN">Login</option>
+            <option value="LOGOUT">Logout</option>
+            <option value="LOGIN_FAILED">Failed login</option>
+            <option value="UPDATE_LEDGER">Ledger update</option>
+            <option value="USER_REVOKE">User revocation</option>
+            <option value="PASSWORD_CHANGE">Password change</option>
+            <option value="AUTHORITY_REJECT">Authority rejection</option>
+            <option value="RESOLVE_INCIDENT">Resolve incident</option>
+          </select>
+
+          <select v-model="selectedOutcome" aria-label="Filter by outcome" @change="applyFilters">
+            <option value="">All outcomes</option>
+            <option value="SUCCESS">Success</option>
+            <option value="FAILED">Failed</option>
+          </select>
+
+          <select v-model="selectedPeriod" aria-label="Filter by period" @change="applyFilters">
+            <option value="all">All time</option>
+            <option value="hour">Last hour</option>
+            <option value="day">Last 24 hours</option>
+            <option value="week">Last 7 days</option>
+          </select>
+        </div>
+
+        <div v-if="errorMessage" class="error-banner" role="alert">
+          <span>Unable to load audit records: {{ errorMessage }}</span>
+          <button type="button" @click="fetchLogs">Retry</button>
+        </div>
+
+        <div class="table-scroll">
+          <table class="event-table">
+            <thead>
+              <tr>
+                <th class="expand-column"></th>
+                <th>SEQUENCE</th>
+                <th>TIMESTAMP (IST)</th>
+                <th>OPERATOR</th>
+                <th>ACTION</th>
+                <th>OUTCOME</th>
+                <th>SUMMARY</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="loading && logs.length === 0">
+                <td colspan="7" class="table-message" aria-live="polite">
+                  <span class="loading-spinner" aria-hidden="true"></span> Loading secure audit entries...
+                </td>
+              </tr>
+              <tr v-else-if="logs.length === 0">
+                <td colspan="7" class="table-message">No audit records match your search criteria.</td>
+              </tr>
+
+              <template v-for="log in logs" :key="log.id">
+                <tr
+                  class="event-row"
+                  tabindex="0"
+                  role="button"
+                  :aria-expanded="expandedRows.has(log.id)"
+                  :aria-controls="`detail-${log.id}`"
+                  :class="{
+                    'selected-row': selectedEvent?.id === log.id,
+                    'critical-row': isCritical(log),
+                    'group-row': isGroup(log)
+                  }"
+                  @click="toggleRow(log)"
+                  @keydown.enter.prevent="toggleRow(log)"
+                  @keydown.space.prevent="toggleRow(log)"
+                >
+                  <td class="expand-column">
+                    <span class="row-chevron" :class="{ expanded: expandedRows.has(log.id) }">›</span>
+                  </td>
+                  <td>
+                    <span class="sequence-text">{{ displaySequence(log) }}</span>
+                  </td>
+                  <td class="timestamp-cell">
+                    <template v-if="isGroup(log)">
+                      <span>{{ formatDate(log.first_timestamp, false) }}</span>
+                      <small>to {{ formatDate(log.last_timestamp, false) }}</small>
+                    </template>
+                    <template v-else>
+                      {{ formatDate(log.timestamp) }}
+                    </template>
+                  </td>
+                  <td>
+                    <div class="actor-name">{{ displayActor(log) }}</div>
+                    <div class="actor-role">{{ displayRole(log) }}</div>
+                  </td>
+                  <td>
+                    <span class="action-badge" :class="getActionBadgeClass(log.action_type)">
+                      {{ log.action_type || 'UNKNOWN' }}
+                    </span>
+                    <small v-if="isGroup(log)" class="group-count">{{ log.event_count }} original events</small>
+                  </td>
+                  <td>
+                    <span
+                      class="outcome-badge"
+                      :class="isFailure(log) ? 'outcome-failed' : getOutcome(log) === 'SUCCESS' ? 'outcome-success' : 'outcome-unknown'"
+                    >
+                      {{ isGroup(log) ? 'SUCCESS GROUP' : getOutcome(log) || 'UNKNOWN' }}
+                    </span>
+                  </td>
+                  <td class="summary-cell">
+                    <div>{{ displaySummary(log) }}</div>
+                    <small v-if="isGroup(log)">Select to load original records</small>
+                    <small v-else>{{ displayTarget(log) }}</small>
+                  </td>
+                </tr>
+
+                <!-- Expanded Group Row -->
+                <tr v-if="isGroup(log) && expandedRows.has(log.id)" :id="`detail-${log.id}`" class="group-detail-row">
+                  <td colspan="7">
+                    <div class="group-detail">
+                      <div class="group-detail-heading">
+                        <div>
+                          <strong>Original token refresh events</strong>
+                          <p>{{ formatRange(log.first_timestamp, log.last_timestamp) }}</p>
+                        </div>
+                        <span>{{ groupEvents[log.id]?.length ?? log.event_count ?? 0 }} loaded</span>
+                      </div>
+
+                      <div v-if="groupLoading.has(log.id)" class="group-loading">
+                        <span class="loading-spinner"></span> Loading original audit events...
+                      </div>
+                      <div v-else-if="groupErrors[log.id]" class="group-error">
+                        {{ groupErrors[log.id] }}
+                        <button type="button" @click.stop="toggleGroup(log)">Retry</button>
+                      </div>
+                      <div v-else-if="groupEvents[log.id]?.length" class="original-events">
+                        <button
+                          v-for="event in groupEvents[log.id]"
+                          :key="event.id"
+                          type="button"
+                          class="original-event"
+                          @click.stop="selectEvent(event)"
+                        >
+                          <span class="original-sequence">#{{ event.sequence_id ?? '—' }}</span>
+                          <span>{{ formatDate(event.timestamp) }}</span>
+                          <span class="original-outcome">{{ getOutcome(event) || 'UNKNOWN' }}</span>
+                          <span class="original-endpoint">{{ event.endpoint || 'Endpoint not recorded' }}</span>
+                          <span class="inspect-arrow">Inspect →</span>
+                        </button>
+                      </div>
+                      <div v-else class="group-loading">No original events found for this group.</div>
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- Expanded Standard Row -->
+                <tr v-if="isGroup(log) && expandedRows.has(log.id)" :id="`detail-${log.id}`" class="group-detail-row">
+                  <td colspan="7">
+                    <div class="inline-detail">
+                      <div>
+                        <span>EVENT ID</span>
+                        <strong>{{ displayEventId(log) }}</strong>
+                      </div>
+                      <div>
+                        <span>TARGET</span>
+                        <strong>{{ displayTarget(log) }}</strong>
+                      </div>
+                      <div>
+                        <span>NETWORK ORIGIN</span>
+                        <strong>{{ displayIp(log) }}</strong>
+                      </div>
+                      <div>
+                        <span>DEVICE</span>
+                        <strong>{{ displayDevice(log) }}</strong>
+                      </div>
+                      <button type="button" @click.stop="selectEvent(log)">
+                        Open evidence inspector →
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        <footer class="pagination-footer">
+          <span>Showing {{ rangeStart }}–{{ rangeEnd }} of {{ totalLogs.toLocaleString() }} records</span>
+
+          <div class="pagination-actions">
+            <label>
+              Rows
+              <select v-model.number="pageLimit" @change="applyFilters">
+                <option :value="25">25</option>
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+              </select>
+            </label>
+
+            <button type="button" :disabled="currentPage <= 1 || loading" @click="changePage(currentPage - 1)">
+              Previous
+            </button>
+            <span>Page {{ currentPage }} / {{ maxPages }}</span>
+            <button type="button" :disabled="currentPage >= maxPages || loading" @click="changePage(currentPage + 1)">
+              Next
+            </button>
+          </div>
+        </footer>
+      </section>
+
+      <!-- Inspector Drawer -->
+      <aside 
+        class="inspector" 
+        :class="{ 'inspector-mobile-open': mobileInspectorOpen }"
+        aria-label="Event Evidence Inspector"
+        :aria-hidden="!mobileInspectorOpen"
+      >
+        <div class="inspector-header">
+          <div>
+            <div class="eyebrow">FORENSIC EVIDENCE</div>
+            <h2>Event Inspector</h2>
+          </div>
+          <button class="close-inspector" type="button" @click="closeInspector" aria-label="Close inspector">×</button>
+        </div>
+
+        <template v-if="selectedEvent">
+          <div class="inspected-event-heading">
+            <span class="action-badge" :class="getActionBadgeClass(selectedEvent.action_type)">
+              {{ selectedEvent.action_type || 'UNKNOWN' }}
+            </span>
+            <button type="button" class="copy-id" @click="copyToClipboard(displayEventId(selectedEvent))">
+              {{ displaySequence(selectedEvent) }} ⧉
+            </button>
+          </div>
+
+          <div class="inspected-timestamp">
+            {{ isGroup(selectedEvent)
+              ? formatRange(selectedEvent.first_timestamp, selectedEvent.last_timestamp)
+              : formatDate(selectedEvent.timestamp)
+            }}
+          </div>
+
+          <div class="inspector-status" :class="{ failed: isFailure(selectedEvent) }">
+            <span class="status-dot"></span>
+            {{ isGroup(selectedEvent) ? `${selectedEvent.event_count} successful events` : selectedOutcomeLabel }}
+          </div>
+
+          <div v-if="isGroup(selectedEvent)" class="inspector-callout">
+            This is a display group. Expand it in the stream to inspect individual original records.
+          </div>
+
+          <div class="inspector-section">
+            <h3>ACTOR &amp; CONTEXT</h3>
+            <div class="detail-line"><span>Operator</span><strong>{{ displayActor(selectedEvent) }}</strong></div>
+            <div class="detail-line"><span>Role</span><strong>{{ displayRole(selectedEvent) }}</strong></div>
+            <div class="detail-line"><span>User ID</span><strong>{{ selectedEvent.user_id ?? 'Not recorded' }}</strong></div>
+            <div class="detail-line"><span>Target</span><strong>{{ displayTarget(selectedEvent) }}</strong></div>
+            <div class="detail-line"><span>IP Address</span><strong>{{ displayIp(selectedEvent) }}</strong></div>
+            <div class="detail-line"><span>Device</span><strong>{{ displayDevice(selectedEvent) }}</strong></div>
+          </div>
+
+          <div class="inspector-section">
+            <h3>EVENT DETAILS</h3>
+            <div class="detail-line"><span>Event ID</span><strong>{{ displayEventId(selectedEvent) }}</strong></div>
+            <div class="detail-line"><span>Sequence ID</span><strong>{{ selectedEvent.sequence_id ?? 'Not recorded' }}</strong></div>
+            <div class="detail-line"><span>Category</span><strong>{{ selectedEvent.category || 'Not recorded' }}</strong></div>
+            <div class="detail-line"><span>Endpoint</span><strong class="break-value">{{ selectedEvent.endpoint || 'Not recorded' }}</strong></div>
+            <div class="detail-line"><span>HTTP Method</span><strong>{{ selectedEvent.http_method || 'Not recorded' }}</strong></div>
+            <div class="detail-line"><span>Status Code</span><strong>{{ selectedEvent.status_code ?? selectedMetadata.status_code ?? 'Not recorded' }}</strong></div>
+          </div>
+
+          <div class="inspector-section">
+            <h3>OPERATIONAL JUSTIFICATION</h3>
+            <p class="justification-value">{{ getJustification(selectedEvent) }}</p>
+            <p class="summary-value">{{ displaySummary(selectedEvent) }}</p>
+          </div>
+
+          <div class="inspector-section">
+            <h3>INTEGRITY EVIDENCE</h3>
+            <div class="hash-field">
+              <span>Previous Hash</span>
+              <code>{{ selectedEvent.prev_hash || 'Not provided by API' }}</code>
+              <button v-if="selectedEvent.prev_hash" type="button" @click="copyToClipboard(selectedEvent.prev_hash)">Copy</button>
+            </div>
+            <div class="hash-field">
+              <span>Record Hash</span>
+              <code>{{ selectedEvent.record_hash || 'Not provided by API' }}</code>
+              <button v-if="selectedEvent.record_hash" type="button" @click="copyToClipboard(selectedEvent.record_hash)">Copy</button>
+            </div>
+          </div>
+
+          <div class="inspector-section">
+            <h3>FIELD-LEVEL CHANGES</h3>
+            <div v-if="parseDiffs(selectedEvent.detailed_diffs).length" class="inspector-diffs">
+              <div v-for="delta in parseDiffs(selectedEvent.detailed_diffs)" :key="delta.field" class="inspector-diff">
+                <strong>{{ delta.field }}</strong>
+                <div class="old-value">{{ jsonValue(delta.oldValue) }}</div>
+                <div class="new-value">{{ jsonValue(delta.newValue) }}</div>
+              </div>
+            </div>
+            <div v-else class="inspector-empty">No field-level changes provided for this event.</div>
+          </div>
+
+          <div class="inspector-section">
+            <div class="raw-heading">
+              <h3>RAW EVENT JSON</h3>
+              <button type="button" @click="toggleRawView(selectedEvent.id)">
+                {{ rawViews.has(selectedEvent.id) ? 'Hide' : 'Show JSON' }}
+              </button>
+            </div>
+            <pre v-if="rawViews.has(selectedEvent.id)" class="raw-json">{{ JSON.stringify(selectedEvent, null, 2) }}</pre>
+          </div>
+        </template>
+
+        <div v-else class="inspector-empty-state">
+          <div class="inspector-empty-icon">◇</div>
+          <h3>No event selected</h3>
+          <p>Select a row from the audit stream to inspect its metadata, evidence, and cryptographic hashes.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</template>
+
+<!-- Unscoped global override to completely kill the parent layout container's blue background -->
+<style>
+/* Theme-aware global shell */
+html, body, #app {
+  background-color: var(--app-bg) !important;
+  margin: 0;
+  padding: 0;
+  width: 100%;
   min-height: 100vh;
-  color: #e2e8f0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", monospace, sans-serif;
+}
+</style>
+
+<style scoped>
+.audit-console-view {
+  --bg-primary: var(--app-bg);
+  --panel: var(--surface);
+  --border: var(--border-main);
+  --border-strong: var(--accent);
+  --text: var(--text-primary);
+  --muted: var(--text-muted);
+  --cyan: var(--accent);
+  --blue: var(--accent);
+  --green: var(--text-success);
+  --red: var(--text-danger);
+  --amber: var(--text-warning);
+  --violet: var(--accent);
+
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  
+  background-color: var(--app-bg);
+  color: var(--text);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  padding: 32px;
+  box-sizing: border-box;
 }
 
-/* HEADER & KPIS */
-.ledger-header {
+.audit-console-view *,
+.audit-console-view *::before,
+.audit-console-view *::after {
+  box-sizing: border-box;
+}
+
+button, input, select {
+  font: inherit;
+  color: inherit;
+}
+
+.audit-console-view table,
+.audit-console-view thead,
+.audit-console-view tbody,
+.audit-console-view tr,
+.audit-console-view th,
+.audit-console-view td {
+  background-color: transparent !important;
+}
+
+.audit-console-view thead tr,
+.audit-console-view thead th {
+  background: var(--surface-2) !important;
+}
+
+.audit-console-view tr.event-row:hover {
+  background: var(--hover-bg) !important;
+}
+
+.view-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  gap: 24px;
-  margin-bottom: 28px;
+  margin-bottom: 24px;
+  gap: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
 
-.header-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.breadcrumb-trail {
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: #f59e0b;
+  color: var(--muted);
   margin-bottom: 6px;
-}
-
-.live-pulse {
-  width: 7px;
-  height: 7px;
-  background: #10b981;
-  border-radius: 50%;
-  box-shadow: 0 0 8px #10b981;
-}
-
-.page-title {
-  font-size: 26px;
   font-weight: 700;
-  color: #ffffff;
-  letter-spacing: -0.02em;
-  margin: 0 0 6px 0;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.page-subtitle {
-  font-size: 13px;
-  color: #64748b;
+.breadcrumb-trail span {
+  color: var(--cyan);
+  padding: 0 6px;
+}
+
+.view-header h1 {
   margin: 0;
-  max-width: 680px;
-  line-height: 1.5;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--text-primary);
 }
 
-.kpi-strip {
-  display: flex;
-  gap: 12px;
-}
-
-.kpi-card {
-  background: rgba(18, 20, 26, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 10px 16px;
-  min-width: 120px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.kpi-label {
-  font-size: 10px;
-  font-weight: 700;
-  color: #64748b;
-  letter-spacing: 0.05em;
-}
-
-.kpi-val {
-  font-size: 20px;
-  font-weight: 700;
-  color: #f1f5f9;
-  font-family: monospace;
-}
-
-/* CONTROLS */
-.controls-panel {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-
-.search-wrap {
-  position: relative;
-  flex: 1;
-  display: flex;
-  align-items: center;
-}
-
-.search-icon {
-  position: absolute;
-  left: 14px;
-  width: 16px;
-  height: 16px;
-  color: #64748b;
-}
-
-.search-input {
-  width: 100%;
-  background-color: #12141a;
-  border: 1px solid #1e222d;
-  border-radius: 8px;
-  padding: 10px 36px 10px 38px;
-  color: #ffffff;
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.15s ease;
-}
-
-.search-input:focus {
-  border-color: #3b82f6;
-}
-
-.clear-btn {
-  position: absolute;
-  right: 12px;
-  background: none;
-  border: none;
-  color: #64748b;
-  cursor: pointer;
+.view-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
   font-size: 12px;
 }
 
-.filter-actions {
+.header-actions {
   display: flex;
+  align-items: center;
   gap: 12px;
 }
 
-.filter-dropdown {
-  background-color: #12141a;
-  border: 1px solid #1e222d;
-  border-radius: 8px;
-  padding: 10px 14px;
-  color: #cbd5e1;
-  font-size: 13px;
-  outline: none;
+.poll-btn.active {
+  border-color: var(--green);
+  background: var(--surface-success);
+  color: var(--text-success);
 }
 
-.btn-refresh {
-  display: inline-flex;
+.live-status-pill {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  background: #1e222d;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface-success);
+  border: 1px solid var(--border-success);
+  border-radius: 20px;
+  color: var(--text-success);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pulse-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--text-success);
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 10px 16px;
-  color: #cbd5e1;
-  font-size: 13px;
-  font-weight: 500;
+  background: var(--surface-2);
+  color: var(--text);
   cursor: pointer;
-  transition: all 0.15s ease;
+  font-weight: 600;
+  box-shadow: var(--shadow);
+  transition: all 0.2s ease;
 }
 
-.btn-refresh:hover:not(:disabled) {
-  background: #282d3c;
-  color: #ffffff;
+.action-btn:hover:not(:disabled) {
+  border-color: var(--cyan);
+  background: var(--hover-bg);
 }
 
-.icon-refresh {
-  width: 14px;
-  height: 14px;
+.action-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .spinning {
   animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(280px, 1.2fr);
+  gap: 16px;
+  margin-bottom: 24px;
 }
 
-/* TABLE */
-.table-card {
-  background-color: #12141a;
-  border: 1px solid #1e222d;
-  border-radius: 10px;
+.metric-card {
+  position: relative;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
   overflow: hidden;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 84px;
 }
 
-.audit-data-table {
+.metric-card:hover {
+  border-color: var(--border-strong);
+}
+
+.metric-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.metric-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.metric-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.metric-icon.cyan { color: var(--cyan); background: var(--catalog-accent-soft); border: 1px solid var(--catalog-card-border); }
+.metric-icon.red { color: var(--red); background: var(--surface-danger); border: 1px solid var(--border-danger); }
+.metric-icon.blue { color: var(--blue); background: var(--catalog-accent-soft); border: 1px solid var(--catalog-card-border); }
+.metric-icon.violet { color: var(--violet); background: var(--catalog-accent-soft); border: 1px solid var(--catalog-card-border); }
+
+.metric-value {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.metric-foot {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.metric-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+}
+.cyan-bar { background: var(--cyan); }
+.red-bar { background: var(--red); }
+.blue-bar { background: var(--blue); }
+
+.integrity-card {
+  justify-content: center;
+  padding: 10px 16px;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 20px;
+  align-items: start;
+}
+
+.activity-panel {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 22px 14px;
+}
+
+.panel-heading h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.panel-heading p {
+  margin: 3px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.record-badge {
+  padding: 5px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.record-badge span {
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.tab-strip {
+  display: flex;
+  gap: 6px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.tab-strip button {
+  position: relative;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.tab-strip button:hover {
+  color: var(--text-primary);
+}
+
+.tab-strip button.selected {
+  color: var(--cyan);
+}
+
+.tab-strip button.selected::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  background: var(--cyan);
+  border-radius: 2px 2px 0 0;
+}
+
+.filter-panel {
+  display: grid;
+  grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(120px, 1fr));
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  transition: all 0.2s ease;
+}
+
+.search-box:focus-within {
+  border-color: var(--cyan);
+}
+
+.search-symbol {
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.filter-panel select,
+.pagination-actions select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+.filter-panel select:focus,
+.pagination-actions select:focus {
+  border-color: var(--cyan);
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--surface-danger);
+  border-bottom: 1px solid var(--border-danger);
+  color: var(--text-danger);
+  font-size: 12px;
+}
+
+.error-banner button {
+  padding: 5px 10px;
+  border: 1px solid var(--border-danger);
+  border-radius: 6px;
+  background: var(--surface-danger);
+  color: var(--text-danger);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.event-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
 }
 
-.audit-data-table th {
-  background-color: #0e1015;
-  color: #64748b;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 12px 18px;
-  border-bottom: 1px solid #1e222d;
-  letter-spacing: 0.04em;
-  text-align: center;
+.event-table th {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: left;
+  white-space: nowrap;
 }
 
-.audit-data-table td {
-  padding: 12px 18px;
-  border-bottom: 1px solid #181b24;
-  color: #94a3b8;
+.event-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
   vertical-align: middle;
-  text-align: center;
 }
 
-.main-row {
+.expand-column {
+  width: 32px;
+  text-align: center !important;
+}
+
+.event-row {
   cursor: pointer;
-  transition: background 0.12s ease;
+  transition: background 0.15s ease;
 }
 
-.main-row:hover {
-  background-color: rgba(255, 255, 255, 0.02);
+.event-row:hover {
+  background: var(--hover-bg) !important;
 }
 
-.row-active {
-  background-color: rgba(59, 130, 246, 0.05) !important;
+.event-row.selected-row {
+  background: var(--active-bg) !important;
 }
 
-.chevron-icon {
+.event-row.critical-row {
+  box-shadow: inset 3px 0 var(--red);
+}
+
+.row-chevron {
   display: inline-block;
-  font-size: 9px;
-  color: #64748b;
+  color: var(--muted);
+  font-size: 18px;
   transition: transform 0.2s ease;
 }
 
-.chevron-rotated {
+.row-chevron.expanded {
   transform: rotate(90deg);
-  color: #3b82f6;
+  color: var(--cyan);
 }
 
-/* NODE PILL */
-.node-pill {
+.sequence-text {
   font-family: monospace;
-  font-size: 11px;
-  font-weight: 700;
-  color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.25);
-  padding: 2px 7px;
-  border-radius: 4px;
-  letter-spacing: 0.5px;
-  display: inline-block;
+  color: var(--cyan);
+  font-weight: 600;
 }
 
-/* CELL COMPONENTS */
-.actor-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.timestamp-cell {
+  white-space: nowrap;
+}
+
+.timestamp-cell small,
+.group-count {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .actor-name {
-  color: #f1f5f9;
-  font-weight: 600;
-}
-
-.actor-id {
-  font-size: 11px;
-  color: #64748b;
-  font-family: monospace;
-}
-
-.role-pill {
-  font-size: 10px;
   font-weight: 700;
-  color: #ec4899;
-  background: rgba(236, 72, 153, 0.1);
-  padding: 2px 6px;
-  border-radius: 4px;
+  color: var(--text-primary);
 }
 
-.type-badge {
+.actor-role {
+  margin-top: 2px;
+  color: var(--muted);
   font-size: 10px;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 4px;
-  text-transform: uppercase;
+}
+
+.action-badge, .outcome-badge {
   display: inline-block;
-}
-
-.type-badge.create { background: rgba(16, 185, 129, 0.12); color: #10b981; }
-.type-badge.update { background: rgba(59, 130, 246, 0.12); color: #3b82f6; }
-.type-badge.delete { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
-.type-badge.auth   { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
-.type-badge.default{ background: rgba(255, 255, 255, 0.08); color: #cbd5e1; }
-
-.target-badge {
-  font-family: monospace;
-  font-weight: 600;
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.08);
-  padding: 3px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.target-badge:hover .copy-hint {
-  opacity: 1;
-}
-
-.copy-hint {
-  opacity: 0.4;
-  font-size: 10px;
-}
-
-.summary-text {
-  color: #cbd5e1;
-  line-height: 1.4;
-}
-
-/* EXPANSION DRAWER */
-.details-expansion-tray td {
-  padding: 0 !important;
-  background-color: #0c0e12;
-  border-bottom: 1px solid #1e222d;
-}
-
-.tray-inner-wrapper {
-  padding: 20px 28px;
-  text-align: left;
-}
-
-.meta-grid-specs {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.spec-card {
-  background: #12141a;
-  border: 1px solid #1e222d;
+  padding: 4px 8px;
   border-radius: 6px;
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.span-3 {
-  grid-column: span 3;
-}
-
-.spec-label {
   font-size: 10px;
-  font-weight: 700;
-  color: #64748b;
-  letter-spacing: 0.05em;
+  font-weight: 800;
+  letter-spacing: 0.03em;
 }
 
-.justification-card {
-  background: rgba(245, 158, 11, 0.03);
-  border-color: rgba(245, 158, 11, 0.2);
+.action-badge.token { background: var(--catalog-accent-soft); color: var(--cyan); border: 1px solid var(--catalog-card-border); }
+.action-badge.danger, .outcome-failed { background: var(--surface-danger); color: var(--text-danger); border: 1px solid var(--border-danger); }
+.action-badge.governance { background: var(--surface-warning); color: var(--text-warning); border: 1px solid var(--border-warning); }
+.action-badge.success, .outcome-success { background: var(--surface-success); color: var(--text-success); border: 1px solid var(--border-success); }
+.action-badge.default, .outcome-unknown { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+
+.group-detail-row td {
+  padding: 0;
+  background: var(--surface-2) !important;
 }
 
-.justification-text {
-  margin: 0;
-  font-size: 13px;
-  color: #f1f5f9;
-  line-height: 1.5;
+.group-detail,
+.inline-detail {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
 }
 
-/* DIFF INSPECTOR */
-.diff-inspector {
-  background: #12141a;
-  border: 1px solid #1e222d;
+.group-detail-heading strong { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+
+.original-event {
+  display: grid;
+  grid-template-columns: 80px minmax(130px, 1fr) 75px minmax(130px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
-}
-
-.diff-inspector-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 14px;
-  background: #0e1015;
-  border-bottom: 1px solid #1e222d;
-}
-
-.diff-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  color: #94a3b8;
-  letter-spacing: 0.04em;
-}
-
-.diff-icon {
-  width: 14px;
-  height: 14px;
-  color: #3b82f6;
-}
-
-.raw-toggle-btn {
-  background: none;
-  border: 1px solid #282d3c;
-  color: #94a3b8;
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
-}
-
-.raw-toggle-btn:hover {
-  color: #ffffff;
-  border-color: #3b82f6;
-}
-
-.diff-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.diff-table th {
-  background: #101217;
-  color: #64748b;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 8px 14px;
-  border-bottom: 1px solid #1e222d;
   text-align: left;
+  transition: all 0.15s ease;
 }
 
-.diff-table td {
-  padding: 8px 14px;
-  border-bottom: 1px solid #181b24;
-  text-align: left;
-  vertical-align: top;
+.original-event:hover {
+  background: var(--hover-bg);
+  border-color: var(--cyan);
 }
 
-.field-key {
-  font-family: monospace;
-  font-weight: 600;
-  color: #cbd5e1;
-}
+.inline-detail strong { color: var(--text-primary); font-size: 12px; }
 
-.val-old {
-  background: rgba(239, 68, 68, 0.06);
-  color: #fca5a5;
-  font-family: monospace;
-}
-
-.val-new {
-  background: rgba(16, 185, 129, 0.06);
-  color: #6ee7b7;
-  font-family: monospace;
-}
-
-.diff-empty {
-  padding: 16px;
-  color: #64748b;
-  font-size: 12px;
-  font-style: italic;
-  text-align: center;
-}
-
-.raw-json-block {
-  padding: 14px;
-  max-height: 280px;
-  overflow-y: auto;
-  background: #090a0d;
-}
-
-.raw-json-block pre {
-  margin: 0;
-  font-family: monospace;
-  font-size: 11.5px;
-  color: #a5b4fc;
-}
-
-/* PAGINATION FOOTER */
 .pagination-footer {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: center;
   padding: 12px 20px;
-  background: #0e1015;
-  border-top: 1px solid #1e222d;
+  color: var(--muted);
+  font-size: 11px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
 }
 
-.pagination-info {
-  font-size: 12px;
-  color: #64748b;
-}
-
-.pagination-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.btn-page {
-  background: #161822;
-  border: 1px solid #282d3c;
-  color: #cbd5e1;
-  padding: 5px 12px;
+.pagination-actions button {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: 12px;
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
+  font-weight: 600;
 }
 
-.btn-page:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
+.inspector {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  position: sticky;
+  top: 24px;
+  height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 
-.page-indicator {
-  font-family: monospace;
-  font-size: 12px;
-  font-weight: 700;
-  color: #38bdf8;
-}
-
-/* UTILITY HELPERS */
-.text-left { text-align: left !important; }
-.text-center { text-align: center !important; }
-.text-mono { font-family: monospace; }
-.text-muted { color: #64748b; }
-.text-blue { color: #60a5fa; }
-.text-amber { color: #f59e0b; }
-.text-red { color: #f87171; }
-.text-xs { font-size: 11px; }
-
-.loading-state, .empty-state {
-  padding: 30px;
+.inspector-header {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  color: #64748b;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
 }
 
-.spinner-dot {
-  width: 20px;
-  height: 20px;
-  border: 2px solid #1e222d;
-  border-top-color: #3b82f6;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+.inspector-header h2 { color: var(--text-primary); }
+
+.copy-id, .hash-field button, .inspector-diff, .raw-json, .hash-field code {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.detail-line strong { color: var(--text-primary); }
+.justification-value { color: var(--text); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+@media (max-width: 1350px) {
+  .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+  .inspector {
+    position: fixed;
+    z-index: 50;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(420px, 92vw);
+    height: 100vh;
+    border-radius: 0;
+    transform: translateX(105%);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .inspector.inspector-mobile-open { transform: translateX(0); }
 }
 </style>

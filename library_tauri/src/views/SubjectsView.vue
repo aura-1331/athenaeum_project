@@ -1,4 +1,3 @@
-```vue
 <template>
   <div class="classification-layout">
     <!-- LEFT PANEL: STRUCTURAL METRICS -->
@@ -172,7 +171,7 @@
                   </router-link>
                 </td>
 
-                <td class="text-left size-small font-bold text-white">
+                <td class="text-left size-small font-bold text-primary">
                   {{ book.author || 'UNKNOWN AUTHOR' }}
                 </td>
 
@@ -478,8 +477,8 @@ onMounted(() => {
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
 
 .classification-layout {
-  background-color: #111216;
-  color: #e2e4e9;
+  background-color: var(--app-bg);
+  color: var(--text-primary);
   position: fixed !important;
   top: 0;
   left: 0;
@@ -494,8 +493,8 @@ onMounted(() => {
 
 .metric-sidebar {
   width: 420px;
-  background-color: #0a0b0d !important;
-  border-right: 1px solid #1c1f26 !important;
+  background-color: var(--surface-2) !important;
+  border-right: 1px solid var(--border-main) !important;
   padding: 48px;
   display: flex;
   flex-direction: column;
@@ -508,22 +507,22 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 11px;
-  color: #f59e0b;
+  color: var(--accent);
   text-decoration: none;
   margin-bottom: 32px;
   letter-spacing: 1px;
   font-weight: bold;
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid var(--catalog-card-border);
   padding: 8px 12px;
   border-radius: 4px;
-  background: rgba(245, 158, 11, 0.03);
+  background: var(--catalog-accent-soft);
   transition: all 0.2s ease;
 }
 
 .escape-matrix-link:hover {
-  color: #ffffff;
-  background: #f59e0b;
-  border-color: #f59e0b;
+  color: var(--button-text);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .escape-icon {
@@ -533,7 +532,7 @@ onMounted(() => {
 .panel-badge {
   font-size: 10px;
   font-weight: bold;
-  color: #525966;
+  color: var(--text-muted);
   letter-spacing: 2px;
   margin-bottom: 40px;
 }
@@ -544,7 +543,7 @@ onMounted(() => {
 
 .meta-label {
   font-size: 9px;
-  color: #626a7a;
+  color: var(--text-muted);
   letter-spacing: 1px;
   display: block;
   margin-bottom: 8px;
@@ -553,7 +552,7 @@ onMounted(() => {
 .display-title {
   font-size: 32px;
   font-weight: 800;
-  color: #ffffff;
+  color: var(--text-primary);
   margin: 0 0 16px;
   letter-spacing: 1px;
 }
@@ -561,13 +560,13 @@ onMounted(() => {
 .display-summary {
   font-size: 12px;
   line-height: 1.6;
-  color: #626a7a;
+  color: var(--text-muted);
   margin: 0;
 }
 
 .system-status-matrix {
-  background-color: #111216;
-  border: 1px solid #1c1f26;
+  background-color: var(--surface);
+  border: 1px solid var(--border-main);
   border-radius: 8px;
   padding: 16px;
   display: flex;
@@ -583,7 +582,7 @@ onMounted(() => {
 }
 
 .status-node span {
-  color: #525966;
+  color: var(--text-muted);
   font-weight: bold;
 }
 
@@ -592,7 +591,7 @@ onMounted(() => {
   min-width: 0;
   height: 100%;
   overflow-y: auto;
-  background-color: #111216;
+  background-color: var(--app-bg);
 }
 
 .feed-scroll-wrapper {
@@ -610,29 +609,30 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  background-color: #16181f;
-  border: 1px solid #22252e;
+  background-color: var(--surface);
+  border: 1px solid var(--border-main);
   border-radius: 6px;
   padding: 14px 20px;
   margin-bottom: 32px;
+  box-shadow: var(--shadow);
 }
 
 .filter-breadcrumb-badge {
   font-size: 11px;
   font-weight: bold;
-  color: #525966;
+  color: var(--text-muted);
   letter-spacing: 1px;
 }
 
 .filter-breadcrumb-badge .highlight {
-  color: #f59e0b;
+  color: var(--accent);
   font-weight: 800;
 }
 
 .clear-filter-btn {
   background: transparent;
   border: none;
-  color: #f87171;
+  color: var(--text-danger);
   font-family: inherit;
   font-size: 11px;
   font-weight: bold;
@@ -641,29 +641,29 @@ onMounted(() => {
 }
 
 .clear-filter-btn:hover {
-  color: #ef4444;
   text-decoration: underline;
 }
 
 .search-box-wrapper {
-  background-color: #16181f;
-  border: 1px solid #22252e;
+  background-color: var(--surface);
+  border: 1px solid var(--border-main);
   border-radius: 6px;
   padding: 12px 16px;
   display: flex;
   align-items: center;
   gap: 12px;
+  box-shadow: var(--shadow);
 }
 
 .search-icon {
-  color: #525966;
+  color: var(--text-muted);
   font-size: 16px;
 }
 
 .search-input {
   background: transparent;
   border: none;
-  color: #ffffff;
+  color: var(--text-primary);
   font-family: inherit;
   font-size: 13px;
   width: 100%;
@@ -675,10 +675,11 @@ onMounted(() => {
 }
 
 .table-container {
-  background-color: #16181f;
-  border: 1px solid #22252e;
+  background-color: var(--surface);
+  border: 1px solid var(--border-main);
   border-radius: 8px;
   overflow-x: auto;
+  box-shadow: var(--shadow);
 }
 
 .vault-table {
@@ -689,32 +690,32 @@ onMounted(() => {
 }
 
 .vault-table th {
-  background-color: #12141a;
-  color: #525966;
+  background-color: var(--surface-2);
+  color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 1px;
   padding: 16px 24px;
-  border-bottom: 1px solid #22252e;
+  border-bottom: 1px solid var(--border-main);
   text-transform: uppercase;
   white-space: nowrap;
 }
 
 .vault-table td {
   padding: 16px 24px;
-  border-bottom: 1px solid #1c1f26;
-  color: #a3a8b4;
+  border-bottom: 1px solid var(--border-main);
+  color: var(--text-secondary);
   vertical-align: middle;
 }
 
 .data-row:hover {
-  background-color: rgba(255, 255, 255, 0.01);
+  background-color: var(--hover-bg);
 }
 
 .interactive-identity-trigger {
   background: transparent;
   border: none;
-  color: #ffffff;
+  color: var(--text-primary);
   font-family: inherit;
   font-size: 13px;
   font-weight: bold;
@@ -725,24 +726,24 @@ onMounted(() => {
 }
 
 .interactive-identity-trigger:hover {
-  color: #ec4899;
+  color: var(--accent);
   text-decoration: underline;
 }
 
 .interactive-book-trigger {
-  color: #ffffff;
+  color: var(--text-primary);
   text-decoration: none;
   font-weight: bold;
   transition: color 0.2s ease;
 }
 
 .interactive-book-trigger:hover {
-  color: #3b82f6;
+  color: var(--accent);
   text-decoration: underline;
 }
 
 .error-message {
-  color: #f87171;
+  color: var(--text-danger);
   font-family: 'JetBrains Mono', monospace;
 }
 
@@ -759,15 +760,19 @@ onMounted(() => {
 }
 
 .text-blue {
-  color: #3b82f6;
+  color: var(--accent);
 }
 
 .text-magenta {
-  color: #ec4899;
+  color: var(--accent);
 }
 
 .text-muted {
-  color: #525966;
+  color: var(--text-muted);
+}
+
+.text-primary {
+  color: var(--text-primary);
 }
 
 .bold {
@@ -834,4 +839,3 @@ onMounted(() => {
   }
 }
 </style>
-```

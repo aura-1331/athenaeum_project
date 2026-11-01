@@ -1,6 +1,12 @@
+import {
+  createRouter,
+  createWebHashHistory,
+  type RouteRecordRaw,
+} from "vue-router"
 
-import { createRouter, createWebHashHistory } from "vue-router"
 import { useAuthStore } from "@/stores/auth"
+
+import type { RouteLocationNormalized } from "vue-router"
 
 import Login from "@/views/Login.vue"
 import Dashboard from "@/views/Dashboard.vue"
@@ -8,6 +14,7 @@ import CatalogueView from "@/views/CatalogueView.vue"
 import Search from "@/views/Search.vue"
 import AuditTrailView from "@/views/AuditTrailView.vue"
 import DetailsView from "@/views/DetailsView.vue"
+import PrintView from "@/views/PrintView.vue"
 import CreateWorkView from "@/views/CreateWorkView.vue"
 import CreateItemView from "@/views/CreateItemView.vue"
 import Operations from "@/views/Operations.vue"
@@ -26,7 +33,16 @@ import ItemReviewView from "@/views/ItemReviewView.vue"
 import WorkReviewView from "@/views/WorkReviewView.vue"
 import CreateWorkChiefDirect from "@/views/CreateWorkChiefDirect.vue"
 
-const routes = [
+declare module "vue-router" {
+  interface RouteMeta {
+    public?: boolean
+    requiresAuth?: boolean
+    permission?: string
+    roles?: string[]
+  }
+}
+
+const routes: RouteRecordRaw[] = [
   {
     path: "/login",
     name: "Login",
@@ -65,6 +81,12 @@ const routes = [
     path: "/details/:id",
     name: "Details",
     component: DetailsView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: "/print/:id",
+    name: "PrintView",
+    component: PrintView,
     meta: { requiresAuth: true },
   },
 
@@ -224,7 +246,9 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+
+
+router.beforeEach((to: RouteLocationNormalized, from: RouteLocationNormalized) => {
   const auth = useAuthStore()
 
   if (to.meta.public) {
@@ -238,22 +262,20 @@ router.beforeEach((to) => {
     return { name: "Login" }
   }
 
-  const role =
+  const role: string | undefined =
     auth.user?.role ??
-    auth.currentUser?.role ??
     auth.role ??
     auth.userRole
 
-  if (to.meta.roles && !to.meta.roles.includes(role)) {
+  if (
+    to.meta.roles &&
+    (!role || !to.meta.roles.includes(role))
+  ) {
     return { name: "Dashboard" }
   }
 
   if (to.meta.permission) {
-    const allowed =
-      typeof auth.hasPermission === "function"
-        ? auth.hasPermission(to.meta.permission)
-        : Array.isArray(auth.permissions) &&
-          auth.permissions.includes(to.meta.permission)
+    const allowed = auth.hasPermission(to.meta.permission)
 
     if (!allowed) {
       return { name: "Dashboard" }
