@@ -1,3 +1,4 @@
+import os
 from time import perf_counter
 
 from fastapi import APIRouter, HTTPException, Request
@@ -67,3 +68,8 @@ def health_check(request: Request):
     finally:
         if conn:
             conn.close()
+
+@router.get("/version")
+def version():
+    """Reports which commit is deployed. No database access."""
+    return {"commit": os.getenv("RENDER_GIT_COMMIT")}
