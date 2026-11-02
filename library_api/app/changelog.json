@@ -1,5 +1,17 @@
 [
   {
+    "version": "v2.2.6",
+    "date": "2026-11-02",
+    "sections": [
+      {
+        "category": "Infrastructure & Release",
+        "notes": [
+          "Allow http://tauri.localhost in production CORS"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.5",
     "date": "2026-11-01",
     "sections": [
