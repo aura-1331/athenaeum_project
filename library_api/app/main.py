@@ -157,6 +157,7 @@ if ATHENAEUM_ENV == "production":
     CORS_ORIGINS = [
         "https://athenaeum-project.vercel.app",
         "https://tauri.localhost",
+        "http://tauri.localhost",
     ]
 else:
     CORS_ORIGINS = [
