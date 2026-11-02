@@ -1,43 +1,36 @@
-name: Release App
+name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
-  release:
-    permissions:
-      contents: write
-    runs-on: windows-latest
-
+  deploy-backend:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Trigger Render deploy
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 26
+      - name: Wait until Render runs this commit
+        run: |
+          for i in $(seq 1 40); do
+            sha=$(curl -s --max-time 60 https://athenaeum-api.onrender.com/health/version | jq -r .commit 2>/dev/null || echo none)
+            echo "Try $i | Live: $sha | Expected: $GITHUB_SHA"
+            [ "$sha" = "$GITHUB_SHA" ] && exit 0
+            sleep 15
+          done
+          echo "Deploy never went live"
+          exit 1
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install dependencies
-        working-directory: ./library_tauri
-        run: npm install
-
-      - name: Build and Release Tauri App
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
-          VITE_API_URL: https://athenaeum-api.onrender.com
-        with:
-          projectPath: './library_tauri'
-          tagName: ${{ github.ref_name }}
-          releaseName: 'The Athenaeum ${{ github.ref_name }}'
-          releaseBody: 'A new version of The Athenaeum is available!'
-          releaseDraft: false
-          prerelease: false
+      - name: CORS check for every client
+        run: |
+          fail=0
+          for o in https://athenaeum-project.vercel.app https://tauri.localhost http://tauri.localhost; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X OPTIONS \
+              https://athenaeum-api.onrender.com/token \
+              -H "Origin: $o" -H "Access-Control-Request-Method: POST")
+            echo "$o -> $code"
+            [ "$code" = "200" ] || fail=1
+          done
+          exit $fail
