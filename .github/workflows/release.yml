@@ -16,6 +16,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r library_api/requirements.txt pytest httpx
+      - name: Create throwaway test keys
+        working-directory: library_api
+        run: |
+          openssl genrsa -out private.pem 2048
+          openssl rsa -in private.pem -pubout -out public.pem
       - run: python -m pytest tests -v
         working-directory: library_api
 
