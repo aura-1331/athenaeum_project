@@ -99,3 +99,41 @@ jobs:
             [ "$code" = "200" ] || fail=1
           done
           exit $fail
+
+  build-desktop:
+    needs: [deploy-backend]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 26
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        working-directory: ./library_tauri
+        run: npm install
+
+      - name: Build and Release Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
+          VITE_API_URL: https://athenaeum-api.onrender.com
+        with:
+          projectPath: './library_tauri'
+          tagName: ${{ github.ref_name }}
+          releaseName: 'The Athenaeum ${{ github.ref_name }}'
+          releaseBody: 'A new version of The Athenaeum is available!'
+          releaseDraft: false
+          prerelease: false
