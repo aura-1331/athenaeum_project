@@ -6,7 +6,39 @@ on:
   workflow_dispatch:
 
 jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    env:
+      ATHENAEUM_ENV: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r library_api/requirements.txt pytest httpx
+      - run: python -m pytest tests -v
+        working-directory: library_api
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+    defaults:
+      run:
+        working-directory: library_tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: library_tauri/package-lock.json
+      - run: npm ci
+      - run: npm run test:run -- --passWithNoTests
+      - run: npm run build
+
   deploy-backend:
+    needs: [test-backend, test-frontend]
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Render deploy
