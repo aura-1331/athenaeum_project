@@ -9,8 +9,29 @@ on:
 jobs:
   test-backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: athenaeum_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     env:
       ATHENAEUM_ENV: production
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: athenaeum_test
+      DB_USER: test
+      DB_PASSWORD: test
+      DB_SSLMODE: disable
+      PGPASSWORD: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -22,6 +43,8 @@ jobs:
         run: |
           openssl genrsa -out private.pem 2048
           openssl rsa -in private.pem -pubout -out public.pem
+      - name: Load database structure into test database
+        run: psql -h localhost -U test -d athenaeum_test -v ON_ERROR_STOP=1 -q -f library_api/tests/schema.sql
       - run: python -m pytest tests -v
         working-directory: library_api
 
