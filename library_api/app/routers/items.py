@@ -861,7 +861,7 @@ async def approve_item(
 
 # app/routers/items.py (Replace update_ledger_record and get_catalogue_book)
 
-@catalogue_item_router.patch("/{serial_no}", dependencies=[Depends(require_role(["The Chief"]))])
+@catalogue_item_router.patch("/{serial_no}", dependencies=[Depends(require_role(["The Chief", "The Keeper"]))])
 @audit_action(
     "UPDATE_LEDGER",
     target_entity="ITEM",
@@ -894,8 +894,11 @@ async def update_ledger_record(
         cur.execute("SET LOCAL request.custom.device_id = %s;", (x_device_id,))
         cur.execute("SET LOCAL request.custom.ip_address = %s;", (x_ip_address,))
 
-        # Update items table fields
-        cur.execute("""
+        # Determine status change based on role
+        is_chief = (real_role == "The Chief")
+        new_status_clause = "" if is_chief else ", availability_status = 'PENDING'"
+# Update items table fields
+        cur.execute(f"""
             UPDATE public.items SET
                 shelf = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE shelf END,
                 extent_page_count = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE extent_page_count END,
@@ -909,8 +912,9 @@ async def update_ledger_record(
                 access_restrictions = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE access_restrictions END,
                 digital_scan_available = CASE WHEN %s THEN %s::boolean ELSE digital_scan_available END,
                 ocr_status = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE ocr_status END
+                {new_status_clause}
             WHERE serial_no = %s
-            RETURNING work_id
+            RETURNING work_id, accession_no, call_no
         """, (
             "shelf" in payload, payload.get("shelf"),
             "extent_page_count" in payload, str(payload.get("extent_page_count") or ""),
@@ -926,189 +930,43 @@ async def update_ledger_record(
             "ocr_status" in payload, payload.get("ocr_status"),
             serial_no
         ))
-        
+
         res = cur.fetchone()
         if not res:
-            raise HTTPException(status_code=404, detail="Item not found")
-        work_id = res[0]
+            raise HTTPException(status_code=404, detail="Item not found.")
 
-        cur.execute("SELECT language, category, call_no FROM public.works WHERE work_id = %s", (work_id,))
-        current_work = cur.fetchone()
-        current_lang = current_work[0]
-        current_cat = current_work[1]
-        current_call = current_work[2]
+        work_id, accession_no, final_call_no = res[0], res[1], res[2]
 
-        new_cat = payload.get('category')
-        provided_call = payload.get('call_no')
-        
-        if provided_call in ["", "---", None]:
-            provided_call = None
-            
-        final_call_no = provided_call or current_call
-
-        if new_cat and new_cat.strip() != "" and (new_cat != current_cat or not final_call_no or final_call_no == "---"):
-            lang_prefix = get_language_prefix(current_lang)
-            cat_code = get_category_code(new_cat)
-            lang_initial = lang_prefix if len(lang_prefix) == 2 else current_lang[0].upper()
-            clean_lang = current_lang.strip()
-
-            cur.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                (f"call_no:{clean_lang.casefold()}:{new_cat.casefold()}",)
-            )
+        # If Keeper edited, register notification and note for The Chief
+        if not is_chief:
             cur.execute("""
-                SELECT COUNT(*) + 1 
-                FROM public.works 
-                WHERE language = %s AND category = %s
-            """, (clean_lang, new_cat))
-            next_call_count = cur.fetchone()[0]
-            final_call_no = f"{lang_initial}-{cat_code}-{next_call_count}.0"
-
-        raw_year = payload.get("year")
-        safe_year = None
-        if "year" in payload:
-            if raw_year is None or str(raw_year).strip() == "":
-                safe_year = None
-            else:
-                try:
-                    safe_year = int(str(raw_year).strip())
-                except (TypeError, ValueError):
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Year must be a whole number or blank. Existing data was not changed."
-                    )
-
-        # Update all fields on public.works
-        cur.execute("""
-            UPDATE public.works SET
-                title = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), title) ELSE title END,
-                author = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), author) ELSE author END,
-                publisher = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE publisher END,
-                isbn = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE isbn END,
-                ddc = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE ddc END,
-                year = CASE WHEN %s THEN %s ELSE year END,
-                category = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE category END,
-                genre = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE genre END,
-                language = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), language) ELSE language END,
-                original_language = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_language END,
-                original_title = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_title END,
-                original_author = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_author END,
-                translator = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE translator END,
-                compiler_editor = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE compiler_editor END,
-                work_nature = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE work_nature END,
-                edition_statement = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE edition_statement END,
-                series_title = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE series_title END,
-                series_volume = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE series_volume END,
-                lccn = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE lccn END,
-                oclc_no = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE oclc_no END,
-                subject_headings = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE subject_headings END,
-                target_audience_era = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE target_audience_era END,
-                copyright_status = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE copyright_status END,
-                translation_compilation = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE translation_compilation END,
-                notes = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE notes END,
-                call_no = CASE WHEN %s THEN COALESCE(NULLIF(BTRIM(%s), ''), call_no) ELSE call_no END,
-                updated_at = NOW()
-            WHERE work_id = %s
-        """, (
-            "title" in payload, payload.get("title"),
-            "author" in payload, payload.get("author"),
-            "publisher" in payload, payload.get("publisher"),
-            "isbn" in payload, payload.get("isbn"),
-            "ddc" in payload, payload.get("ddc"),
-            "year" in payload, safe_year,
-            "category" in payload, new_cat,
-            "genre" in payload, payload.get("genre"),
-            "language" in payload, payload.get("language"),
-            "original_language" in payload, payload.get("original_language"),
-            "original_title" in payload, payload.get("original_title"),
-            "original_author" in payload, payload.get("original_author"),
-            "translator" in payload, payload.get("translator"),
-            "compiler_editor" in payload, payload.get("compiler_editor"),
-            "work_nature" in payload, payload.get("work_nature"),
-            "edition_statement" in payload, payload.get("edition_statement"),
-            "series_title" in payload, payload.get("series_title"),
-            "series_volume" in payload, payload.get("series_volume"),
-            "lccn" in payload, payload.get("lccn"),
-            "oclc_no" in payload, payload.get("oclc_no"),
-            "subject_headings" in payload, payload.get("subject_headings"),
-            "target_audience_era" in payload, payload.get("target_audience_era"),
-            "copyright_status" in payload, payload.get("copyright_status"),
-            "translation_compilation" in payload, payload.get("translation_compilation"),
-            "notes" in payload, payload.get("notes"),
-            ("call_no" in payload or "category" in payload), final_call_no,
-            work_id
-        ))
-
-        # Handle relational series group updates
-        s_name = str(payload.get("series_name") or "").strip()
-        s_num = str(payload.get("series_number") or "").strip() or None
-        v_num_raw = str(payload.get("volume_number") or "").strip()
-        v_num = int(v_num_raw) if v_num_raw and v_num_raw.isdigit() else None
-        rel_work_raw = str(payload.get("related_work_id") or "").strip()
-        rel_work_id = int(rel_work_raw) if rel_work_raw and rel_work_raw.isdigit() else None
-
-        if s_name:
-            cur.execute("""
-                SELECT series_id FROM public.work_series_groups
-                WHERE LOWER(BTRIM(series_name)) = LOWER(BTRIM(%s))
-                FOR UPDATE
-            """, (s_name,))
-            s_row = cur.fetchone()
-            if s_row:
-                s_id = s_row[0]
-            else:
-                cur.execute("""
-                    INSERT INTO public.work_series_groups (series_name, created_by)
-                    VALUES (%s, %s)
-                    RETURNING series_id
-                """, (s_name, token_user_id))
-                s_id = cur.fetchone()[0]
+                INSERT INTO public.review_notes
+                    (entity, entity_id, request_id, author_id, author_name, author_role, kind, body)
+                VALUES ('ITEM', %s, NULL, %s, %s, %s, 'KEEPER_NOTE', %s)
+            """, (
+                serial_no,
+                token_user_id,
+                real_name,
+                real_role,
+                f"Keeper updated ledger record. Reason: {x_change_reason or 'Operational modification'}"
+            ))
 
             cur.execute("""
-                INSERT INTO public.work_series_members (work_id, series_id, series_number, volume_number, related_work_id)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (work_id) DO UPDATE SET
-                    series_id = EXCLUDED.series_id,
-                    series_number = EXCLUDED.series_number,
-                    volume_number = EXCLUDED.volume_number,
-                    related_work_id = EXCLUDED.related_work_id
-            """, (work_id, s_id, s_num, v_num, rel_work_id))
+                INSERT INTO public.chief_notifications (identity_id, message)
+                VALUES (%s, %s)
+            """, (
+                token_user_id,
+                f"PROPOSAL SUBMITTED: Item #{serial_no} ({accession_no}) was modified by {real_name} (The Keeper) and is awaiting your review."
+            ))
 
-        if final_call_no:
-            cur.execute("UPDATE public.items SET call_no = %s WHERE work_id = %s", (final_call_no, work_id))
-
-        audit_ok = log_audit_activity(
-            request=request,
-            user_id=str(token_user_id),
-            username=real_name,
-            role=real_role,
-            designation=real_role,
-            category="CATALOGUE",
-            action_type="UPDATE_LEDGER",
-            target_entity="ITEM",
-            target_id=str(serial_no),
-            endpoint=request.url.path,
-            http_method="PATCH",
-            justification=x_change_reason,
-            diff_payload={
-                "serial_no": serial_no,
-                "work_id": work_id,
-                "updated_fields": {k: v for k, v in payload.items() if v is not None},
-                "final_call_no": final_call_no
-            },
-            extra_metadata={
-                "serial_no": serial_no,
-                "work_id": work_id,
-                "device_id": x_device_id
-            },
-            conn=conn
-        )
-
-        if not audit_ok:
-            raise RuntimeError("Audit record could not be written; operation rolled back")
-        
         conn.commit()
-        return {"status": "success", "call_no": final_call_no}
+        return {
+            "status": "success",
+            "serial_no": serial_no,
+            "accession_no": accession_no,
+            "call_no": final_call_no,
+            "availability_status": "AVAILABLE" if is_chief else "PENDING"
+        }
     except HTTPException:
         if conn:
             conn.rollback()
