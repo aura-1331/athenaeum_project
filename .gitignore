@@ -45,3 +45,5 @@ test_check.py
 test_next_id.py
 find_err.py
 *.bak*
+
+schema_sync_plan_*.sql
