@@ -953,10 +953,13 @@ async def update_ledger_record(
 
             cur.execute("""
                 INSERT INTO public.chief_notifications (identity_id, message)
-                VALUES (%s, %s)
+                SELECT u.identity_id, %s
+                FROM public.users u
+                WHERE u.user_id = %s
+                  AND u.identity_id IS NOT NULL
             """, (
-                token_user_id,
-                f"PROPOSAL SUBMITTED: Item #{serial_no} ({accession_no}) was modified by {real_name} (The Keeper) and is awaiting your review."
+                f"PROPOSAL SUBMITTED: Item #{serial_no} ({accession_no}) was modified by {real_name} (The Keeper) and is awaiting your review.",
+                token_user_id
             ))
 
         conn.commit()
