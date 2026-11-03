@@ -904,6 +904,7 @@ const showAllSections = ref(false)
 const activeModalType = ref<'commit' | 'abort' | null>(null)
 const changeReason = ref<string>("")
 let toastTimeout: ReturnType<typeof setTimeout> | null = null
+let draftTimer: ReturnType<typeof setTimeout> | null = null
 
 interface ToastNotification {
   message: string
@@ -1275,6 +1276,10 @@ async function revertSingleField(fieldKey: string) {
 
 function revertAllModifications() {
   if (!pristineBook.value) return
+  const id = editableBook.value?.serial_no || route.params.id
+  if (id) {
+    localStorage.removeItem(`athenaeum_draft_item_${id}`)
+  }
   editableBook.value = JSON.parse(JSON.stringify(pristineBook.value))
   setupComboboxValues()
   triggerToastNotification("All modifications reverted.", "success")
@@ -1339,6 +1344,34 @@ watch(() => route.params.id, (newId: string | string[] | undefined) => {
     fetchRecordData()
   }
 })
+
+// Auto-save changes to client-side localStorage without triggering API requests or audit logs
+watch(
+  () => editableBook.value,
+  (newVal) => {
+    if (!newVal || !pristineBook.value) return
+    
+    if (draftTimer) clearTimeout(draftTimer)
+    draftTimer = setTimeout(() => {
+      const id = newVal.serial_no || route.params.id
+      if (!id) return
+      
+      const draftKey = `athenaeum_draft_item_${id}`
+      if (modifiedFieldsList.value.length > 0) {
+        localStorage.setItem(
+          draftKey,
+          JSON.stringify({
+            data: newVal,
+            savedAt: new Date().toISOString()
+          })
+        )
+      } else {
+        localStorage.removeItem(draftKey)
+      }
+    }, 400) // 400ms debounce
+  },
+  { deep: true }
+)
 
 function isSectionVisible(sectionKey: string, fieldKeywords: string[]): boolean {
   if (searchQuery.value.trim() !== '') {
@@ -1438,8 +1471,24 @@ async function fetchRecordData() {
     await fetchLanguageOptions()
     const response = await axios.get(`/catalogue/holding/${encodeURIComponent(String(id))}`)
     if (!response.data) throw new Error('The server returned an empty record.')
-    editableBook.value = { ...response.data }
     pristineBook.value = JSON.parse(JSON.stringify(response.data))
+    
+    // Check if an unsaved desktop draft exists for this record
+    const draftKey = `athenaeum_draft_item_${response.data.serial_no || id}`
+    const cachedDraft = localStorage.getItem(draftKey)
+    
+    if (cachedDraft) {
+      try {
+        const parsed = JSON.parse(cachedDraft)
+        editableBook.value = { ...response.data, ...parsed.data }
+        triggerToastNotification("Restored unsaved local draft.", "success")
+      } catch {
+        editableBook.value = { ...response.data }
+      }
+    } else {
+      editableBook.value = { ...response.data }
+    }
+    
     setupComboboxValues()
   } catch (err: any) {
     loadError.value = err?.response?.data?.message || err?.message || 'Failed to load record.'
@@ -1496,6 +1545,9 @@ async function saveRecord() {
       }
     })
     
+    // Clear local draft upon confirmed backend commit
+    localStorage.removeItem(`athenaeum_draft_item_${id}`)
+    
     try {
       await dispatchAuditTrail('UPDATE', 'CATALOGUE', id, `Updated record details for ${editableBook.value.title}`, operationalReason, null, editableBook.value)
     } catch {}
@@ -1511,6 +1563,7 @@ async function saveRecord() {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleEditorKeyboard)
+  if (draftTimer) clearTimeout(draftTimer)
   if (toastTimeout) clearTimeout(toastTimeout)
   if (debounceAuthorTimeout) clearTimeout(debounceAuthorTimeout)
   if (debouncePublisherTimeout) clearTimeout(debouncePublisherTimeout)
@@ -2275,6 +2328,7 @@ onMounted(() => {
 .toast-message.error {
   border-left: 4px solid #ef4444;
 }
+
 /* Ensure the input container can hold an absolute dropdown */
 .relative-position {
   position: relative;
@@ -2379,6 +2433,7 @@ onMounted(() => {
   border: 1px solid #065f46;
   white-space: nowrap;
 }
+
 @media (max-width: 900px) {
   .workspace {
     grid-template-columns: 1fr;

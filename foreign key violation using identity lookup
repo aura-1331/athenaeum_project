@@ -1,0 +1,21 @@
+[1mdiff --git a/library_api/app/routers/items.py b/library_api/app/routers/items.py[m
+[1mindex 8e1f0b7..8167526 100644[m
+[1m--- a/library_api/app/routers/items.py[m
+[1m+++ b/library_api/app/routers/items.py[m
+[36m@@ -953,10 +953,13 @@[m [masync def update_ledger_record([m
+ [m
+             cur.execute("""[m
+                 INSERT INTO public.chief_notifications (identity_id, message)[m
+[31m-                VALUES (%s, %s)[m
+[32m+[m[32m                SELECT u.identity_id, %s[m
+[32m+[m[32m                FROM public.users u[m
+[32m+[m[32m                WHERE u.user_id = %s[m
+[32m+[m[32m                  AND u.identity_id IS NOT NULL[m
+             """, ([m
+[31m-                token_user_id,[m
+[31m-                f"PROPOSAL SUBMITTED: Item #{serial_no} ({accession_no}) was modified by {real_name} (The Keeper) and is awaiting your review."[m
+[32m+[m[32m                f"PROPOSAL SUBMITTED: Item #{serial_no} ({accession_no}) was modified by {real_name} (The Keeper) and is awaiting your review.",[m
+[32m+[m[32m                token_user_id[m
+             ))[m
+ [m
+         conn.commit()[m
