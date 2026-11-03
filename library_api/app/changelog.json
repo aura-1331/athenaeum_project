@@ -1,5 +1,17 @@
 [
   {
+    "version": "v2.2.9",
+    "date": "2026-11-03",
+    "sections": [
+      {
+        "category": "Changes",
+        "notes": [
+          "permit Keeper updates and route to Chief approval docket"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.8",
     "date": "2026-11-03",
     "sections": [
