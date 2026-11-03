@@ -1,5 +1,23 @@
 [
   {
+    "version": "v2.2.10",
+    "date": "2026-11-03",
+    "sections": [
+      {
+        "category": "Features",
+        "notes": [
+          "implement client-side local draft auto-saving in EditItemView"
+        ]
+      },
+      {
+        "category": "Security & Authentication",
+        "notes": [
+          "resolve chief_notifications foreign key violation using identity lookup"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.9",
     "date": "2026-11-03",
     "sections": [
