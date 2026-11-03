@@ -1,5 +1,45 @@
 [
   {
+    "version": "v2.2.8",
+    "date": "2026-11-03",
+    "sections": [
+      {
+        "category": "Changes",
+        "notes": [
+          "Ignore schema sync plan files"
+        ]
+      },
+      {
+        "category": "Features",
+        "notes": [
+          "Add schema sync tool",
+          "Add tests before deploy",
+          "Add release pipeline",
+          "Add /health/version route"
+        ]
+      },
+      {
+        "category": "Infrastructure & Release",
+        "notes": [
+          "Run original installer build after tests and deploy",
+          "Run tests on every push, deploy only on release"
+        ]
+      },
+      {
+        "category": "Security & Authentication",
+        "notes": [
+          "Add database, token and API tests"
+        ]
+      },
+      {
+        "category": "Bug Fixes",
+        "notes": [
+          "Fix workflow indentation"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.7",
     "date": "2026-11-02",
     "sections": [

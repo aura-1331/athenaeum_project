@@ -1,7 +1,7 @@
 {
   "name": "the-athenaeum",
   "private": true,
-  "version": "2.2.7",
+  "version": "2.2.8",
   "type": "module",
   "scripts": {
     "predev": "kill-port 1420",
