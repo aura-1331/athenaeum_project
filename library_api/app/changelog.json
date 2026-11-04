@@ -1,5 +1,17 @@
 [
   {
+    "version": "v2.2.11",
+    "date": "2026-11-04",
+    "sections": [
+      {
+        "category": "Security & Authentication",
+        "notes": [
+          "Keeper edits save directly with old/new audit trail; add draft recovery and DDC validation to EditItemView"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.10",
     "date": "2026-11-03",
     "sections": [
