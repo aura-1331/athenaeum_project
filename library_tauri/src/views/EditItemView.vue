@@ -27,12 +27,12 @@
         </div>
 
         <div class="topbar-meta">
-            <button class="button-back btn-sm" type="button" @click="navigateSection('prev')" title="Previous Section (←)">←</button>
-            <span class="record-pill">{{ currentTabLabel }}</span>
-            <button class="button-back btn-sm" type="button" @click="navigateSection('next')" title="Next Section (→)">→</button>
-            <span class="status-dot"></span>
-            <span>Editing Mode</span>
-          </div>
+          <button class="button-back btn-sm" type="button" @click="navigateSection('prev')" title="Previous Section (←)">←</button>
+          <span class="record-pill">{{ currentTabLabel }}</span>
+          <button class="button-back btn-sm" type="button" @click="navigateSection('next')" title="Next Section (→)">→</button>
+          <span class="status-dot"></span>
+          <span>Editing Mode</span>
+        </div>
       </header>
 
       <!-- Compact Identity Bar -->
@@ -54,6 +54,25 @@
           <strong>#{{ editableBook.work_id || '—' }}</strong>
         </div>
       </section>
+
+      <!-- Draft Recovery Notification Banner -->
+      <aside v-if="detectedDraft" class="draft-recovery-banner" role="status">
+        <div class="banner-content">
+          <span class="banner-icon">📋</span>
+          <div>
+            <strong>Unsaved draft found</strong>
+            <p>Saved on this device at {{ formatDraftTime(detectedDraft.savedAt) }}. Would you like to restore your uncommitted edits?</p>
+          </div>
+        </div>
+        <div class="banner-actions">
+          <button class="button button-quiet btn-sm" type="button" @click="discardDetectedDraft">
+            Discard draft
+          </button>
+          <button class="button button-primary btn-sm" type="button" @click="restoreDetectedDraft">
+            Restore draft
+          </button>
+        </div>
+      </aside>
 
       <div class="workspace">
         <!-- Sidebar Navigation -->
@@ -212,11 +231,14 @@
                   />
                 </div>
 
-                <!-- Strict DDC with regex validation -->
+                <!-- Strict Real-World DDC (Optional) -->
                 <div class="field-block" :class="{ 'field-modified': isFieldModified('ddc') }">
                   <div class="label-line">
-                    <label for="field-ddc">Dewey Decimal (DDC)</label>
-                    <span v-if="!isDdcValid" class="validation-error-tag">Format: 3 digits [.decimals]</span>
+                    <label for="field-ddc">
+                      Dewey Decimal (DDC) 
+                      <span class="optional-pill">Optional</span>
+                    </label>
+                    <span v-if="!isDdcValid" class="validation-error-tag">Invalid DDC: 3 digits [.decimals]</span>
                     <span v-else-if="isFieldModified('ddc')" class="modified-label">Modified</span>
                   </div>
                   <input 
@@ -224,10 +246,12 @@
                     v-model="editableBook.ddc" 
                     class="input-control" 
                     :class="{ 'input-invalid': !isDdcValid }" 
-                    placeholder="e.g. 823.914 or 894.812" 
-                    maxlength="14" 
+                    placeholder="e.g. 894.812 or 823.914" 
+                    maxlength="16" 
+                    @input="handleDdcInput"
+                    @blur="formatDdcOnBlur"
                   />
-                  <p class="field-help">Strict 3-digit class followed by optional decimals (e.g. 894.812 for Malayalam).</p>
+                  <p class="field-help">Standard 3-digit class (000–999) + optional subdivision decimals (e.g. 894.812).</p>
                 </div>
 
                 <!-- Unified Genre Multi-Tag Combobox -->
@@ -258,7 +282,7 @@
                     <button class="button button-quiet" type="button" @click="addGenreFromInput">Add Tag</button>
                   </div>
 
-                  <!-- Suggested Quick Badges -->
+                  <!-- Suggested Quick Badges Grouped/Extended -->
                   <div class="quick-genre-hints">
                     <small>Quick Pick:</small>
                     <button 
@@ -832,6 +856,9 @@
         <div class="savebar-info">
           <span class="save-indicator" :class="{ dirty: modifiedFieldsList.length }"></span>
           <span>{{ modifiedFieldsList.length ? `${modifiedFieldsList.length} unsaved field changes` : 'All changes saved' }}</span>
+          <span v-if="lastDraftSavedTime" class="draft-timestamp">
+            · Draft saved locally at {{ lastDraftSavedTime }}
+          </span>
         </div>
         <div class="savebar-actions">
           <button class="button button-quiet" type="button" @click="handleBackNavigation">Cancel (Esc)</button>
@@ -875,7 +902,7 @@
       </section>
     </div>
 
-    <!-- Toast -->
+    <!-- Toast Notification -->
     <div v-if="toast" class="toast-message" :class="toast.type" role="status">{{ toast.message }}</div>
   </main>
 </template>
@@ -905,6 +932,15 @@ const activeModalType = ref<'commit' | 'abort' | null>(null)
 const changeReason = ref<string>("")
 let toastTimeout: ReturnType<typeof setTimeout> | null = null
 let draftTimer: ReturnType<typeof setTimeout> | null = null
+
+// Draft management states
+interface LocalDraftPayload {
+  data: any
+  savedAt: string
+}
+const detectedDraft = ref<LocalDraftPayload | null>(null)
+const lastDraftSavedTime = ref<string>('')
+const DRAFT_MAX_AGE_HOURS = 48
 
 interface ToastNotification {
   message: string
@@ -1032,11 +1068,22 @@ async function fetchLanguageOptions() {
   }
 }
 
-// Genres
+// ----------------------------------------------------
+// Expanded Real-World Literary & Indic Genre Presets
+// ----------------------------------------------------
 const newGenreInput = ref("")
 const popularIndianGenres = [
-  "NOVEL", "SHORT STORIES", "POETRY", "BIOGRAPHY", "DETECTIVE", 
-  "HISTORICAL", "PHILOSOPHY", "DRAMA", "SATIRE", "FOLKLORE"
+  // Core Forms & Fiction
+  "NOVEL", "SHORT STORIES", "POETRY", "DRAMA", "SATIRE", "EPIC",
+  // Mystery & Popular Fiction
+  "DETECTIVE", "CRIME & THRILLER", "HISTORICAL FICTION", "SCIENCE FICTION", "FANTASY", "MYTHOLOGY",
+  // Non-Fiction & Lineage
+  "BIOGRAPHY", "AUTOBIOGRAPHY", "MEMOIR", "ESSAYS", "LETTERS", "TRAVELOGUE",
+  // Humanities & Indic Knowledge
+  "PHILOSOPHY", "HISTORY", "LITERARY CRITICISM", "FOLKLORE", "VEDIC & RELIGIOUS",
+  "SOCIOLOGY", "POLITICS", "ART & ARCHITECTURE", "MANUSCRIPT / PALM-LEAF",
+  // Regional Malayalam / South Asian Formats
+  "AATHMAKATHA", "CHARITHRAM", "NATAKAM", "VIMARSHANAM", "THATHVACHINTHANAM", "BALASAHITHYAM"
 ]
 
 const currentGenreList = computed<string[]>(() => {
@@ -1074,6 +1121,69 @@ function clearAllGenres() {
   editableBook.value.genre = null
 }
 
+// ----------------------------------------------------
+// Strict Real-World DDC Validation & Formatting (Optional)
+// DDC Standard: Exactly 3 digits (000-999) + optional decimal extension
+// ----------------------------------------------------
+const isDdcValid = computed(() => {
+  const val = editableBook.value?.ddc
+  if (!val || String(val).trim() === "") return true // STRICTLY OPTIONAL
+  
+  const trimmed = String(val).trim()
+  // Matches 000 to 999, followed optionally by a decimal dot and one or more digits
+  return /^[0-9]{3}(\.[0-9]+)?$/.test(trimmed)
+})
+
+function handleDdcInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  let val = input.value
+
+  // Strip invalid characters (allow only numbers and dot)
+  val = val.replace(/[^0-9.]/g, '')
+
+  // Prevent multiple dots
+  const parts = val.split('.')
+  if (parts.length > 2) {
+    val = `${parts[0]}.${parts.slice(1).join('')}`
+  }
+
+  editableBook.value.ddc = val
+}
+
+function formatDdcOnBlur() {
+  const raw = editableBook.value?.ddc
+  if (!raw || !String(raw).trim()) {
+    editableBook.value.ddc = null
+    return
+  }
+
+  let clean = String(raw).trim().replace(/[^0-9.]/g, '')
+  if (!clean) {
+    editableBook.value.ddc = null
+    return
+  }
+
+  // Remove trailing decimal point if left by user
+  if (clean.endsWith('.')) {
+    clean = clean.slice(0, -1)
+  }
+
+  const parts = clean.split('.')
+  let mainClass = parts[0]
+  const decimalPart = parts[1] !== undefined ? parts[1] : null
+
+  // In DDC, base class is strictly 3 digits (e.g. 82 -> 082, 8 -> 008)
+  if (mainClass.length > 0 && mainClass.length < 3) {
+    mainClass = mainClass.padStart(3, '0')
+  }
+
+  if (decimalPart !== null && decimalPart.length > 0) {
+    editableBook.value.ddc = `${mainClass}.${decimalPart}`
+  } else {
+    editableBook.value.ddc = mainClass
+  }
+}
+
 // Dimensions handling (Height × Width cm)
 const dimHeight = ref("")
 const dimWidth = ref("")
@@ -1099,7 +1209,6 @@ function syncDimensions() {
   editableBook.value.physical_dimensions = `${dimHeight.value.trim()} × ${dimWidth.value.trim()} ${dimUnit.value}`
 }
 
-// Strictly numbers-only helper
 function enforceNumbersOnly(event: Event, fieldKey: string, maxLen?: number) {
   const input = event.target as HTMLInputElement
   let digits = input.value.replace(/\D/g, "")
@@ -1109,13 +1218,6 @@ function enforceNumbersOnly(event: Event, fieldKey: string, maxLen?: number) {
   editableBook.value[fieldKey] = digits ? digits : null
   input.value = digits
 }
-
-// DDC validation: 3 digits before decimal, optional decimal parts
-const isDdcValid = computed(() => {
-  const val = editableBook.value?.ddc
-  if (!val || String(val).trim() === "") return true
-  return /^\d{3}(\.\d+)?$/.test(String(val).trim())
-})
 
 // ISBN Formatter & Validator
 const isIsbnValid = computed(() => {
@@ -1276,12 +1378,10 @@ async function revertSingleField(fieldKey: string) {
 
 function revertAllModifications() {
   if (!pristineBook.value) return
-  const id = editableBook.value?.serial_no || route.params.id
-  if (id) {
-    localStorage.removeItem(`athenaeum_draft_item_${id}`)
-  }
+  discardDetectedDraft()
   editableBook.value = JSON.parse(JSON.stringify(pristineBook.value))
   setupComboboxValues()
+  lastDraftSavedTime.value = ''
   triggerToastNotification("All modifications reverted.", "success")
 }
 
@@ -1325,7 +1425,6 @@ function handleEditorKeyboard(event: KeyboardEvent) {
     return
   }
 
-  // Prevent section navigation when the user is typing in a field or has a modal open
   if (isTyping || activeModalType.value) return
 
   if (event.key === "ArrowLeft") {
@@ -1345,30 +1444,63 @@ watch(() => route.params.id, (newId: string | string[] | undefined) => {
   }
 })
 
-// Auto-save changes to client-side localStorage without triggering API requests or audit logs
+// ----------------------------------------------------
+// Enhanced Local-Storage Auto-Save & Recovery
+// ----------------------------------------------------
+function getDraftKey(id?: string | number): string {
+  const targetId = id || editableBook.value?.serial_no || route.params.id
+  return `athenaeum_draft_item_${targetId}`
+}
+
+function formatDraftTime(isoString: string): string {
+  if (!isoString) return ''
+  try {
+    return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return ''
+  }
+}
+
+function restoreDetectedDraft() {
+  if (!detectedDraft.value) return
+  editableBook.value = { ...pristineBook.value, ...detectedDraft.value.data }
+  lastDraftSavedTime.value = formatDraftTime(detectedDraft.value.savedAt)
+  detectedDraft.value = null
+  setupComboboxValues()
+  triggerToastNotification("Local draft restored.", "success")
+}
+
+function discardDetectedDraft() {
+  const draftKey = getDraftKey()
+  localStorage.removeItem(draftKey)
+  detectedDraft.value = null
+  triggerToastNotification("Local draft removed.", "success")
+}
+
+// Auto-save debounced watcher
 watch(
   () => editableBook.value,
   (newVal) => {
-    if (!newVal || !pristineBook.value) return
+    if (!newVal || !pristineBook.value || detectedDraft.value) return
     
     if (draftTimer) clearTimeout(draftTimer)
     draftTimer = setTimeout(() => {
-      const id = newVal.serial_no || route.params.id
-      if (!id) return
-      
-      const draftKey = `athenaeum_draft_item_${id}`
+      const draftKey = getDraftKey()
       if (modifiedFieldsList.value.length > 0) {
+        const now = new Date().toISOString()
         localStorage.setItem(
           draftKey,
           JSON.stringify({
             data: newVal,
-            savedAt: new Date().toISOString()
+            savedAt: now
           })
         )
+        lastDraftSavedTime.value = formatDraftTime(now)
       } else {
         localStorage.removeItem(draftKey)
+        lastDraftSavedTime.value = ''
       }
-    }, 400) // 400ms debounce
+    }, 400)
   },
   { deep: true }
 )
@@ -1465,28 +1597,36 @@ function hideSuggestionsWithDelay(type: 'author' | 'publisher') {
 async function fetchRecordData() {
   loading.value = true
   loadError.value = ''
+  detectedDraft.value = null
   const id = route.params.id
+
   try {
     if (!id) throw new Error('Record identifier is missing.')
     await fetchLanguageOptions()
     const response = await axios.get(`/catalogue/holding/${encodeURIComponent(String(id))}`)
     if (!response.data) throw new Error('The server returned an empty record.')
+
     pristineBook.value = JSON.parse(JSON.stringify(response.data))
-    
-    // Check if an unsaved desktop draft exists for this record
-    const draftKey = `athenaeum_draft_item_${response.data.serial_no || id}`
+    editableBook.value = JSON.parse(JSON.stringify(response.data))
+
+    // Check for unexpired draft
+    const draftKey = getDraftKey(response.data.serial_no || id)
     const cachedDraft = localStorage.getItem(draftKey)
     
     if (cachedDraft) {
       try {
-        const parsed = JSON.parse(cachedDraft)
-        editableBook.value = { ...response.data, ...parsed.data }
-        triggerToastNotification("Restored unsaved local draft.", "success")
+        const parsed: LocalDraftPayload = JSON.parse(cachedDraft)
+        const draftDate = new Date(parsed.savedAt).getTime()
+        const hoursOld = (Date.now() - draftDate) / (1000 * 60 * 60)
+
+        if (hoursOld < DRAFT_MAX_AGE_HOURS) {
+          detectedDraft.value = parsed
+        } else {
+          localStorage.removeItem(draftKey)
+        }
       } catch {
-        editableBook.value = { ...response.data }
+        localStorage.removeItem(draftKey)
       }
-    } else {
-      editableBook.value = { ...response.data }
     }
     
     setupComboboxValues()
@@ -1510,7 +1650,7 @@ function triggerActionConfirm(actionType: 'commit' | 'abort') {
       return
     }
     if (!isDdcValid.value) {
-      triggerToastNotification("Validation Error: Check DDC format (e.g. 894.812).", "error")
+      triggerToastNotification("Validation Error: DDC format must be 3 digits (e.g. 894.812).", "error")
       setTab('taxonomy')
       return
     }
@@ -1546,7 +1686,7 @@ async function saveRecord() {
     })
     
     // Clear local draft upon confirmed backend commit
-    localStorage.removeItem(`athenaeum_draft_item_${id}`)
+    localStorage.removeItem(getDraftKey(id))
     
     try {
       await dispatchAuditTrail('UPDATE', 'CATALOGUE', id, `Updated record details for ${editableBook.value.title}`, operationalReason, null, editableBook.value)
@@ -1715,6 +1855,48 @@ onMounted(() => {
 
 .highlight-code {
   color: #fb7185 !important;
+}
+
+/* Draft Recovery Alert Banner */
+.draft-recovery-banner {
+  max-width: 1560px;
+  margin: 1.25rem auto 0 auto;
+  padding: 0.85rem 1.5rem;
+  background: #392242;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.draft-recovery-banner .banner-content {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.draft-recovery-banner .banner-icon {
+  font-size: 1.4rem;
+}
+
+.draft-recovery-banner strong {
+  display: block;
+  font-size: 0.88rem;
+  color: #fff;
+}
+
+.draft-recovery-banner p {
+  margin: 0.15rem 0 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.draft-recovery-banner .banner-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-shrink: 0;
 }
 
 .workspace {
@@ -1982,6 +2164,16 @@ onMounted(() => {
   color: #e9d5ff;
 }
 
+.optional-pill {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-soft);
+  padding: 0.08rem 0.35rem;
+  border-radius: 4px;
+  margin-left: 0.35rem;
+}
+
 .required-star {
   color: #f43f5e;
 }
@@ -2195,6 +2387,11 @@ onMounted(() => {
   transition: all 0.15s ease;
 }
 
+.btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+}
+
 .button-quiet {
   background: #362240;
   border-color: var(--line-strong);
@@ -2223,6 +2420,17 @@ onMounted(() => {
   justify-content: space-between;
   padding: 0 2rem;
   z-index: 100;
+}
+
+.savebar-info {
+  display: flex;
+  align-items: center;
+}
+
+.draft-timestamp {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-left: 0.4rem;
 }
 
 .save-indicator {
@@ -2329,12 +2537,10 @@ onMounted(() => {
   border-left: 4px solid #ef4444;
 }
 
-/* Ensure the input container can hold an absolute dropdown */
 .relative-position {
   position: relative;
 }
 
-/* Floating Suggestion Menu */
 .suggestion-list {
   position: absolute;
   top: 100%;
@@ -2354,7 +2560,6 @@ onMounted(() => {
   gap: 2px;
 }
 
-/* Individual Suggestion Item */
 .suggestion-item {
   display: flex;
   align-items: center;
@@ -2374,7 +2579,6 @@ onMounted(() => {
   background: var(--accent-pale);
 }
 
-/* Avatar Badge (First Letter) */
 .suggestion-avatar {
   width: 28px;
   height: 28px;
@@ -2395,7 +2599,6 @@ onMounted(() => {
   color: #ffffff;
 }
 
-/* Text Container (Name & Subtitle) */
 .suggestion-copy {
   display: flex;
   flex-direction: column;
@@ -2420,7 +2623,6 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 
-/* Status Badge (VERIFIED, etc.) */
 .suggestion-status {
   font-size: 0.65rem;
   font-weight: 700;

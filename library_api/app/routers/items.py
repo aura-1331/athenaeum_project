@@ -879,13 +879,13 @@ async def update_ledger_record(
     x_ip_address: Optional[str] = Header(default="127.0.0.1")
 ):    
     conn = get_connection(request=request)
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         token_user_id = int(current_user.get("user_id"))
         cur.execute("SELECT name FROM public.users WHERE user_id = %s", (token_user_id,))
         user_row = cur.fetchone()
-        real_name = user_row[0] if user_row else (current_user.get("username") or "Archive Operator")
-        real_role = current_user.get("role") or "The Chief"
+        real_name = user_row["name"] if user_row and user_row.get("name") else (current_user.get("username") or "Archive Operator")
+        real_role = current_user.get("role") or "The Keeper"
 
         cur.execute("SET LOCAL request.jwt.claim.username = %s;", (real_name,))
         cur.execute("SET LOCAL request.jwt.claim.role = %s;", (real_role,))
@@ -894,11 +894,185 @@ async def update_ledger_record(
         cur.execute("SET LOCAL request.custom.device_id = %s;", (x_device_id,))
         cur.execute("SET LOCAL request.custom.ip_address = %s;", (x_ip_address,))
 
-        # Determine status change based on role
-        is_chief = (real_role == "The Chief")
-        new_status_clause = "" if is_chief else ", availability_status = 'PENDING'"
-# Update items table fields
-        cur.execute(f"""
+        # 1. Fetch current database state across items and parent works
+        cur.execute("""
+            SELECT 
+                i.item_id, i.serial_no, i.work_id, i.accession_no, i.availability_status,
+                i.shelf, i.call_no, i.extent_page_count, i.physical_dimensions,
+                i.date_acquired, i.collection_fonds, i.physical_condition,
+                i.binding_type, i.provenance_source, i.access_restrictions,
+                i.digital_scan_available, i.ocr_status, i.artifactual_notes,
+                w.title, w.author, w.work_nature, w.category, w.ddc, w.genre,
+                w.language, w.original_language, w.publisher, w.year, w.isbn,
+                w.edition_statement, w.series_title, w.series_volume,
+                w.original_title, w.original_author, w.translator, w.compiler_editor,
+                w.translation_compilation, w.subject_headings, w.target_audience_era,
+                w.copyright_status, w.notes
+            FROM public.items i
+            INNER JOIN public.works w ON i.work_id = w.work_id
+            WHERE i.serial_no = %s
+              AND COALESCE(i.is_deleted, FALSE) = FALSE
+            FOR UPDATE OF i, w
+        """, (serial_no,))
+        
+        current_data = cur.fetchone()
+        if not current_data:
+            raise HTTPException(status_code=404, detail="Catalogue item record not found.")
+
+        work_id = current_data["work_id"]
+        accession_no = current_data["accession_no"]
+        book_title = current_data["title"] or f"Item #{serial_no}"
+
+        friendly_labels = {
+            "title": "Work Title",
+            "author": "Author / Creator",
+            "work_nature": "Work Nature",
+            "category": "Collection Category",
+            "ddc": "Dewey Decimal (DDC)",
+            "genre": "Genre Tags",
+            "language": "Text Language",
+            "original_language": "Original Source Language",
+            "publisher": "Publisher / Imprint",
+            "year": "Publication Year",
+            "isbn": "ISBN Identifier",
+            "edition_statement": "Edition Statement",
+            "series_title": "Academic Series Title",
+            "series_volume": "Series Volume No.",
+            "original_title": "Original Title",
+            "original_author": "Original Author",
+            "translator": "Translator",
+            "compiler_editor": "Compiler / Editor",
+            "translation_compilation": "Translation / Compilation Notes",
+            "subject_headings": "Subject Headings",
+            "target_audience_era": "Target Audience / Era",
+            "copyright_status": "Copyright Status",
+            "shelf": "Shelf Placement",
+            "call_no": "Call Number",
+            "extent_page_count": "Pages / Extent",
+            "physical_dimensions": "Physical Dimensions",
+            "date_acquired": "Date Acquired",
+            "collection_fonds": "Collection / Fonds",
+            "physical_condition": "Physical Condition",
+            "binding_type": "Binding Type",
+            "provenance_source": "Provenance Source",
+            "access_restrictions": "Access Restrictions",
+            "digital_scan_available": "Digital Scan Available",
+            "ocr_status": "OCR Status",
+            "artifactual_notes": "Artifact Markers / Inscriptions",
+            "notes": "Archival Notes"
+        }
+
+        # 2. Determine actual changes
+        detailed_changes = {}
+        human_readable_diffs = []
+
+        for field, label in friendly_labels.items():
+            if field in payload:
+                old_val = current_data.get(field)
+                new_val = payload.get(field)
+
+                old_str = "" if old_val is None else str(old_val).strip()
+                new_str = "" if new_val is None else str(new_val).strip()
+
+                if isinstance(old_val, bool):
+                    old_str = str(old_val)
+                    new_str = "True" if str(new_val).lower() in ("true", "1") else "False"
+
+                if old_str != new_str:
+                    display_old = old_str if old_str else "[Empty]"
+                    display_new = new_str if new_str else "[Empty]"
+                    detailed_changes[field] = {
+                        "label": label,
+                        "old": old_str,
+                        "new": new_str
+                    }
+                    human_readable_diffs.append(f"{label}: '{display_old}' → '{display_new}'")
+
+        # 3. Synchronize author authority if author was modified
+        if "author" in payload and str(payload.get("author") or "").strip() != str(current_data.get("author") or "").strip():
+            author_text = str(payload.get("author") or "").strip() or "Unknown"
+            authority_id = resolve_or_create_authority(cur, author_text, token_user_id)
+            cur.execute("""
+                DELETE FROM public.work_authorities
+                WHERE work_id = %s AND relationship_type = 'AUTHOR'
+            """, (work_id,))
+            cur.execute("""
+                INSERT INTO public.work_authorities (
+                    work_id, authority_id, relationship_type, sequence_no, notes, created_by
+                ) VALUES (%s, %s, 'AUTHOR', 1, %s, %s)
+                ON CONFLICT (work_id, authority_id, relationship_type) DO NOTHING
+            """, (
+                work_id, authority_id,
+                f"Author authority synchronized during catalogue edit by {real_role}",
+                token_user_id
+            ))
+
+        # 4. Update public.works
+        safe_year = None
+        if "year" in payload and payload.get("year") is not None:
+            raw_year = str(payload.get("year")).strip()
+            if raw_year:
+                try:
+                    safe_year = int(raw_year)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Year must be a whole number or blank.")
+
+        cur.execute("""
+            UPDATE public.works SET
+                title = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE title END,
+                author = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE author END,
+                work_nature = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE work_nature END,
+                category = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE category END,
+                ddc = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE ddc END,
+                genre = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE genre END,
+                language = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE language END,
+                original_language = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_language END,
+                publisher = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE publisher END,
+                year = CASE WHEN %s THEN %s ELSE year END,
+                isbn = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE isbn END,
+                edition_statement = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE edition_statement END,
+                series_title = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE series_title END,
+                series_volume = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE series_volume END,
+                original_title = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_title END,
+                original_author = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE original_author END,
+                translator = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE translator END,
+                compiler_editor = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE compiler_editor END,
+                translation_compilation = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE translation_compilation END,
+                subject_headings = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE subject_headings END,
+                target_audience_era = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE target_audience_era END,
+                copyright_status = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE copyright_status END,
+                notes = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE notes END,
+                updated_at = NOW()
+            WHERE work_id = %s
+        """, (
+            "title" in payload, payload.get("title"),
+            "author" in payload, payload.get("author"),
+            "work_nature" in payload, payload.get("work_nature"),
+            "category" in payload, payload.get("category"),
+            "ddc" in payload, payload.get("ddc"),
+            "genre" in payload, payload.get("genre"),
+            "language" in payload, payload.get("language"),
+            "original_language" in payload, payload.get("original_language"),
+            "publisher" in payload, payload.get("publisher"),
+            "year" in payload, safe_year,
+            "isbn" in payload, payload.get("isbn"),
+            "edition_statement" in payload, payload.get("edition_statement"),
+            "series_title" in payload, payload.get("series_title"),
+            "series_volume" in payload, payload.get("series_volume"),
+            "original_title" in payload, payload.get("original_title"),
+            "original_author" in payload, payload.get("original_author"),
+            "translator" in payload, payload.get("translator"),
+            "compiler_editor" in payload, payload.get("compiler_editor"),
+            "translation_compilation" in payload, payload.get("translation_compilation"),
+            "subject_headings" in payload, payload.get("subject_headings"),
+            "target_audience_era" in payload, payload.get("target_audience_era"),
+            "copyright_status" in payload, payload.get("copyright_status"),
+            "notes" in payload, payload.get("notes"),
+            work_id
+        ))
+
+        # 5. Update public.items (ensuring availability_status stays AVAILABLE)
+        cur.execute("""
             UPDATE public.items SET
                 shelf = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE shelf END,
                 extent_page_count = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE extent_page_count END,
@@ -912,9 +1086,9 @@ async def update_ledger_record(
                 access_restrictions = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE access_restrictions END,
                 digital_scan_available = CASE WHEN %s THEN %s::boolean ELSE digital_scan_available END,
                 ocr_status = CASE WHEN %s THEN NULLIF(BTRIM(%s), '') ELSE ocr_status END
-                {new_status_clause}
+                
             WHERE serial_no = %s
-            RETURNING work_id, accession_no, call_no
+            RETURNING call_no
         """, (
             "shelf" in payload, payload.get("shelf"),
             "extent_page_count" in payload, str(payload.get("extent_page_count") or ""),
@@ -930,15 +1104,17 @@ async def update_ledger_record(
             "ocr_status" in payload, payload.get("ocr_status"),
             serial_no
         ))
+        final_call_no = cur.fetchone()["call_no"]
 
-        res = cur.fetchone()
-        if not res:
-            raise HTTPException(status_code=404, detail="Item not found.")
+        # 6. Write detailed audit trail
+        reason_text = x_change_reason or "Catalogue holding revision"
+        if human_readable_diffs:
+            summary_statement = (
+                f"Updated {len(human_readable_diffs)} field(s) on Book '{book_title}' (Accession {accession_no}): "
+                + "; ".join(human_readable_diffs)
+            )
 
-        work_id, accession_no, final_call_no = res[0], res[1], res[2]
-
-        # If Keeper edited, register notification and note for The Chief
-        if not is_chief:
+            # Insert ledger review note for historical timeline
             cur.execute("""
                 INSERT INTO public.review_notes
                     (entity, entity_id, request_id, author_id, author_name, author_role, kind, body)
@@ -948,28 +1124,56 @@ async def update_ledger_record(
                 token_user_id,
                 real_name,
                 real_role,
-                f"Keeper updated ledger record. Reason: {x_change_reason or 'Operational modification'}"
+                f"Modifications: {'; '.join(human_readable_diffs)}. Reason: {reason_text}"
             ))
 
-            cur.execute("""
-                INSERT INTO public.chief_notifications (identity_id, message)
-                SELECT u.identity_id, %s
-                FROM public.users u
-                WHERE u.user_id = %s
-                  AND u.identity_id IS NOT NULL
-            """, (
-                f"PROPOSAL SUBMITTED: Item #{serial_no} ({accession_no}) was modified by {real_name} (The Keeper) and is awaiting your review.",
-                token_user_id
-            ))
+            audit_ok = log_audit_activity(
+                request=request,
+                user_id=str(token_user_id),
+                username=real_name,
+                role=real_role,
+                designation=real_role,
+                category="ARCHIVAL_GOVERNANCE",
+                action_type="ITEM_UPDATE",
+                target_entity="ITEM",
+                target_id=str(serial_no),
+                endpoint=request.url.path,
+                http_method="PATCH",
+                justification=reason_text,
+                diff_payload={
+                    "book_title": payload.get("title") or book_title,
+                    "accession_no": accession_no,
+                    "serial_no": serial_no,
+                    "modified_by": real_name,
+                    "role": real_role,
+                    "reason": reason_text,
+                    "changes": detailed_changes,
+                    "summary": summary_statement
+                },
+                extra_metadata={
+                    "serial_no": serial_no,
+                    "work_id": work_id,
+                    "fields_changed": list(detailed_changes.keys()),
+                    "device_id": x_device_id,
+                    "ip_address": x_ip_address
+                },
+                conn=conn
+            )
+            if not audit_ok:
+                raise RuntimeError("Audit logging failed; transaction rolled back.")
+        else:
+            summary_statement = "No modifications detected."
 
         conn.commit()
         return {
             "status": "success",
+            "message": summary_statement,
             "serial_no": serial_no,
             "accession_no": accession_no,
-            "call_no": final_call_no,
-            "availability_status": "AVAILABLE" if is_chief else "PENDING"
+            "call_no": final_call_no
+            
         }
+
     except HTTPException:
         if conn:
             conn.rollback()
@@ -977,7 +1181,7 @@ async def update_ledger_record(
     except Exception as e:
         if conn:
             conn.rollback()
-        print(f"❌ Database Error: {e}")
+        print(f"❌ Database Error in update_ledger_record: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cur.close()
