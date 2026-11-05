@@ -1,5 +1,23 @@
 [
   {
+    "version": "v2.2.12",
+    "date": "2026-11-05",
+    "sections": [
+      {
+        "category": "Infrastructure & Release",
+        "notes": [
+          "single shared API_BASE in config.ts; fail production build without VITE_API_URL"
+        ]
+      },
+      {
+        "category": "Changes",
+        "notes": [
+          "use VITE_API_URL instead of hard-coded localhost API address"
+        ]
+      }
+    ]
+  },
+  {
     "version": "v2.2.11",
     "date": "2026-11-04",
     "sections": [
