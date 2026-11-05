@@ -3,6 +3,8 @@ import { ref, computed } from 'vue'
 // @ts-ignore
 import router from '@/router'
 
+import { API_BASE } from '@/config'
+
 export interface UserSession {
   id?: string | number
   user_id?: string | number
@@ -188,9 +190,7 @@ export const useAuthStore = defineStore('auth', () => {
     const tokenVal = accessToken.value
     const sessionId = localStorage.getItem('active_session_id')
 
-    const baseUrl =
-      import.meta.env.VITE_API_URL ||
-      'http://127.0.0.1:8000'
+    const baseUrl = API_BASE
 
     // Read the CSRF token before the logout request.
     const csrfToken = getCsrfToken()

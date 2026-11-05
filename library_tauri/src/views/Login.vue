@@ -183,13 +183,14 @@
 import { ref } from "vue"
 import { useRouter } from "vue-router"
 import { useAuthStore } from "@/stores/auth"
+import { API_BASE } from '@/config'
 
 import orbisLogo from "@/assets/athenaeum-orbis-logo.png"
 
 const router = useRouter()
 const authStore = useAuthStore()
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+
 
 const currentStep = ref(1)
 

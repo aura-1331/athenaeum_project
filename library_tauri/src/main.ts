@@ -11,6 +11,7 @@ import App from "./App.vue"
 import router from "./router/index.ts"
 
 import { useAuthStore } from "./stores/auth.ts"
+import { API_BASE } from "./config"
 
 import "./assets/main.css"
 
@@ -23,10 +24,6 @@ pinia.use(piniaPluginPersistedstate)
 app.use(pinia)
 
 const auth = useAuthStore()
-
-const API_BASE =
-  import.meta.env.VITE_API_URL ||
-  "http://127.0.0.1:8000"
 
 // -------------------------
 // CSRF

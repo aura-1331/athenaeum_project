@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ShieldCheck, ShieldAlert, RefreshCw } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
+import { API_BASE } from '@/config'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -22,9 +23,7 @@ async function checkHealth() {
   loading.value = true
 
   try {
-    const baseUrl =
-      import.meta.env.VITE_API_URL ||
-      'http://127.0.0.1:8000'
+    const baseUrl = API_BASE
 
     const token = getToken()
 

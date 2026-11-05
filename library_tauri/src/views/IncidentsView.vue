@@ -461,6 +461,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router"
 import axios from "axios"
 import { useAuthStore } from "@/stores/auth.ts"
+import { API_BASE } from '@/config'
 
 interface Incident {
   incident_id: number
@@ -500,7 +501,8 @@ interface SecurityBreach {
 
 const router = useRouter()
 const authStore = useAuthStore()
-const baseUrl = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+const baseUrl = API_BASE
+
 
 // COLLAPSIBLE STATE FLAGS
 const isBreachesOpen = ref(true)

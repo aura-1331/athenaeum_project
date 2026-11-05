@@ -3,6 +3,8 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import LedgerIntegrityBadge from '@/components/LedgerIntegrityBadge.vue'
 
+import { API_BASE } from '@/config'
+
 const authStore = useAuthStore()
 
 const loading = ref(false)
@@ -37,9 +39,7 @@ const searchInputRef = ref(null)
 let debounceTimer = null
 let requestController = null
 
-const baseUrl = (
-  import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
-).replace(/\/$/, '')
+const baseUrl = API_BASE
 
 const maxPages = computed(() =>
   Math.max(1, Math.ceil(totalLogs.value / pageLimit.value))
